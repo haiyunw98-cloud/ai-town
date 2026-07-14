@@ -1,5 +1,6 @@
 import { catalogs } from './catalogs';
 import { formatMessage, normalizeLocale } from './index';
+import { readFileSync } from 'node:fs';
 
 describe('i18n', () => {
   test('catalogs contain the same keys', () => {
@@ -26,5 +27,31 @@ describe('i18n', () => {
 
   test('falls back to English when a Chinese value is unavailable', () => {
     expect(formatMessage('zh-CN', 'test.englishOnly')).toBe('English fallback');
+  });
+
+  test('player-facing components do not contain known English JSX literals', () => {
+    const files = [
+      '../App.tsx',
+      '../components/FreezeButton.tsx',
+      '../components/Messages.tsx',
+      '../components/PlayerDetails.tsx',
+      '../components/buttons/InteractButton.tsx',
+      '../components/buttons/MusicButton.tsx',
+    ];
+    const forbidden = [
+      'Help',
+      'Start conversation',
+      'Leave conversation',
+      'typing...',
+      'Walking over...',
+      'Accept',
+      'Reject',
+    ];
+    for (const file of files) {
+      const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+      for (const literal of forbidden) {
+        expect(source).not.toContain(`>${literal}<`);
+      }
+    }
   });
 });

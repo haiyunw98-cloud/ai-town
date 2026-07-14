@@ -6,6 +6,7 @@ import { Id } from '../../convex/_generated/dataModel';
 import { useSendInput } from '../hooks/sendInput';
 import { Player } from '../../convex/aiTown/player';
 import { Conversation } from '../../convex/aiTown/conversation';
+import { useI18n } from '../i18n';
 
 export function MessageInput({
   worldId,
@@ -18,6 +19,7 @@ export function MessageInput({
   humanPlayer: Player;
   conversation: Conversation;
 }) {
+  const { t } = useI18n();
   const descriptions = useQuery(api.world.gameDescriptions, { worldId });
   const humanName = descriptions?.playerDescriptions.find((p) => p.playerId === humanPlayer.id)
     ?.name;
@@ -85,7 +87,7 @@ export function MessageInput({
           contentEditable
           style={{ outline: 'none' }}
           tabIndex={0}
-          placeholder="Type here"
+          placeholder={t('message.placeholder')}
           onKeyDown={(e) => onKeyDown(e)}
         />
       </div>
