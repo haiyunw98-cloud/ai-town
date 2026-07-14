@@ -7,6 +7,8 @@ import { asyncMap } from '../util/asyncMap';
 import { GameId, agentId, conversationId, playerId } from '../aiTown/ids';
 import { SerializedPlayer } from '../aiTown/player';
 import { memoryFields } from './schema';
+import { buildWorldPrompt } from '../../data/worlds/lighthouse-town/manifest';
+import { getWorldLocale } from '../util/worldLocale';
 
 // How long to wait before updating a memory's last access time.
 export const MEMORY_ACCESS_THROTTLE = 300_000; // In ms
@@ -40,6 +42,10 @@ export async function rememberConversation(
   }
 
   const llmMessages: LLMMessage[] = [
+    {
+      role: 'system',
+      content: buildWorldPrompt(getWorldLocale()),
+    },
     {
       role: 'user',
       content: `You are ${player.name}, and you just finished a conversation with ${otherPlayer.name}. I would
@@ -347,7 +353,12 @@ async function reflectOnMemories(
   }
   console.debug('sum of importance score = ', sumOfImportanceScore);
   console.debug('Reflecting...');
-  const prompt = ['[no prose]', '[Output only JSON]', `You are ${name}, statements about you:`];
+  const prompt = [
+    buildWorldPrompt(getWorldLocale()),
+    '[no prose]',
+    '[Output only JSON]',
+    `You are ${name}, statements about you:`,
+  ];
   memories.forEach((m, idx) => {
     prompt.push(`Statement ${idx}: ${m.description}`);
   });

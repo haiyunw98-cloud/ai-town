@@ -7,6 +7,8 @@ import { api, internal } from '../_generated/api';
 import * as embeddingsCache from './embeddingsCache';
 import { GameId, conversationId, playerId } from '../aiTown/ids';
 import { NUM_MEMORIES_TO_SEARCH } from '../constants';
+import { buildWorldPrompt } from '../../data/worlds/lighthouse-town/manifest';
+import { getWorldLocale } from '../util/worldLocale';
 
 const selfInternal = internal.agent.conversation;
 
@@ -42,6 +44,7 @@ export async function startConversationMessage(
     (m) => m.data.type === 'conversation' && m.data.playerIds.includes(otherPlayerId),
   );
   const prompt = [
+    buildWorldPrompt(getWorldLocale()),
     `You are ${player.name}, and you just started a conversation with ${otherPlayer.name}.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
@@ -99,6 +102,7 @@ export async function continueConversationMessage(
   );
   const memories = await memory.searchMemories(ctx, player.id as GameId<'players'>, embedding, 3);
   const prompt = [
+    buildWorldPrompt(getWorldLocale()),
     `You are ${player.name}, and you're currently in a conversation with ${otherPlayer.name}.`,
     `The conversation started at ${started.toLocaleString()}. It's now ${now.toLocaleString()}.`,
   ];
@@ -150,6 +154,7 @@ export async function leaveConversationMessage(
     },
   );
   const prompt = [
+    buildWorldPrompt(getWorldLocale()),
     `You are ${player.name}, and you're currently in a conversation with ${otherPlayer.name}.`,
     `You've decided to leave the question and would like to politely tell them you're leaving the conversation.`,
   ];

@@ -5,9 +5,12 @@ import { Conversation, conversationInputs } from './conversation';
 import { movePlayer } from './movement';
 import { inputHandler } from './inputHandler';
 import { point } from '../util/types';
-import { Descriptions } from '../../data/characters';
+import { localizedDescriptions } from '../../data/worlds/lighthouse-town/characters';
+import { getWorldLocale } from '../util/worldLocale';
 import { AgentDescription } from './agentDescription';
 import { Agent } from './agent';
+
+const Descriptions = localizedDescriptions(getWorldLocale());
 
 export const agentInputs = {
   finishRememberConversation: inputHandler({

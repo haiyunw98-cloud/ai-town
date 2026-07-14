@@ -1,13 +1,16 @@
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import { DatabaseReader, MutationCtx, mutation } from './_generated/server';
-import { Descriptions } from '../data/characters';
+import { localizedDescriptions } from '../data/worlds/lighthouse-town/characters';
 import * as map from '../data/gentle';
 import { insertInput } from './aiTown/insertInput';
 import { Id } from './_generated/dataModel';
 import { createEngine } from './aiTown/main';
 import { ENGINE_ACTION_DURATION } from './constants';
 import { detectMismatchedLLMProvider } from './util/llm';
+import { getWorldLocale } from './util/worldLocale';
+
+const Descriptions = localizedDescriptions(getWorldLocale());
 
 const init = mutation({
   args: {
