@@ -1,120 +1,22 @@
-// That's right! No imports and no dependencies 🤯
+import {
+  LLMConfig,
+  resolveLLMConfig,
+  sanitizeProviderError,
+} from './llmConfig';
 
-const OPENAI_EMBEDDING_DIMENSION = 1536;
-const TOGETHER_EMBEDDING_DIMENSION = 768;
-const OLLAMA_EMBEDDING_DIMENSION = 1024;
-
-export const EMBEDDING_DIMENSION: number = OLLAMA_EMBEDDING_DIMENSION;
+export { EMBEDDING_DIMENSION } from './llmConfig';
+export type { LLMConfig } from './llmConfig';
 
 export function detectMismatchedLLMProvider() {
-  switch (EMBEDDING_DIMENSION) {
-    case OPENAI_EMBEDDING_DIMENSION:
-      if (!process.env.OPENAI_API_KEY) {
-        throw new Error(
-          "Are you trying to use OpenAI? If so, run: npx convex env set OPENAI_API_KEY 'your-key'",
-        );
-      }
-      break;
-    case TOGETHER_EMBEDDING_DIMENSION:
-      if (!process.env.TOGETHER_API_KEY) {
-        throw new Error(
-          "Are you trying to use Together.ai? If so, run: npx convex env set TOGETHER_API_KEY 'your-key'",
-        );
-      }
-      break;
-    case OLLAMA_EMBEDDING_DIMENSION:
-      break;
-    default:
-      if (!process.env.LLM_API_URL) {
-        throw new Error(
-          "Are you trying to use a custom cloud-hosted LLM? If so, run: npx convex env set LLM_API_URL 'your-url'",
-        );
-      }
-      break;
-  }
-}
-
-export interface LLMConfig {
-  provider: 'openai' | 'together' | 'ollama' | 'custom';
-  url: string; // Should not have a trailing slash
-  chatModel: string;
-  embeddingModel: string;
-  stopWords: string[];
-  apiKey: string | undefined;
+  resolveLLMConfig();
 }
 
 export function getLLMConfig(): LLMConfig {
-  let provider = process.env.LLM_PROVIDER;
-  if (provider ? provider === 'openai' : process.env.OPENAI_API_KEY) {
-    if (EMBEDDING_DIMENSION !== OPENAI_EMBEDDING_DIMENSION) {
-      throw new Error('EMBEDDING_DIMENSION must be 1536 for OpenAI');
-    }
-    return {
-      provider: 'openai',
-      url: 'https://api.openai.com',
-      chatModel: process.env.OPENAI_CHAT_MODEL ?? 'gpt-4o-mini',
-      embeddingModel: process.env.OPENAI_EMBEDDING_MODEL ?? 'text-embedding-ada-002',
-      stopWords: [],
-      apiKey: process.env.OPENAI_API_KEY,
-    };
-  }
-  if (process.env.TOGETHER_API_KEY) {
-    if (EMBEDDING_DIMENSION !== TOGETHER_EMBEDDING_DIMENSION) {
-      throw new Error('EMBEDDING_DIMENSION must be 768 for Together.ai');
-    }
-    return {
-      provider: 'together',
-      url: 'https://api.together.xyz',
-      chatModel: process.env.TOGETHER_CHAT_MODEL ?? 'meta-llama/Llama-3-8b-chat-hf',
-      embeddingModel:
-        process.env.TOGETHER_EMBEDDING_MODEL ?? 'togethercomputer/m2-bert-80M-8k-retrieval',
-      stopWords: ['<|eot_id|>'],
-      apiKey: process.env.TOGETHER_API_KEY,
-    };
-  }
-  if (process.env.LLM_API_URL) {
-    const apiKey = process.env.LLM_API_KEY;
-    const url = process.env.LLM_API_URL;
-    const chatModel = process.env.LLM_MODEL;
-    if (!chatModel) throw new Error('LLM_MODEL is required');
-    const embeddingModel = process.env.LLM_EMBEDDING_MODEL;
-    if (!embeddingModel) throw new Error('LLM_EMBEDDING_MODEL is required');
-    return {
-      provider: 'custom',
-      url,
-      chatModel,
-      embeddingModel,
-      stopWords: [],
-      apiKey,
-    };
-  }
-  // Assume Ollama
-  if (EMBEDDING_DIMENSION !== OLLAMA_EMBEDDING_DIMENSION) {
-    detectMismatchedLLMProvider();
-    throw new Error(
-      `Unknown EMBEDDING_DIMENSION ${EMBEDDING_DIMENSION} found` +
-        `. See convex/util/llm.ts for details.`,
-    );
-  }
-  // Alternative embedding model:
-  // embeddingModel: 'llama3'
-  // const OLLAMA_EMBEDDING_DIMENSION = 4096,
-  return {
-    provider: 'ollama',
-    url: process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434',
-    chatModel: process.env.OLLAMA_MODEL ?? 'llama3',
-    embeddingModel: process.env.OLLAMA_EMBEDDING_MODEL ?? 'mxbai-embed-large',
-    stopWords: ['<|eot_id|>'],
-    apiKey: undefined,
-  };
+  return resolveLLMConfig();
 }
 
-const AuthHeaders = (): Record<string, string> =>
-  getLLMConfig().apiKey
-    ? {
-        Authorization: 'Bearer ' + getLLMConfig().apiKey,
-      }
-    : {};
+const authHeaders = (config: LLMConfig): Record<string, string> =>
+  config.apiKey ? { Authorization: 'Bearer ' + config.apiKey } : {};
 
 // Overload for non-streaming
 export async function chatCompletion(
@@ -151,13 +53,13 @@ export async function chatCompletion(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...AuthHeaders(),
+        ...authHeaders(config),
       },
 
       body: JSON.stringify(body),
     });
     if (!result.ok) {
-      const error = await result.text();
+      const error = sanitizeProviderError(await result.text());
       console.error({ error });
       if (result.status === 404 && config.provider === 'ollama') {
         await tryPullOllama(body.model!, error);
@@ -221,7 +123,7 @@ export async function fetchEmbeddingBatch(texts: string[]) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...AuthHeaders(),
+        ...authHeaders(config),
       },
 
       body: JSON.stringify({
@@ -232,7 +134,9 @@ export async function fetchEmbeddingBatch(texts: string[]) {
     if (!result.ok) {
       throw {
         retry: result.status === 429 || result.status >= 500,
-        error: new Error(`Embedding failed with code ${result.status}: ${await result.text()}`),
+        error: new Error(
+          `Embedding failed with code ${result.status}: ${sanitizeProviderError(await result.text())}`,
+        ),
       };
     }
     return (await result.json()) as CreateEmbeddingResponse;
@@ -258,12 +162,13 @@ export async function fetchEmbedding(text: string) {
 }
 
 export async function fetchModeration(content: string) {
+  const config = getLLMConfig();
   const { result: flagged } = await retryWithBackoff(async () => {
-    const result = await fetch(getLLMConfig().url + '/v1/moderations', {
+    const result = await fetch(config.url + '/v1/moderations', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...AuthHeaders(),
+        ...authHeaders(config),
       },
 
       body: JSON.stringify({
@@ -273,7 +178,9 @@ export async function fetchModeration(content: string) {
     if (!result.ok) {
       throw {
         retry: result.status === 429 || result.status >= 500,
-        error: new Error(`Embedding failed with code ${result.status}: ${await result.text()}`),
+        error: new Error(
+          `Moderation failed with code ${result.status}: ${sanitizeProviderError(await result.text())}`,
+        ),
       };
     }
     return (await result.json()) as { results: { flagged: boolean }[] };
@@ -696,7 +603,7 @@ export async function ollamaFetchEmbedding(text: string) {
       body: JSON.stringify({ model: config.embeddingModel, prompt: text }),
     });
     if (resp.status === 404) {
-      const error = await resp.text();
+      const error = sanitizeProviderError(await resp.text());
       await tryPullOllama(config.embeddingModel, error);
       throw new Error(`Failed to fetch embeddings: ${resp.status}`);
     }
