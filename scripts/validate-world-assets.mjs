@@ -7,6 +7,25 @@ const assetDir = resolve(root, 'public/assets/worlds/lighthouse-town');
 const requiredAssets = ['tileset.svg', 'residents.svg', 'asset-sources.md'];
 const failures = [];
 
+const chineseReadme = resolve(root, 'README.zh-CN.md');
+if (!existsSync(chineseReadme)) {
+  failures.push('missing Chinese operations guide: README.zh-CN.md');
+} else {
+  const guide = readFileSync(chineseReadme, 'utf8');
+  for (const requiredText of [
+    'npm run dev',
+    'docker compose up --build -d',
+    'LLM_PROVIDER=ollama',
+    'LLM_PROVIDER=openai',
+    'LLM_PROVIDER=together',
+    'LLM_PROVIDER=custom',
+    'WORLD_LOCALE',
+    'npx convex run testing:wipeAllTables',
+  ]) {
+    if (!guide.includes(requiredText)) failures.push(`README.zh-CN.md is missing: ${requiredText}`);
+  }
+}
+
 for (const asset of requiredAssets) {
   if (!existsSync(resolve(assetDir, asset))) failures.push(`missing asset: ${asset}`);
 }

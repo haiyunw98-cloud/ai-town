@@ -1,5 +1,7 @@
 # AI Town 🏠💻💌
 
+> **Lighthouse Town fork:** This branch includes a complete Simplified Chinese localization, a bilingual UI, original Jiangnan fantasy world art, five new residents, and configurable LLM providers. See [中文使用说明](./README.zh-CN.md).
+
 [Live Demo](https://www.convex.dev/ai-town)
 
 [Join our community Discord: AI Stack Devs](https://discord.gg/PQUmTBTGmT)
