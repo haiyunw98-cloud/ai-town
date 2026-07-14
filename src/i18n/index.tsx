@@ -25,8 +25,8 @@ export function formatMessage(
 
 type I18nValue = {
   locale: Locale;
-  setLocale(locale: Locale): void;
-  t(key: MessageKey, values?: Record<string, string | number>): string;
+  setLocale: (locale: Locale) => void;
+  t: (key: MessageKey, values?: Record<string, string | number>) => string;
 };
 
 const I18nContext = createContext<I18nValue | undefined>(undefined);

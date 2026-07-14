@@ -6,7 +6,6 @@ import { SelectElement } from './Player';
 import { Messages } from './Messages';
 import { toastOnError } from '../toasts';
 import { useSendInput } from '../hooks/sendInput';
-import { Player } from '../../convex/aiTown/player';
 import { GameId } from '../../convex/aiTown/ids';
 import { ServerGame } from '../hooks/serverGame';
 import { useI18n } from '../i18n';
@@ -132,7 +131,7 @@ export default function PlayerDetails({
   // const pendingSuffix = (inputName: string) =>
   //   [...inflightInputs.values()].find((i) => i.name === inputName) ? ' opacity-50' : '';
 
-  const pendingSuffix = (s: string) => '';
+  const pendingSuffix = (_inputName: string) => '';
   return (
     <>
       <div className="flex gap-4">
@@ -156,7 +155,7 @@ export default function PlayerDetails({
             'mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
             pendingSuffix('startConversation')
           }
-          onClick={onStartConversation}
+          onClick={() => void onStartConversation()}
         >
           <div className="h-full bg-clay-700 text-center">
             <span>{t('action.startConversation')}</span>
@@ -183,7 +182,7 @@ export default function PlayerDetails({
             'mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
             pendingSuffix('leaveConversation')
           }
-          onClick={onLeaveConversation}
+          onClick={() => void onLeaveConversation()}
         >
           <div className="h-full bg-clay-700 text-center">
             <span>{t('action.leaveConversation')}</span>
@@ -197,7 +196,7 @@ export default function PlayerDetails({
               'mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
               pendingSuffix('acceptInvite')
             }
-            onClick={onAcceptInvite}
+            onClick={() => void onAcceptInvite()}
           >
             <div className="h-full bg-clay-700 text-center">
               <span>{t('action.accept')}</span>
@@ -208,7 +207,7 @@ export default function PlayerDetails({
               'mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
               pendingSuffix('rejectInvite')
             }
-            onClick={onRejectInvite}
+            onClick={() => void onRejectInvite()}
           >
             <div className="h-full bg-clay-700 text-center">
               <span>{t('action.reject')}</span>

@@ -335,16 +335,23 @@ export const queryPromptData = internalQuery({
         throw new Error(`Conversation ${lastTogether.conversationId} not found`);
       }
     }
+    const describedOtherAgent = (() => {
+      if (!otherAgent) return undefined;
+      if (!otherAgentDescription) {
+        throw new Error(`Agent description for ${otherAgent.playerId} not found`);
+      }
+      return {
+        identity: otherAgentDescription.identity,
+        plan: otherAgentDescription.plan,
+        ...otherAgent,
+      };
+    })();
     return {
       player: { name: playerDescription.name, ...player },
       otherPlayer: { name: otherPlayerDescription.name, ...otherPlayer },
       conversation,
       agent: { identity: agentDescription.identity, plan: agentDescription.plan, ...agent },
-      otherAgent: otherAgent && {
-        identity: otherAgentDescription!.identity,
-        plan: otherAgentDescription!.plan,
-        ...otherAgent,
-      },
+      otherAgent: describedOtherAgent,
       lastConversation,
     };
   },

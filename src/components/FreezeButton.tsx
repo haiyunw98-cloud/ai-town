@@ -26,7 +26,7 @@ export default function FreezeButton() {
   return !stopAllowed ? null : (
     <>
       <Button
-        onClick={flipSwitch}
+        onClick={() => void flipSwitch()}
         className="hidden lg:block"
         title={t('action.freezeHint')}
         imgUrl="/assets/star.svg"

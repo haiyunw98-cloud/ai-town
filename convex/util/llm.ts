@@ -18,6 +18,9 @@ export function getLLMConfig(): LLMConfig {
 const authHeaders = (config: LLMConfig): Record<string, string> =>
   config.apiKey ? { Authorization: 'Bearer ' + config.apiKey } : {};
 
+const isNumberArray = (value: unknown): value is number[] =>
+  Array.isArray(value) && value.every((item: unknown) => typeof item === 'number');
+
 // Overload for non-streaming
 export async function chatCompletion(
   body: Omit<CreateChatCompletionRequest, 'model'> & {
@@ -592,7 +595,7 @@ export class ChatCompletionContent {
   }
 }
 
-export async function ollamaFetchEmbedding(text: string) {
+export async function ollamaFetchEmbedding(text: string): Promise<{ embedding: number[] }> {
   const config = getLLMConfig();
   const { result } = await retryWithBackoff(async () => {
     const resp = await fetch(config.url + '/api/embeddings', {
@@ -607,7 +610,16 @@ export async function ollamaFetchEmbedding(text: string) {
       await tryPullOllama(config.embeddingModel, error);
       throw new Error(`Failed to fetch embeddings: ${resp.status}`);
     }
-    return (await resp.json()).embedding as number[];
+    const payload: unknown = await resp.json();
+    if (
+      !payload ||
+      typeof payload !== 'object' ||
+      !('embedding' in payload) ||
+      !isNumberArray(payload.embedding)
+    ) {
+      throw new Error('Embedding provider returned an invalid response');
+    }
+    return payload.embedding;
   });
   return { embedding: result };
 }

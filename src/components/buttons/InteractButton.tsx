@@ -30,17 +30,17 @@ export default function InteractButton() {
       let inputId;
       try {
         inputId = await join({ worldId });
-      } catch (e: any) {
-        if (e instanceof ConvexError) {
-          toast.error(e.data);
+      } catch (error: unknown) {
+        if (error instanceof ConvexError) {
+          toast.error(String(error.data));
           return;
         }
-        throw e;
+        throw error;
       }
       try {
         await waitForInput(convex, inputId);
-      } catch (e: any) {
-        toast.error(e.message);
+      } catch (error: unknown) {
+        toast.error(error instanceof Error ? error.message : String(error));
       }
     },
     [convex],
