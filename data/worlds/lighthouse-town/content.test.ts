@@ -10,9 +10,13 @@ describe('Lighthouse Town content', () => {
     expect(lighthouseTown.landmarks).toContain('lighthouse');
   });
 
-  test('defines five unique bilingual residents', () => {
-    expect(lighthouseCharacters).toHaveLength(5);
-    expect(new Set(lighthouseCharacters.map((character) => character.id)).size).toBe(5);
+  test('defines eight unique bilingual residents', () => {
+    expect(lighthouseCharacters).toHaveLength(8);
+    expect(new Set(lighthouseCharacters.map((character) => character.id)).size).toBe(8);
+    expect(new Set(lighthouseCharacters.map((character) => character.sprite)).size).toBe(8);
+    expect(lighthouseCharacters.map((character) => character.name['zh-CN'])).toEqual(
+      expect.arrayContaining(['林澜', '沈砚', '唐果', '墨七', '苏萤', '白露', '顾潮', '阿满']),
+    );
     for (const character of lighthouseCharacters) {
       expect(character.name['zh-CN']).toBeTruthy();
       expect(character.name.en).toBeTruthy();

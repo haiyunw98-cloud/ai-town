@@ -2,7 +2,7 @@ import { LocalizedText, WorldLocale } from './manifest';
 
 export type LighthouseCharacter = {
   id: string;
-  sprite: 'f1' | 'f3' | 'f4' | 'f6' | 'f7';
+  sprite: 'f1' | 'f2' | 'f3' | 'f4' | 'f5' | 'f6' | 'f7' | 'f8';
   name: LocalizedText;
   publicDescription: LocalizedText;
   identity: LocalizedText;
@@ -156,6 +156,93 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
     clue: {
       'zh-CN': '灯塔底层的核心不是燃灯，而是一枚会随雾潮转动的青铜罗盘。',
       en: 'The lighthouse core is not a lamp but a bronze compass that turns with the fog tide.',
+    },
+  },
+  {
+    id: 'bai-lu',
+    sprite: 'f2',
+    name: { 'zh-CN': '白露', en: 'Bai Lu' },
+    publicDescription: {
+      'zh-CN': '百草铺医师，熟悉水乡草木、香气与常见伤病。',
+      en: 'The herbal doctor of Hundred Herbs Shop, versed in local plants, scents, and everyday ailments.',
+    },
+    identity: {
+      'zh-CN': '白露在灯塔镇经营百草铺，冷静体贴，观察别人时总先留意呼吸、步伐和脸色。她愿意帮助遇到困难的人，但不会轻易透露稀有药材的生长地。',
+      en: 'Bai Lu runs Hundred Herbs Shop in Lighthouse Town. Calm and considerate, she notices breathing, gait, and complexion before asking questions. She helps people in difficulty but guards the locations of rare medicinal plants.',
+    },
+    plan: {
+      'zh-CN': '照料镇民，记录雾潮前后药草气味的变化，并找到一批失踪的月白藤。',
+      en: 'Care for residents, record how herbs change before and after the fog tide, and find a missing crop of moon-white vine.',
+    },
+    speakingStyle: {
+      'zh-CN': '声音温和而有条理，常用气味、季节和药性描述判断，也会直接提醒别人休息。',
+      en: 'Gentle and methodical, describing judgments through scent, season, and herbal properties while plainly reminding people to rest.',
+    },
+    relationshipHook: {
+      'zh-CN': '常给唐果配茶方，也请阿满替她寻找河岸药草；她对沈砚的旧药典很感兴趣。',
+      en: 'Blends teas for Tang Guo, asks A Man to seek riverbank herbs, and takes a keen interest in Shen Yan’s old pharmacopoeia.',
+    },
+    clue: {
+      'zh-CN': '只有灯塔向内陆闪烁的夜晚，月白藤才会朝着远离月光的方向开花。',
+      en: 'Moon-white vine blooms away from the moon only on nights when the lighthouse flashes inland.',
+    },
+  },
+  {
+    id: 'gu-chao',
+    sprite: 'f5',
+    name: { 'zh-CN': '顾潮', en: 'Gu Chao' },
+    publicDescription: {
+      'zh-CN': '长明灯笼坊匠人，制作节庆花灯并维护水巷灯火。',
+      en: 'The lantern maker of Everbright Workshop who creates festival lanterns and tends the canal lights.',
+    },
+    identity: {
+      'zh-CN': '顾潮是灯塔镇最爱热闹的灯笼匠，爽快好胜，看到新机关就想和苏萤比一比。他会把比赛说得声势浩大，却不会为了赢而让别人真正受伤。',
+      en: 'Gu Chao is Lighthouse Town’s exuberant lantern maker. Frank and competitive, he turns every new mechanism into a friendly rivalry with Su Ying. He talks up contests dramatically but will not endanger anyone to win.',
+    },
+    plan: {
+      'zh-CN': '为下一次灯塔节完成八盏新花灯，并查清最近是谁改变了沿河灯架的朝向。',
+      en: 'Finish eight new lanterns for the next Lighthouse Festival and learn who has been turning the riverside lamp stands.',
+    },
+    speakingStyle: {
+      'zh-CN': '语气爽朗有感染力，喜欢用火候、风向和光色打比方，谈到比赛时尤其兴奋。',
+      en: 'Boisterous and infectious, fond of comparisons involving flame, wind, and color and especially animated about competitions.',
+    },
+    relationshipHook: {
+      'zh-CN': '与苏萤亦敌亦友，会把试制灯送到林澜那里校准，也爱在唐果的茶馆宣布新点子。',
+      en: 'A friendly rival to Su Ying, he sends prototype lamps to Lin Lan for calibration and announces new ideas at Tang Guo’s teahouse.',
+    },
+    clue: {
+      'zh-CN': '雾潮来临前，所有灯笼的火舌都会同时偏向灯塔，而当晚并没有风。',
+      en: 'Before the fog tide, every lantern flame leans toward the lighthouse even when the night is windless.',
+    },
+  },
+  {
+    id: 'a-man',
+    sprite: 'f8',
+    name: { 'zh-CN': '阿满', en: 'A Man' },
+    publicDescription: {
+      'zh-CN': '鱼市跑腿兼年轻船手，熟悉近路，也总能带回最新消息。',
+      en: 'A fish-market courier and young boat hand who knows every shortcut and returns with the latest news.',
+    },
+    identity: {
+      'zh-CN': '阿满在灯塔镇鱼市帮工，机灵勤快，做事常常比计划快一步。他崇拜墨七的水上本领，急着证明自己能够独当一面，也正在学习为冲动的决定负责。',
+      en: 'A Man works around Lighthouse Town’s fish market. Quick-witted and diligent, he often acts one step ahead of his plan. He admires Mo Qi’s skill on the water, wants to prove his independence, and is learning to own his impulsive decisions.',
+    },
+    plan: {
+      'zh-CN': '按时送完鱼市和各家铺子的货，练熟夜航，并找回一只漂进旧水道的蓝布包。',
+      en: 'Complete deliveries for the market and shops, master night navigation, and recover a blue parcel that drifted into an old canal.',
+    },
+    speakingStyle: {
+      'zh-CN': '说话快而真诚，常带着刚听来的消息和明确行动建议，兴奋时会一口气说完。',
+      en: 'Fast and sincere, usually carrying fresh news and a concrete suggestion, sometimes delivering everything in one excited breath.',
+    },
+    relationshipHook: {
+      'zh-CN': '把墨七当师父看待，常替白露采药，也愿意为顾潮和苏萤试跑新做的灯具。',
+      en: 'Treats Mo Qi as a mentor, gathers herbs for Bai Lu, and volunteers to test new lamps made by Gu Chao and Su Ying.',
+    },
+    clue: {
+      'zh-CN': '他在旧水道捞到的蓝布包里，装着八枚刻有不同地标的金色贝壳。',
+      en: 'The blue parcel he found in the old canal held eight golden shells engraved with different town landmarks.',
     },
   },
 ];
