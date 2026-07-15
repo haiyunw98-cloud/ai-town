@@ -34,7 +34,7 @@ Assert that the future report includes the original message and author.
 
 - [ ] **Step 2: Verify the test fails**
 
-Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts`  
+Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts`
 Expected: FAIL because `BroadcastSnapshot` does not contain `dailyMessages` and the report does not render it.
 
 - [ ] **Step 3: Extend the existing snapshot query**
@@ -57,7 +57,7 @@ Increase the existing life-event cap from 200 to 500. Add `dailyMessages: []` to
 
 - [ ] **Step 4: Verify the focused test and compiler**
 
-Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts && npx tsc --noEmit`  
+Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts && npx tsc --noEmit`
 Expected: PASS and exit 0.
 
 - [ ] **Step 5: Commit**
@@ -93,7 +93,7 @@ expect(report).not.toMatch(/因此导致|内心认为|形成派系|社会中心|
 
 - [ ] **Step 2: Verify RED**
 
-Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts`  
+Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts`
 Expected: FAIL because the existing report is shorter and lacks the required sections.
 
 - [ ] **Step 3: Implement the deterministic report**
@@ -133,7 +133,7 @@ Implementation rules:
 
 - [ ] **Step 4: Verify GREEN**
 
-Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts`  
+Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts`
 Expected: all report tests PASS.
 
 - [ ] **Step 5: Commit**
@@ -156,7 +156,7 @@ In `src/components/EventBroadcast.test.ts`, read `EventBroadcast.tsx` and assert
 
 - [ ] **Step 2: Verify RED**
 
-Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts`  
+Run: `npm test -- --runInBand src/components/EventBroadcast.test.ts`
 Expected: FAIL because the existing button says `导出日报`.
 
 - [ ] **Step 3: Update the existing card without adding a new panel**
