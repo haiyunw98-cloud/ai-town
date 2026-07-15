@@ -137,7 +137,10 @@ export function buildDailyReport(
         (message) => message.conversationId === conversation.conversationId
           && sameLocalDay(message.createdAt, now),
       );
-      const excerpts = (originalMessages.length > 0 ? originalMessages : conversation.messages).map(
+      const excerptMessages = originalMessages.length > 0
+        ? originalMessages.sort((left, right) => left.createdAt - right.createdAt).slice(-4)
+        : conversation.messages.slice(-4);
+      const excerpts = excerptMessages.map(
         (message) => `${message.authorName}：“${cleanMarkdown(message.text).slice(0, 100)}”`,
       );
       if (excerpts.length > 0) lines.push(`- 对话摘录：${excerpts.join('；')}`);

@@ -106,6 +106,7 @@ export const observerSnapshot = query({
       .filter((q) => q.eq(q.field('worldId'), worldId))
       .order('desc')
       .take(500);
+    const legacyMessages = messages.slice(0, 80);
     const dailyMessages = messages.map((message) => ({
       messageId: String(message._id),
       conversationId: message.conversationId,
@@ -116,7 +117,7 @@ export const observerSnapshot = query({
       observerIntervention: !names.has(message.author),
     }));
     const world = await ctx.db.get(worldId);
-    const conversations = groupConversationMessages(messages, names, world?.conversations ?? []);
+    const conversations = groupConversationMessages(legacyMessages, names, world?.conversations ?? []);
     const residentActivity = buildResidentActivity(world?.players ?? [], world?.conversations ?? [], names);
     const event = await ctx.db
       .query('townEvents')
@@ -131,7 +132,7 @@ export const observerSnapshot = query({
         residentActivity,
         dailyLifeEvents,
         dailyMessages,
-        logs: messages.map((message, index) => ({
+        logs: legacyMessages.map((message, index) => ({
           eventKey: `message:${message._id}`,
           sequence: index,
           kind: 'conversation',

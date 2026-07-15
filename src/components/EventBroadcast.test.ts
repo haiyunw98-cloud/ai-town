@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import {
   buildDailyReport,
   buildBroadcastView,
@@ -132,5 +133,55 @@ describe('event broadcast view model', () => {
     expect(report).toContain('## 重要对话');
     expect(report).toContain('顾潮 × 苏萤');
     expect(report).toContain('顾潮：“今晚去机关坊试灯。”');
+  });
+
+  test('uses the latest four same-day raw messages in chronological order', () => {
+    const now = new Date(1970, 0, 2, 12).getTime();
+    const at = (hour: number) => new Date(1970, 0, 2, hour).getTime();
+    const message = (messageId: string, text: string, createdAt: number) => ({
+      messageId,
+      conversationId: 'c:1',
+      authorId: 'p:1',
+      authorName: '顾潮',
+      text,
+      createdAt,
+      observerIntervention: false,
+    });
+    const report = buildDailyReport(
+      {
+        ...running,
+        conversations: [{
+          conversationId: 'c:1',
+          participantNames: ['顾潮', '苏萤'],
+          summary: '顾潮与苏萤依次完成试灯。',
+          updatedAt: at(11),
+          messages: [],
+        }],
+        dailyMessages: [
+          message('m:5', '第五条。', at(11)),
+          message('m:2', '第二条。', at(8)),
+          message('m:off-day', '昨日消息。', new Date(1970, 0, 1, 23).getTime()),
+          message('m:4', '第四条。', at(10)),
+          message('m:1', '第一条。', at(7)),
+          message('m:3', '第三条。', at(9)),
+        ],
+      },
+      'zh-CN',
+      now,
+    );
+
+    expect(report).not.toContain('第一条。');
+    expect(report).not.toContain('昨日消息。');
+    expect(report).toContain('顾潮：“第二条。”；顾潮：“第三条。”；顾潮：“第四条。”；顾潮：“第五条。”');
+  });
+
+  test('keeps complete raw message capture separate from 80-message legacy views', () => {
+    const source = readFileSync(new URL('../../convex/events.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain('.take(500)');
+    expect(source).toContain('const legacyMessages = messages.slice(0, 80);');
+    expect(source).toContain('groupConversationMessages(legacyMessages, names');
+    expect(source).toContain('logs: legacyMessages.map((message, index) => ({');
+    expect(source).toContain('const dailyMessages = messages.map((message) => ({');
   });
 });
