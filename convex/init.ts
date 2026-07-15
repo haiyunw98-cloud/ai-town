@@ -37,6 +37,7 @@ const init = mutation({
           descriptionIndex: i % Descriptions.length,
         });
       }
+      await ctx.scheduler.runAfter(15_000, internal.events.advanceActiveEvents, {});
     }
   },
 });

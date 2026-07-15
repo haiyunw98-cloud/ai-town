@@ -1,5 +1,5 @@
 import { v } from 'convex/values';
-import { agentId, conversationId, parseGameId } from './ids';
+import { agentId, conversationId, parseGameId, playerId } from './ids';
 import { Player, activity } from './player';
 import { Conversation, conversationInputs } from './conversation';
 import { movePlayer } from './movement';
@@ -13,6 +13,21 @@ import { Agent } from './agent';
 const Descriptions = localizedDescriptions(getWorldLocale());
 
 export const agentInputs = {
+  eventMove: inputHandler({
+    args: {
+      playerId,
+      destination: point,
+      description: v.string(),
+      until: v.number(),
+    },
+    handler: (game, now, args) => {
+      const player = game.world.players.get(parseGameId('players', args.playerId));
+      if (!player) return null;
+      movePlayer(game, now, player, args.destination);
+      player.activity = { description: args.description, until: args.until };
+      return null;
+    },
+  }),
   finishRememberConversation: inputHandler({
     args: {
       operationId: v.string(),
