@@ -102,37 +102,133 @@ describe('event broadcast view model', () => {
     expect(view.winnerName).toBe('顾潮');
   });
 
-  test('exports an observer daily report with activity, growth, relationships, and dialogue', () => {
+  test('exports the complete factual report in the required section order', () => {
+    const now = new Date(1970, 0, 2, 12).getTime();
+    const at = (hour: number) => new Date(1970, 0, 2, hour).getTime();
     const report = buildDailyReport(
       {
-        ...running,
+        event: {
+          id: 'event-completed',
+          name: '灯塔镇百万金贝寻宝赛',
+          status: 'completed',
+          phase: 'awards',
+          phaseEndsAt: at(11),
+          winnerId: 'gu-chao',
+          prize: '一百万金贝',
+        },
+        participants: [
+          {
+            residentId: 'gu-chao',
+            displayName: '顾潮',
+            score: 88,
+            shells: 3,
+            active: false,
+            role: 'competitor',
+            rank: 1,
+          },
+        ],
+        logs: [
+          {
+            eventKey: 'event-completed',
+            sequence: 1,
+            kind: 'award',
+            text: '颁奖记录：顾潮领取一百万金贝。',
+            createdAt: at(11),
+          },
+        ],
         residentActivity: [
-          { residentId: 'p:1', displayName: '顾潮', status: '生活中', detail: '在苏氏机关坊制作船灯' },
+          { residentId: 'gu-chao', displayName: '顾潮', status: '生活中', detail: '制作船灯' },
+          { residentId: 'su-ying', displayName: '苏萤', status: '休息中', detail: '整理工具' },
         ],
         dailyLifeEvents: [
-          { residentId: 'p:1', displayName: '顾潮', kind: 'work', text: '在苏氏机关坊：完成抗风船灯', createdAt: 20_000 },
+          { residentId: 'gu-chao', displayName: '顾潮', kind: 'work', text: '顾潮在苏氏机关坊完成抗风船灯', createdAt: at(8) },
+          { residentId: 'su-ying', displayName: '苏萤', kind: 'social', text: '苏萤与顾潮核对船灯清单', createdAt: at(9) },
         ],
         conversations: [
           {
             conversationId: 'c:1',
             participantNames: ['顾潮', '苏萤'],
             summary: '顾潮与苏萤商量了船灯订单。',
-            updatedAt: 21_000,
-            messages: [{ authorName: '顾潮', text: '今晚试灯。', createdAt: 21_000 }],
+            updatedAt: at(10),
+            messages: [{ authorName: '顾潮', text: '今晚试灯。', createdAt: at(10) }],
+          },
+        ],
+        dailyMessages: [
+          {
+            messageId: 'm:1',
+            conversationId: 'c:1',
+            authorId: 'gu-chao',
+            authorName: '顾潮',
+            text: '今晚试灯。',
+            createdAt: at(10),
+            observerIntervention: false,
+          },
+          {
+            messageId: 'm:2',
+            conversationId: 'c:1',
+            authorId: 'observer',
+            authorName: '观察者',
+            text: '请记录当前进度。',
+            createdAt: at(10) + 1,
+            observerIntervention: true,
           },
         ],
       },
       'zh-CN',
-      new Date(1970, 0, 1, 12).getTime(),
+      now,
     );
-    expect(report).toContain('# 灯塔镇观察者日报');
-    expect(report).toContain('## 居民活动与发展');
-    expect(report).toContain('在苏氏机关坊：完成抗风船灯');
-    expect(report).toContain('当前目标');
-    expect(report).toContain('关系进展');
-    expect(report).toContain('## 重要对话');
-    expect(report).toContain('顾潮 × 苏萤');
-    expect(report).toContain('顾潮：“今晚去机关坊试灯。”');
+
+    expect(report).toContain('# 灯塔镇完整观察日报');
+    expect(report.match(/^## .+$/gm)).toEqual([
+      '## 日报元数据',
+      '## 全镇事实概览',
+      '## 居民逐人记录',
+      '## 关系记录',
+      '## 机构与地点',
+      '## 活动分类',
+      '## 当日对话',
+      '## 赛事与公共事件',
+      '## 生活记录附录',
+      '## 原始对话附录',
+      '## 数据说明',
+    ]);
+    expect(report).toContain('人物设定关系');
+    expect(report).toContain('当日实际互动');
+    expect(report).toContain('观察者介入');
+    expect(report).toContain('当日无记录');
+    expect(report).toContain('顾潮在苏氏机关坊完成抗风船灯');
+    expect(report).toContain('冠军：顾潮');
+    expect(report).toContain('奖励：一百万金贝');
+    expect(report).toContain('林澜');
+    expect(report).toContain('玄微先生');
+  });
+
+  test('keeps the daily report factual and identifies every configured institution', () => {
+    const now = new Date(1970, 0, 2, 12).getTime();
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+
+    for (const landmark of [
+      '灯塔书院', '白露药庐', '旧水码头', '听潮卦馆', '听雨茶庄',
+      '晨雾集市', '镇公所', '苏氏机关坊', '望潮食肆',
+    ]) {
+      expect(report).toContain(landmark);
+    }
+    expect(report).toContain('设定内容不属于当日事实');
+    expect(report).toContain('不补全缺失事实');
+    expect(report).toContain('不推断原因或动机');
+    expect(report).not.toMatch(/因此导致|内心认为|形成派系|社会中心|证明了/);
   });
 
   test('uses the latest four same-day raw messages in chronological order', () => {
@@ -170,9 +266,14 @@ describe('event broadcast view model', () => {
       now,
     );
 
-    expect(report).not.toContain('第一条。');
+    const conversationSection = report.slice(
+      report.indexOf('## 当日对话'),
+      report.indexOf('## 赛事与公共事件'),
+    );
+    expect(conversationSection).not.toContain('第一条。');
     expect(report).not.toContain('昨日消息。');
-    expect(report).toContain('顾潮：“第二条。”；顾潮：“第三条。”；顾潮：“第四条。”；顾潮：“第五条。”');
+    expect(conversationSection).toContain('顾潮：“第二条。”；顾潮：“第三条。”；顾潮：“第四条。”；顾潮：“第五条。”');
+    expect(report).toContain('第一条。');
   });
 
   test('keeps complete raw message capture separate from 80-message legacy views', () => {

@@ -1,5 +1,6 @@
 import type { Locale } from '../i18n';
 import { residentLifeProfiles } from '../../data/worlds/lighthouse-town/lives';
+import { townLandmarks } from '../../data/worlds/lighthouse-town/map';
 
 export type BroadcastSnapshot = {
   event: null | {
@@ -73,93 +74,284 @@ const sameLocalDay = (timestamp: number, now: number) => {
 
 const cleanMarkdown = (value: string) => value.replace(/[\r\n]+/g, ' ').trim();
 
+type LifeEvent = NonNullable<BroadcastSnapshot['dailyLifeEvents']>[number];
+type DailyMessage = BroadcastSnapshot['dailyMessages'][number];
+type Conversation = BroadcastSnapshot['conversations'][number];
+type EventLog = BroadcastSnapshot['logs'][number];
+
+type DailyReportData = {
+  snapshot: BroadcastSnapshot;
+  locale: Locale;
+  now: number;
+  lifeEvents: LifeEvent[];
+  dailyMessages: DailyMessage[];
+  conversations: Conversation[];
+  logs: EventLog[];
+};
+
+const chronological = <T extends { createdAt: number }>(left: T, right: T) =>
+  left.createdAt - right.createdAt;
+
+const missingRecord = ['- 当日无记录'];
+
+function reportSection(title: string, content: string[]) {
+  return [`## ${title}`, '', ...(content.length > 0 ? content : missingRecord), ''];
+}
+
+function formatReportDate(timestamp: number, locale: Locale) {
+  return new Intl.DateTimeFormat(locale, {
+    year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'long',
+  }).format(timestamp);
+}
+
+function formatReportTime(timestamp: number, locale: Locale) {
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).format(timestamp);
+}
+
+function buildMetadataSection(data: DailyReportData) {
+  return reportSection('日报元数据', [
+    `- 日期：${formatReportDate(data.now, data.locale)}`,
+    `- 生成时间：${formatReportTime(data.now, data.locale)}`,
+    `- 本地日期筛选：${formatReportDate(data.now, data.locale)}`,
+  ]);
+}
+
+function buildOverviewSection(data: DailyReportData) {
+  return reportSection('全镇事实概览', [
+    `- 居民档案：${residentLifeProfiles.length} 人`,
+    `- 当前状态记录：${data.snapshot.residentActivity.length} 条`,
+    `- 当日生活记录：${data.lifeEvents.length} 条`,
+    `- 当日对话：${data.conversations.length} 组`,
+    `- 当日原始消息：${data.dailyMessages.length} 条`,
+    `- 当日公共事件日志：${data.logs.length} 条`,
+  ]);
+}
+
+function residentIdentity(residentId: string, displayName: string) {
+  return residentId ? `[${cleanMarkdown(residentId)}] ${cleanMarkdown(displayName)}` : cleanMarkdown(displayName);
+}
+
+function buildResidentSection(data: DailyReportData) {
+  const lines: string[] = [];
+  for (const profile of residentLifeProfiles) {
+    const activity = data.snapshot.residentActivity.find((entry) =>
+      entry.residentId === profile.id || entry.displayName === profile.name,
+    );
+    const events = data.lifeEvents.filter((entry) =>
+      entry.residentId === profile.id || entry.displayName === profile.name,
+    );
+    lines.push(`### ${profile.name}｜${profile.occupation}`);
+    lines.push('');
+    lines.push(`- 居民 ID：${profile.id}`);
+    lines.push(activity
+      ? `- 当前状态：${cleanMarkdown(activity.status)}；${cleanMarkdown(activity.detail)}`
+      : '- 当前状态：当日无记录');
+    lines.push('- 当日活动：');
+    if (events.length === 0) {
+      lines.push('  - 当日无记录');
+    } else {
+      for (const event of events) {
+        lines.push(`  - ${residentIdentity(event.residentId, event.displayName)}｜${cleanMarkdown(event.text)}`);
+      }
+    }
+    lines.push('');
+  }
+  return reportSection('居民逐人记录', lines);
+}
+
+function buildRelationshipsSection(data: DailyReportData) {
+  const lines = ['### 人物设定关系', ''];
+  for (const profile of residentLifeProfiles) {
+    for (const relationship of profile.relationships) {
+      const target = residentLifeProfiles.find((entry) => entry.id === relationship.targetId);
+      lines.push(
+        `- ${profile.name} → ${target?.name ?? relationship.targetId}｜${relationship.label}｜${relationship.kind}｜${relationship.score}/100｜${cleanMarkdown(relationship.summary)}`,
+      );
+    }
+  }
+  lines.push('', '### 当日实际互动', '');
+  if (data.conversations.length === 0) {
+    lines.push('- 当日无记录');
+  } else {
+    for (const conversation of data.conversations) {
+      const rawMessages = data.dailyMessages.filter(
+        (message) => message.conversationId === conversation.conversationId,
+      );
+      const fallbackMessages = conversation.messages.filter((message) =>
+        sameLocalDay(message.createdAt, data.now),
+      );
+      const messageCount = rawMessages.length > 0 ? rawMessages.length : fallbackMessages.length;
+      lines.push(`- ${conversation.participantNames.map(cleanMarkdown).join(' × ')}｜消息 ${messageCount} 条`);
+    }
+  }
+  return reportSection('关系记录', lines);
+}
+
+function buildLandmarksSection(data: DailyReportData) {
+  const lines: string[] = [];
+  for (const landmark of townLandmarks) {
+    const confirmedUses = data.lifeEvents.filter((event) =>
+      event.text.includes(`在${landmark.name}`),
+    );
+    lines.push(`### ${landmark.name}`);
+    lines.push('');
+    lines.push(`- 说明：${cleanMarkdown(landmark.description)}`);
+    lines.push(`- 开放时间：${landmark.openHours}`);
+    lines.push(`- 服务：${landmark.services.join('、')}`);
+    lines.push('- 当日确认使用：');
+    if (confirmedUses.length === 0) {
+      lines.push('  - 当日无记录');
+    } else {
+      for (const event of confirmedUses) {
+        lines.push(`  - ${residentIdentity(event.residentId, event.displayName)}｜${cleanMarkdown(event.text)}`);
+      }
+    }
+    lines.push('');
+  }
+  return reportSection('机构与地点', lines);
+}
+
+const activityKindLabels: Record<string, string> = {
+  work: '工作',
+  conversation: '对话',
+  social: '社交',
+  memory: '记忆记录',
+  travel: '出行',
+  meal: '饮食',
+  rest: '休息',
+  leisure: '休闲',
+  purchase: '采买',
+  health: '健康',
+  event: '公共活动',
+};
+
+function buildActivityClassificationSection(data: DailyReportData) {
+  if (data.lifeEvents.length === 0) return reportSection('活动分类', []);
+  const grouped = new Map<string, LifeEvent[]>();
+  for (const event of data.lifeEvents) {
+    const label = activityKindLabels[event.kind] ?? '其他';
+    const events = grouped.get(label) ?? [];
+    events.push(event);
+    grouped.set(label, events);
+  }
+  const lines: string[] = [];
+  for (const [label, events] of grouped) {
+    lines.push(`### ${label}`, '');
+    for (const event of events) {
+      lines.push(`- ${residentIdentity(event.residentId, event.displayName)}｜${cleanMarkdown(event.text)}`);
+    }
+    lines.push('');
+  }
+  return reportSection('活动分类', lines);
+}
+
+function conversationExcerptMessages(conversation: Conversation, data: DailyReportData) {
+  const rawMessages = data.dailyMessages.filter(
+    (message) => message.conversationId === conversation.conversationId,
+  );
+  if (rawMessages.length > 0) return rawMessages.slice(-4);
+  return conversation.messages
+    .filter((message) => sameLocalDay(message.createdAt, data.now))
+    .sort(chronological)
+    .slice(-4);
+}
+
+function buildConversationsSection(data: DailyReportData) {
+  const lines: string[] = [];
+  for (const conversation of data.conversations) {
+    lines.push(`### ${conversation.participantNames.map(cleanMarkdown).join(' × ')}`, '');
+    lines.push(`- 摘要：${cleanMarkdown(conversation.summary)}`);
+    const excerpts = conversationExcerptMessages(conversation, data).map(
+      (message) => `${cleanMarkdown(message.authorName)}：“${cleanMarkdown(message.text).slice(0, 100)}”`,
+    );
+    lines.push(excerpts.length > 0 ? `- 对话摘录：${excerpts.join('；')}` : '- 对话摘录：当日无记录');
+    lines.push('');
+  }
+  return reportSection('当日对话', lines);
+}
+
+function buildPublicEventsSection(data: DailyReportData) {
+  const lines: string[] = [];
+  if (data.snapshot.event) {
+    const event = data.snapshot.event;
+    const winner = data.snapshot.participants.find(
+      (participant) => participant.residentId === event.winnerId,
+    );
+    lines.push(`- 赛事：${cleanMarkdown(event.name)}`);
+    lines.push(`- 状态：${cleanMarkdown(event.status)}`);
+    lines.push(`- 阶段：${cleanMarkdown(event.phase)}`);
+    if (event.winnerId) lines.push(`- 冠军：${winner?.displayName ?? event.winnerId}`);
+    lines.push(`- 奖励：${cleanMarkdown(event.prize)}`);
+  }
+  if (data.logs.length > 0) {
+    lines.push('', '### 当日日志', '');
+    for (const log of data.logs) {
+      lines.push(`- [${log.eventKey}#${log.sequence}] ${cleanMarkdown(log.text)}`);
+    }
+  }
+  return reportSection('赛事与公共事件', lines);
+}
+
+function buildLifeAppendixSection(data: DailyReportData) {
+  return reportSection('生活记录附录', data.lifeEvents.map((event) =>
+    `- ${event.createdAt}｜${residentIdentity(event.residentId, event.displayName)}｜${activityKindLabels[event.kind] ?? '其他'}｜${cleanMarkdown(event.text)}`,
+  ));
+}
+
+function buildRawMessagesSection(data: DailyReportData) {
+  return reportSection('原始对话附录', data.dailyMessages.map((message) => {
+    const observerLabel = message.observerIntervention ? '｜观察者介入' : '';
+    return `- ${message.createdAt}｜${residentIdentity(message.authorId, message.authorName)}${observerLabel}｜${cleanMarkdown(message.text)}`;
+  }));
+}
+
+function buildDataNotesSection() {
+  return reportSection('数据说明', [
+    '- 人物档案、人物设定关系与机构资料属于设定内容；设定内容不属于当日事实。',
+    '- 缺失项统一标记为“当日无记录”，不补全缺失事实。',
+    '- 本日报仅转录输入快照中的状态、记录、摘要与日志，不推断原因或动机。',
+  ]);
+}
+
 export function buildDailyReport(
   snapshot: BroadcastSnapshot,
   locale: Locale,
   now = Date.now(),
 ) {
-  const date = new Intl.DateTimeFormat(locale, {
-    year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'long',
-  }).format(now);
-  const story = buildTownStory(snapshot.conversations);
-  const lifeEvents = (snapshot.dailyLifeEvents ?? []).filter((event) =>
-    sameLocalDay(event.createdAt, now),
-  );
-  const conversations = snapshot.conversations.filter((conversation) =>
-    sameLocalDay(conversation.updatedAt, now),
-  );
+  const data: DailyReportData = {
+    snapshot,
+    locale,
+    now,
+    lifeEvents: (snapshot.dailyLifeEvents ?? [])
+      .filter((event) => sameLocalDay(event.createdAt, now))
+      .sort(chronological),
+    dailyMessages: snapshot.dailyMessages
+      .filter((message) => sameLocalDay(message.createdAt, now))
+      .sort(chronological),
+    conversations: snapshot.conversations
+      .filter((conversation) => sameLocalDay(conversation.updatedAt, now))
+      .sort((left, right) => left.updatedAt - right.updatedAt),
+    logs: snapshot.logs
+      .filter((entry) => sameLocalDay(entry.createdAt, now))
+      .sort(chronological),
+  };
   const lines = [
-    '# 灯塔镇观察者日报',
+    '# 灯塔镇完整观察日报',
     '',
-    `- 日期：${date}`,
-    `- 生成时间：${new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(now)}`,
-    `- 活跃居民：${snapshot.residentActivity.length} 人`,
-    `- 今日生活记录：${lifeEvents.length} 条`,
-    `- 今日重要对话：${conversations.length} 组`,
-    '',
-    '## 全镇摘要',
-    '',
-    story.headline,
-    ...story.bullets.map((bullet) => `- ${cleanMarkdown(bullet)}`),
-    '',
-    '## 居民活动与发展',
-    '',
+    ...buildMetadataSection(data),
+    ...buildOverviewSection(data),
+    ...buildResidentSection(data),
+    ...buildRelationshipsSection(data),
+    ...buildLandmarksSection(data),
+    ...buildActivityClassificationSection(data),
+    ...buildConversationsSection(data),
+    ...buildPublicEventsSection(data),
+    ...buildLifeAppendixSection(data),
+    ...buildRawMessagesSection(data),
+    ...buildDataNotesSection(),
   ];
-
-  for (const resident of snapshot.residentActivity) {
-    const profile = residentLifeProfiles.find((entry) => entry.name === resident.displayName);
-    const events = lifeEvents.filter((event) => event.residentId === resident.residentId).slice(0, 8);
-    lines.push(`### ${resident.displayName}${profile ? `｜${profile.occupation}` : ''}`);
-    lines.push('');
-    lines.push(`- 当前情况：${resident.status}；${cleanMarkdown(resident.detail)}`);
-    if (profile) {
-      lines.push(`- 当前目标：${profile.currentGoal}`);
-      lines.push(`- 生计发展：${profile.business}`);
-      const relationships = profile.relationships.map((relationship) => {
-        const target = residentLifeProfiles.find((entry) => entry.id === relationship.targetId);
-        return `${target?.name ?? relationship.targetId}（${relationship.label} ${relationship.score}/100）`;
-      });
-      lines.push(`- 关系进展：${relationships.join('；') || '暂无明确关系记录'}`);
-    }
-    lines.push(`- 今日行动：${events.length > 0 ? events.map((event) => cleanMarkdown(event.text)).join('；') : '继续当前生活节奏，暂无新增记录'}`);
-    lines.push('');
-  }
-
-  lines.push('## 重要对话', '');
-  if (conversations.length === 0) {
-    lines.push('- 今日暂未形成可归纳的对话。');
-  } else {
-    for (const conversation of conversations) {
-      lines.push(`### ${conversation.participantNames.join(' × ')}`);
-      lines.push('');
-      lines.push(`- 摘要：${cleanMarkdown(conversation.summary)}`);
-      const originalMessages = snapshot.dailyMessages.filter(
-        (message) => message.conversationId === conversation.conversationId
-          && sameLocalDay(message.createdAt, now),
-      );
-      const excerptMessages = originalMessages.length > 0
-        ? originalMessages.sort((left, right) => left.createdAt - right.createdAt).slice(-4)
-        : conversation.messages.slice(-4);
-      const excerpts = excerptMessages.map(
-        (message) => `${message.authorName}：“${cleanMarkdown(message.text).slice(0, 100)}”`,
-      );
-      if (excerpts.length > 0) lines.push(`- 对话摘录：${excerpts.join('；')}`);
-      lines.push('');
-    }
-  }
-
-  lines.push('## 公共事件与镇志', '');
-  if (snapshot.event) {
-    const winner = snapshot.participants.find(
-      (participant) => participant.residentId === snapshot.event?.winnerId,
-    );
-    lines.push(`- ${snapshot.event.name}：${snapshot.event.status === 'completed' ? `已结束${winner ? `，冠军为 ${winner.displayName}` : ''}` : '进行中'}`);
-    lines.push(`- 奖励：${snapshot.event.prize}`);
-  }
-  const logs = snapshot.logs.filter((entry) => sameLocalDay(entry.createdAt, now)).slice(0, 20);
-  if (logs.length === 0) lines.push('- 今日暂无新增公共事件。');
-  else logs.forEach((entry) => lines.push(`- ${cleanMarkdown(entry.text)}`));
-  lines.push('', '---', '由灯塔镇观察台根据本地生活记录自动生成。');
   return lines.join('\n');
 }
 
