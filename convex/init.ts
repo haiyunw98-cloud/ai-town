@@ -25,20 +25,26 @@ const init = mutation({
       );
       return;
     }
-    const shouldCreate = await shouldCreateAgents(
+    const requestedDescriptions = Descriptions.slice(
+      0,
+      args.numAgents !== undefined ? args.numAgents : Descriptions.length,
+    );
+    const missingDescriptionIndexes = await findMissingDescriptionIndexes(
       ctx.db,
       worldStatus.worldId,
       worldStatus.engineId,
+      requestedDescriptions,
     );
-    if (shouldCreate) {
-      const toCreate = args.numAgents !== undefined ? args.numAgents : Descriptions.length;
-      for (let i = 0; i < toCreate; i++) {
-        await insertInput(ctx, worldStatus.worldId, 'createAgent', {
-          descriptionIndex: i % Descriptions.length,
-        });
+    if (missingDescriptionIndexes.length > 0) {
+      for (const descriptionIndex of missingDescriptionIndexes) {
+        await insertInput(ctx, worldStatus.worldId, 'createAgent', { descriptionIndex });
       }
       await ctx.scheduler.runAfter(15_000, internal.events.advanceActiveEvents, {});
     }
+    return {
+      worldId: worldStatus.worldId,
+      queuedResidents: missingDescriptionIndexes.map((index) => Descriptions[index].name),
+    };
   },
 });
 export default init;
@@ -91,27 +97,34 @@ async function getOrCreateDefaultWorld(ctx: MutationCtx) {
   return { worldStatus, engine };
 }
 
-async function shouldCreateAgents(
+async function findMissingDescriptionIndexes(
   db: DatabaseReader,
   worldId: Id<'worlds'>,
   engineId: Id<'engines'>,
+  requestedDescriptions: typeof Descriptions,
 ) {
   const world = await db.get(worldId);
   if (!world) {
     throw new Error(`Invalid world ID: ${worldId}`);
   }
-  if (world.agents.length > 0) {
-    return false;
-  }
+  const existingDescriptions = await db
+    .query('playerDescriptions')
+    .withIndex('worldId', (q) => q.eq('worldId', worldId))
+    .collect();
+  const existingNames = new Set(existingDescriptions.map((description) => description.name));
   const unactionedJoinInputs = await db
     .query('inputs')
     .withIndex('byInputNumber', (q) => q.eq('engineId', engineId))
     .order('asc')
     .filter((q) => q.eq(q.field('name'), 'createAgent'))
     .filter((q) => q.eq(q.field('returnValue'), undefined))
-    .first();
-  if (unactionedJoinInputs) {
-    return false;
-  }
-  return true;
+    .collect();
+  const pendingIndexes = new Set(
+    unactionedJoinInputs
+      .map((input) => (input.args as { descriptionIndex?: unknown }).descriptionIndex)
+      .filter((index): index is number => typeof index === 'number'),
+  );
+  return requestedDescriptions.flatMap((description, index) =>
+    existingNames.has(description.name) || pendingIndexes.has(index) ? [] : [index],
+  );
 }

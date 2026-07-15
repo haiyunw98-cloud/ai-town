@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "npm-run-all --parallel dev:backend dev:frontend",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node scripts/validate-client-bundle.mjs",
     "lint": "eslint .",
     "predev": "convex dev --run init --until-success",
     "dev:backend": "convex dev --tail-logs",

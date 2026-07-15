@@ -1,4 +1,4 @@
-import { Doc } from '../../convex/_generated/dataModel';
+import type { Doc } from '../../convex/_generated/dataModel';
 import { useEffect, useRef, useState } from 'react';
 
 export function useHistoricalTime(engineStatus?: Doc<'engines'>) {

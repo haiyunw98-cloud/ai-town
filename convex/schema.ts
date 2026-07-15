@@ -18,6 +18,8 @@ export default defineSchema({
     text: v.string(),
     worldId: v.optional(v.id('worlds')),
   })
+    .index('worldId', ['worldId'])
+    .index('worldAuthor', ['worldId', 'author'])
     .index('conversationId', ['worldId', 'conversationId'])
     .index('messageUuid', ['conversationId', 'messageUuid']),
 
@@ -62,6 +64,14 @@ export default defineSchema({
   })
     .index('eventId', ['eventId'])
     .index('eventKey', ['eventId', 'eventKey']),
+
+  lifeEvents: defineTable({
+    worldId: v.id('worlds'),
+    residentId: playerId,
+    kind: v.string(),
+    text: v.string(),
+    createdAt: v.number(),
+  }).index('resident', ['worldId', 'residentId', 'createdAt']),
 
   ...agentTables,
   ...aiTownTables,

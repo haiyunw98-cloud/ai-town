@@ -11,7 +11,7 @@ import { World, serializedWorld } from './world';
 import { WorldMap, serializedWorldMap } from './worldMap';
 import { PlayerDescription, serializedPlayerDescription } from './playerDescription';
 import { Location, locationFields, playerLocation } from './location';
-import { runAgentOperation } from './agent';
+import { runAgentOperation } from './agentOperations';
 import { GameId, IdTypes, allocGameId } from './ids';
 import { InputArgs, InputNames, inputs } from './inputs';
 import {

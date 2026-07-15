@@ -1,7 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import PixiGame from './PixiGame.tsx';
 
-import { useElementSize } from 'usehooks-ts';
 import { Stage } from '@pixi/react';
 import { ConvexProvider, useConvex, useQuery } from 'convex/react';
 import PlayerDetails from './PlayerDetails.tsx';
@@ -9,10 +8,12 @@ import { api } from '../../convex/_generated/api';
 import { useWorldHeartbeat } from '../hooks/useWorldHeartbeat.ts';
 import { useHistoricalTime } from '../hooks/useHistoricalTime.ts';
 import { DebugTimeManager } from './DebugTimeManager.tsx';
-import { GameId } from '../../convex/aiTown/ids.ts';
+import type { GameId } from '../../convex/aiTown/ids.ts';
 import { useServerGame } from '../hooks/serverGame.ts';
 import EventBroadcast from './EventBroadcast.tsx';
 import { useI18n } from '../i18n';
+import type { TownLandmark } from '../../data/worlds/lighthouse-town/map';
+import { townLandmarks } from '../../data/worlds/lighthouse-town/map';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
@@ -24,7 +25,25 @@ export default function Game() {
     id: GameId<'players'>;
   }>();
   const [sidebarTab, setSidebarTab] = useState<'broadcast' | 'resident'>('broadcast');
-  const [gameWrapperRef, { width, height }] = useElementSize();
+  const [selectedLandmark, setSelectedLandmark] = useState<TownLandmark>();
+  const [locationDirectoryOpen, setLocationDirectoryOpen] = useState(false);
+  const [observerOpen, setObserverOpen] = useState(() => window.innerWidth >= 960);
+  const [gameWrapper, setGameWrapper] = useState<HTMLDivElement | null>(null);
+  const [{ width, height }, setGameSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (!gameWrapper) return;
+    const updateSize = () => {
+      const next = { width: gameWrapper.offsetWidth, height: gameWrapper.offsetHeight };
+      setGameSize((current) =>
+        current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
+    updateSize();
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(gameWrapper);
+    return () => resizeObserver.disconnect();
+  }, [gameWrapper]);
 
   const worldStatus = useQuery(api.world.defaultWorldStatus);
   const worldId = worldStatus?.worldId;
@@ -41,17 +60,94 @@ export default function Game() {
   const scrollViewRef = useRef<HTMLDivElement>(null);
 
   if (!worldId || !engineId || !game) {
-    return null;
+    return (
+      <div className="town-loading" role="status">
+        <img src="/ai-town/assets/worlds/lighthouse-town/playable-map-v1.webp" alt="" />
+        <div>
+          <span>灯</span>
+          <h1>正在重连灯塔镇</h1>
+          <p>居民、记忆与小镇记录都安全保存在本地。</p>
+        </div>
+      </div>
+    );
   }
   return (
     <>
       {SHOW_DEBUG_UI && <DebugTimeManager timeManager={timeManager} width={200} height={100} />}
-      <div className="mx-auto w-full max-w grid grid-rows-[420px_1fr] lg:grid-rows-[1fr] lg:grid-cols-[1fr_auto] lg:grow max-w-[1500px] min-h-[620px] game-frame">
+      <div className={`town-game-layout ${observerOpen ? '' : 'observer-closed'}`}>
         {/* Game area */}
-        <div className="relative overflow-hidden bg-brown-900" ref={gameWrapperRef}>
+        <div className="town-map-panel" ref={setGameWrapper}>
+          <div className="town-brand" aria-label={t('app.title')}>
+            <span>灯</span>
+            <div>
+              <h1>{t('app.title')}</h1>
+              <p>{t('app.tagline')}</p>
+            </div>
+          </div>
+          {selectedElement && (
+            <div className="selected-resident-chip">
+              已选择：{game.playerDescriptions.get(selectedElement.id)?.name ?? '居民'}
+            </div>
+          )}
+          <button
+            className="observer-toggle"
+            onClick={() => setObserverOpen((open) => !open)}
+            aria-label={observerOpen ? '扩大地图' : '打开观察台'}
+          >
+            {observerOpen ? '◫ 扩大地图' : '▣ 打开观察台'}
+          </button>
+          <button
+            className="map-live-badge"
+            onClick={() => setLocationDirectoryOpen((open) => !open)}
+            aria-label="查看灯塔镇地点名录"
+          >
+            <i /> {game.world.agents.size} 位居民正在生活 · 地点名录
+          </button>
+          {locationDirectoryOpen && (
+            <nav className="town-location-directory" aria-label="灯塔镇地点名录">
+              <header>
+                <div><strong>小镇机构</strong><small>居民会实际前往并使用这些服务</small></div>
+                <button onClick={() => setLocationDirectoryOpen(false)} aria-label="关闭地点名录">×</button>
+              </header>
+              <div>
+                {townLandmarks.map((landmark) => (
+                  <button
+                    key={landmark.id}
+                    onClick={() => {
+                      setSelectedLandmark(landmark);
+                      setLocationDirectoryOpen(false);
+                    }}
+                  >
+                    <span>{landmark.icon}</span>
+                    <div><strong>{landmark.name}</strong><small>{landmark.services.join(' · ')}</small></div>
+                  </button>
+                ))}
+              </div>
+            </nav>
+          )}
+          {selectedLandmark && (
+            <section className="town-landmark-card" aria-live="polite">
+              <button onClick={() => setSelectedLandmark(undefined)} aria-label="关闭地点介绍">×</button>
+              <header>
+                <span>{selectedLandmark.icon}</span>
+                <div>
+                  <h2>{selectedLandmark.name}</h2>
+                  <small>{selectedLandmark.openHours}</small>
+                </div>
+              </header>
+              <p>{selectedLandmark.description}</p>
+              <div>
+                {selectedLandmark.services.map((service) => <span key={service}>{service}</span>)}
+              </div>
+            </section>
+          )}
           <div className="absolute inset-0">
-            <div className="container">
-              <Stage width={width} height={height} options={{ backgroundColor: 0x7ab5ff }}>
+            <div className="town-pixi-canvas">
+              <Stage
+                width={width}
+                height={height}
+                options={{ backgroundColor: 0x7ab5ff }}
+              >
                 {/* Re-propagate context because contexts are not shared between renderers.
 https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-531549215 */}
                 <ConvexProvider client={convex}>
@@ -64,8 +160,12 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
                     historicalTime={historicalTime}
                     setSelectedElement={(selection) => {
                       setSelectedElement(selection);
-                      if (selection) setSidebarTab('resident');
+                      if (selection) {
+                        setSidebarTab('resident');
+                        setObserverOpen(true);
+                      }
                     }}
+                    onSelectLandmark={(landmark) => setSelectedLandmark(landmark)}
                   />
                 </ConvexProvider>
               </Stage>
@@ -73,10 +173,13 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
           </div>
         </div>
         {/* Right column area */}
-        <div
-          className="flex flex-col overflow-y-auto shrink-0 px-4 py-4 sm:px-6 lg:w-[28rem] xl:pr-6 border-t-8 sm:border-t-0 sm:border-l-8 border-brown-900 bg-brown-800 text-brown-100"
+        <aside
+          className="town-observer-panel"
           ref={scrollViewRef}
         >
+          <button className="observer-drawer-close" onClick={() => setObserverOpen(false)}>
+            × 收起观察台
+          </button>
           <div className="observer-tabs" role="tablist">
             <button
               className={sidebarTab === 'broadcast' ? 'is-active' : ''}
@@ -94,7 +197,13 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
             </button>
           </div>
           {sidebarTab === 'broadcast' ? (
-            <EventBroadcast worldId={worldId} />
+            <EventBroadcast
+              worldId={worldId}
+              onSelectResident={(residentId) => {
+                setSelectedElement({ kind: 'player', id: residentId });
+                setSidebarTab('resident');
+              }}
+            />
           ) : (
             <PlayerDetails
               worldId={worldId}
@@ -105,7 +214,7 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
               scrollViewRef={scrollViewRef}
             />
           )}
-        </div>
+        </aside>
       </div>
     </>
   );

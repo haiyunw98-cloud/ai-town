@@ -11,6 +11,10 @@ import { Game } from './game';
 import { stopPlayer, blocked, movePlayer } from './movement';
 import { ConversationMembership, serializedConversationMembership } from './conversationMembership';
 import { parseMap, serializeMap } from '../util/object';
+import {
+  canHumanPreemptConversation,
+  shouldAutoAcceptHumanInvite,
+} from './conversationPriority';
 
 export class Conversation {
   id: GameId<'conversations'>;
@@ -266,11 +270,34 @@ export const conversationInputs = {
       if (!invitee) {
         throw new Error(`Invalid player ID: ${inviteeId}`);
       }
+      const inviteeConversation = [...game.world.conversations.values()].find((conversation) =>
+        conversation.participants.has(invitee.id),
+      );
+      if (inviteeConversation) {
+        const conversationHasHuman = [...inviteeConversation.participants.keys()].some(
+          (participantId) => !!game.world.players.get(participantId)?.human,
+        );
+        if (canHumanPreemptConversation(!!player.human, conversationHasHuman)) {
+          console.log(`Human ${player.id} is preempting ${inviteeConversation.id}`);
+          inviteeConversation.stop(game, now);
+        }
+      }
       console.log(`Starting ${playerId} ${inviteeId}...`);
       const { conversationId, error } = Conversation.start(game, now, player, invitee);
       if (!conversationId) {
         // TODO: pass it back to the client for them to show an error.
         throw new Error(error);
+      }
+      const inviteeAgent = [...game.world.agents.values()].find(
+        (agent) => agent.playerId === invitee.id,
+      );
+      if (shouldAutoAcceptHumanInvite(!!player.human, !!inviteeAgent)) {
+        const conversation = game.world.conversations.get(conversationId);
+        conversation?.acceptInvite(game, invitee);
+        if (inviteeAgent) {
+          delete inviteeAgent.inProgressOperation;
+          delete inviteeAgent.toRemember;
+        }
       }
       return conversationId;
     },

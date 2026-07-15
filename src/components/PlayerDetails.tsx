@@ -1,14 +1,16 @@
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { Id } from '../../convex/_generated/dataModel';
+import type { Id } from '../../convex/_generated/dataModel';
 import closeImg from '../../assets/close.svg';
-import { SelectElement } from './Player';
+import type { SelectElement } from './Player';
 import { Messages } from './Messages';
 import { toastOnError } from '../toasts';
 import { useSendInput } from '../hooks/sendInput';
-import { GameId } from '../../convex/aiTown/ids';
-import { ServerGame } from '../hooks/serverGame';
+import type { GameId } from '../../convex/aiTown/ids';
+import type { ServerGame } from '../hooks/serverGame';
 import { useI18n } from '../i18n';
+import { conversationAction } from './conversationAccess';
+import ResidentDossier from './ResidentDossier';
 
 export default function PlayerDetails({
   worldId,
@@ -65,7 +67,17 @@ export default function PlayerDetails({
     return null;
   }
   const isMe = humanPlayer && player.id === humanPlayer.id;
-  const canInvite = !isMe && !playerConversation && humanPlayer && !humanConversation;
+  const residentConversationHasHuman = !!playerConversation && [
+    ...playerConversation.participants.keys(),
+  ].some((participantId) => !!game.world.players.get(participantId)?.human);
+  const inviteAction = conversationAction({
+    isMe: !!isMe,
+    hasHumanPlayer: !!humanPlayer,
+    humanIsBusy: !!humanConversation,
+    residentIsBusy: !!playerConversation,
+    residentConversationHasHuman,
+  });
+  const canInvite = inviteAction !== 'unavailable';
   const sameConversation =
     !isMe &&
     humanPlayer &&
@@ -128,6 +140,15 @@ export default function PlayerDetails({
       }),
     );
   };
+  const onCancelConversation = async () => {
+    if (!humanPlayer || !humanConversation) return;
+    await toastOnError(
+      leaveConversation({
+        playerId: humanPlayer.id,
+        conversationId: humanConversation.id,
+      }),
+    );
+  };
   // const pendingSuffix = (inputName: string) =>
   //   [...inflightInputs.values()].find((i) => i.name === inputName) ? ' opacity-50' : '';
 
@@ -149,6 +170,12 @@ export default function PlayerDetails({
           </h2>
         </a>
       </div>
+      {!isMe && (
+        <ResidentDossier
+          worldId={worldId}
+          playerId={player.id}
+        />
+      )}
       {canInvite && (
         <a
           className={
@@ -158,21 +185,29 @@ export default function PlayerDetails({
           onClick={() => void onStartConversation()}
         >
           <div className="h-full bg-clay-700 text-center">
-            <span>{t('action.startConversation')}</span>
+            <span>
+              {t(inviteAction === 'interrupt' ? 'action.interruptConversation' : 'action.startConversation')}
+            </span>
           </div>
         </a>
       )}
       {waitingForAccept && (
-        <a className="mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto opacity-50">
+        <a
+          className="mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto"
+          onClick={() => void onCancelConversation()}
+        >
           <div className="h-full bg-clay-700 text-center">
-            <span>{t('status.waitingForAccept')}</span>
+            <span>{t('status.waitingForAccept')} · {t('action.cancelConversation')}</span>
           </div>
         </a>
       )}
       {waitingForNearby && (
-        <a className="mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto opacity-50">
+        <a
+          className="mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto"
+          onClick={() => void onCancelConversation()}
+        >
           <div className="h-full bg-clay-700 text-center">
-            <span>{t('status.walkingOver')}</span>
+            <span>{t('status.walkingOver')} · {t('action.cancelConversation')}</span>
           </div>
         </a>
       )}
@@ -235,14 +270,16 @@ export default function PlayerDetails({
         </p>
       </div>
       {!isMe && playerConversation && playerStatus?.kind === 'participating' && (
-        <Messages
-          worldId={worldId}
-          engineId={engineId}
-          inConversationWithMe={inConversationWithMe ?? false}
-          conversation={{ kind: 'active', doc: playerConversation }}
-          humanPlayer={humanPlayer}
-          scrollViewRef={scrollViewRef}
-        />
+        <>
+          <Messages
+            worldId={worldId}
+            engineId={engineId}
+            inConversationWithMe={inConversationWithMe ?? false}
+            conversation={{ kind: 'active', doc: playerConversation }}
+            humanPlayer={humanPlayer}
+            scrollViewRef={scrollViewRef}
+          />
+        </>
       )}
       {!playerConversation && previousConversation && (
         <>

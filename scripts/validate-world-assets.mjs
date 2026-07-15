@@ -1,8 +1,54 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const root = resolve(import.meta.dirname, '..');
+const EXPECTED_RESIDENT_PHOTO_COUNT = 36;
+
+export function validateResidentPhotoAssets(profiles, publicDir) {
+  const failures = [];
+  const residents = Array.isArray(profiles) ? profiles : [];
+  const photoReferences = residents.flatMap((profile) =>
+    Array.isArray(profile?.photos) ? profile.photos : [],
+  );
+
+  if (residents.length !== 9) {
+    failures.push(`resident life profiles must contain exactly nine residents (found ${residents.length})`);
+  }
+  if (photoReferences.length !== EXPECTED_RESIDENT_PHOTO_COUNT) {
+    failures.push(
+      `resident life profiles must reference exactly ${EXPECTED_RESIDENT_PHOTO_COUNT} photos (found ${photoReferences.length})`,
+    );
+  }
+
+  for (const [index, profile] of residents.entries()) {
+    const residentId = profile?.id || `resident-${index + 1}`;
+    const photos = Array.isArray(profile?.photos) ? profile.photos : [];
+    if (photos.length !== 4 || new Set(photos).size !== 4) {
+      failures.push(`${residentId} must reference four unique resident photos`);
+    }
+
+    for (const photo of photos) {
+      if (typeof photo !== 'string' || !photo.endsWith('.webp')) {
+        failures.push(`${residentId} resident photo must be a WebP: ${String(photo)}`);
+        continue;
+      }
+      const relativePath = photo.replace(/^\/ai-town\//, '').replace(/^\/+/, '');
+      const assetPath = resolve(publicDir, relativePath);
+      if (!existsSync(assetPath)) {
+        failures.push(`missing resident photo for ${residentId}: ${photo}`);
+        continue;
+      }
+      const asset = statSync(assetPath);
+      if (!asset.isFile() || asset.size === 0) {
+        failures.push(`resident photo is empty for ${residentId}: ${photo}`);
+      }
+    }
+  }
+
+  return failures;
+}
+
+export async function validateWorldAssets(root = resolve(import.meta.dirname, '..')) {
 const assetDir = resolve(root, 'public/assets/worlds/lighthouse-town');
 const requiredAssets = ['tileset.svg', 'residents.svg', 'event-poster-v1.png', 'asset-sources.md'];
 const failures = [];
@@ -30,6 +76,16 @@ for (const asset of requiredAssets) {
   if (!existsSync(resolve(assetDir, asset))) failures.push(`missing asset: ${asset}`);
 }
 
+const livesPath = resolve(root, 'data/worlds/lighthouse-town/lives.ts');
+if (!existsSync(livesPath)) {
+  failures.push('missing resident life profiles: data/worlds/lighthouse-town/lives.ts');
+} else {
+  const lives = await import(pathToFileURL(livesPath));
+  failures.push(
+    ...validateResidentPhotoAssets(lives.residentLifeProfiles, resolve(root, 'public')),
+  );
+}
+
 function svgSize(filename) {
   const source = readFileSync(resolve(assetDir, filename), 'utf8');
   const match = source.match(/<svg[^>]*\bwidth="(\d+)"[^>]*\bheight="(\d+)"/);
@@ -43,8 +99,8 @@ if (failures.length === 0) {
   if (tileset.width % 32 || tileset.height % 32) {
     failures.push('tileset.svg dimensions must be multiples of 32');
   }
-  if (residents.width !== 384 || residents.height !== 256) {
-    failures.push('residents.svg must be 384x256 for the existing 32px frame metadata');
+  if (residents.width !== 384 || residents.height !== 384) {
+    failures.push('residents.svg must be 384x384 for the nine 32px resident frame sets');
   }
 }
 
@@ -75,8 +131,8 @@ if (!existsSync(mapPath)) {
 
   const blocked = (x, y) => map.objmap.some((layer) => layer[x][y] !== -1);
   const uniqueSpawns = new Set(map.spawnPoints.map(({ x, y }) => `${x},${y}`));
-  if (map.spawnPoints.length !== 8 || uniqueSpawns.size !== 8) {
-    failures.push('map must expose eight unique resident spawn points');
+  if (map.spawnPoints.length !== 9 || uniqueSpawns.size !== 9) {
+    failures.push('map must expose nine unique resident spawn points');
   }
   const requiredCheckpoints = [
     'plaza',
@@ -125,9 +181,15 @@ if (!existsSync(mapPath)) {
   }
 }
 
-if (failures.length) {
-  console.error(`Lighthouse Town asset validation failed:\n- ${failures.join('\n- ')}`);
-  process.exit(1);
+return failures;
 }
 
-console.log('Lighthouse Town assets validated.');
+const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : '';
+if (import.meta.url === invokedPath) {
+  const failures = await validateWorldAssets();
+  if (failures.length) {
+    console.error(`Lighthouse Town asset validation failed:\n- ${failures.join('\n- ')}`);
+    process.exit(1);
+  }
+  console.log('Lighthouse Town assets validated.');
+}

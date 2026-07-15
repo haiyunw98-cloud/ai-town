@@ -1,11 +1,10 @@
-import * as PIXI from 'pixi.js';
 import { useApp } from '@pixi/react';
 import { Player, SelectElement } from './Player.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { PixiStaticMap } from './PixiStaticMap.tsx';
 import PixiViewport from './PixiViewport.tsx';
 import { Viewport } from 'pixi-viewport';
-import { Id } from '../../convex/_generated/dataModel';
+import type { Id } from '../../convex/_generated/dataModel';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api.js';
 import { useSendInput } from '../hooks/sendInput.ts';
@@ -13,7 +12,10 @@ import { toastOnError } from '../toasts.ts';
 import { DebugPath } from './DebugPath.tsx';
 import { PositionIndicator } from './PositionIndicator.tsx';
 import { SHOW_DEBUG_UI } from './Game.tsx';
-import { ServerGame } from '../hooks/serverGame.ts';
+import type { ServerGame } from '../hooks/serverGame.ts';
+import TownLandmarks from './TownLandmarks.tsx';
+import type { TownLandmark } from '../../data/worlds/lighthouse-town/map.ts';
+import { initialViewportScale } from './viewportMath.ts';
 
 export const PixiGame = (props: {
   worldId: Id<'worlds'>;
@@ -23,6 +25,7 @@ export const PixiGame = (props: {
   width: number;
   height: number;
   setSelectedElement: SelectElement;
+  onSelectLandmark: (landmark: TownLandmark) => void;
 }) => {
   // PIXI setup.
   const pixiApp = useApp();
@@ -82,16 +85,25 @@ export const PixiGame = (props: {
   const { width, height, tileDim } = props.game.worldMap;
   const players = [...props.game.world.players.values()];
 
-  // Zoom on the user’s avatar when it is created
   useEffect(() => {
-    if (!viewportRef.current || humanPlayerId === undefined) return;
+    const viewport = viewportRef.current;
+    if (!viewport || props.width <= 0 || props.height <= 0) return;
+    const worldWidth = width * tileDim;
+    const worldHeight = height * tileDim;
+    const minScale = initialViewportScale(
+      props.width,
+      props.height,
+      worldWidth,
+      worldHeight,
+    );
+    viewport.resize(props.width, props.height, worldWidth, worldHeight);
+    viewport.clampZoom({ minScale, maxScale: 3.0 });
+    viewport.setZoom(minScale, true);
+    viewport.moveCenter(worldWidth / 2, worldHeight / 2);
+  }, [props.width, props.height, width, height, tileDim]);
 
-    const humanPlayer = props.game.world.players.get(humanPlayerId)!;
-    viewportRef.current.animate({
-      position: new PIXI.Point(humanPlayer.position.x * tileDim, humanPlayer.position.y * tileDim),
-      scale: 1.5,
-    });
-  }, [humanPlayerId]);
+  // Keep the full town framed after joining. The old 1.5× auto-focus hid every
+  // resident outside the human spawn area and made starting conversations hard.
 
   return (
     <PixiViewport
@@ -107,6 +119,7 @@ export const PixiGame = (props: {
         onpointerup={onMapPointerUp}
         onpointerdown={onMapPointerDown}
       />
+      <TownLandmarks tileDim={tileDim} onSelect={props.onSelectLandmark} />
       {players.map(
         (p) =>
           // Only show the path for the human player in non-debug mode.

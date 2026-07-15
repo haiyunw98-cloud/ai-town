@@ -72,26 +72,47 @@ export const observerSnapshot = query({
           .filter((q) => q.eq(q.field('isDefault'), true))
           .first();
     const worldId = args.worldId ?? worldStatus?.worldId;
-    if (!worldId) return { event: null, participants: [], logs: [] };
+    if (!worldId) {
+      return { event: null, participants: [], logs: [], conversations: [], residentActivity: [], dailyLifeEvents: [] };
+    }
+    const descriptions = await ctx.db
+      .query('playerDescriptions')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
+      .collect();
+    const names = new Map(descriptions.map((entry) => [entry.playerId, entry.name]));
+    const dailyLifeEvents = (await ctx.db
+      .query('lifeEvents')
+      .filter((q) => q.eq(q.field('worldId'), worldId))
+      .collect())
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .slice(0, 200)
+      .map((entry) => ({
+        residentId: entry.residentId,
+        displayName: names.get(entry.residentId) ?? '居民',
+        kind: entry.kind,
+        text: entry.text,
+        createdAt: entry.createdAt,
+      }));
+    const messages = await ctx.db
+      .query('messages')
+      .filter((q) => q.eq(q.field('worldId'), worldId))
+      .order('desc')
+      .take(80);
+    const world = await ctx.db.get(worldId);
+    const conversations = groupConversationMessages(messages, names, world?.conversations ?? []);
+    const residentActivity = buildResidentActivity(world?.players ?? [], world?.conversations ?? [], names);
     const event = await ctx.db
       .query('townEvents')
       .withIndex('worldId', (q) => q.eq('worldId', worldId))
       .order('desc')
       .first();
     if (!event) {
-      const messages = await ctx.db
-        .query('messages')
-        .filter((q) => q.eq(q.field('worldId'), worldId))
-        .order('desc')
-        .take(20);
-      const descriptions = await ctx.db
-        .query('playerDescriptions')
-        .withIndex('worldId', (q) => q.eq('worldId', worldId))
-        .collect();
-      const names = new Map(descriptions.map((entry) => [entry.playerId, entry.name]));
       return {
         event: null,
         participants: [],
+        conversations,
+        residentActivity,
+        dailyLifeEvents,
         logs: messages.map((message, index) => ({
           eventKey: `message:${message._id}`,
           sequence: index,
@@ -133,9 +154,132 @@ export const observerSnapshot = query({
         }))
         .sort((left, right) => (left.rank ?? 99) - (right.rank ?? 99)),
       logs,
+      conversations,
+      residentActivity,
+      dailyLifeEvents,
     };
   },
 });
+
+function groupConversationMessages(
+  messages: Array<{ conversationId: string; author: string; text: string; _creationTime: number }>,
+  names: Map<string, string>,
+  liveConversations: Array<{ id: string; participants: Array<{ playerId: string }> }>,
+) {
+  const grouped = new Map<string, typeof messages>();
+  for (const message of messages) {
+    const group = grouped.get(message.conversationId) ?? [];
+    group.push(message);
+    grouped.set(message.conversationId, group);
+  }
+  const liveParticipants = new Map(
+    liveConversations.map((conversation) => [
+      conversation.id,
+      conversation.participants.map((participant) => participant.playerId),
+    ]),
+  );
+  return [...grouped.entries()]
+    .map(([conversationId, group]) => {
+      const participantIds = liveParticipants.get(conversationId) ?? [
+        ...new Set(group.map((message) => message.author)),
+      ];
+      const participantNames = participantIds.map((id) => names.get(id) ?? '居民');
+      const ordered = [...group].sort((left, right) => left._creationTime - right._creationTime);
+      return {
+        conversationId,
+        participantNames,
+        summary: summarizeConversation(participantNames, ordered.map((message) => message.text)),
+        updatedAt: Math.max(...group.map((message) => message._creationTime)),
+        messages: ordered.slice(-6).map((message) => ({
+          authorName: names.get(message.author) ?? '居民',
+          text: message.text,
+          createdAt: message._creationTime,
+        })),
+      };
+    })
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, 6);
+}
+
+function summarizeConversation(participantNames: string[], messages: string[]) {
+  const combined = messages.join('');
+  const topics = [
+    [/河|水位|航道|渡口/, '河道水位'],
+    [/灯|灯塔|火光|灯架/, '灯火装置'],
+    [/花|草药|根系|枯萎/, '花木生长'],
+    [/机关|齿轮|结构|零件/, '机关结构'],
+    [/金贝|寻宝|比赛|线索/, '寻宝赛事'],
+  ]
+    .filter(([pattern]) => (pattern as RegExp).test(combined))
+    .map(([, label]) => label as string)
+    .slice(0, 3);
+  const latest = cleanDialogue(messages.at(-1) ?? '').slice(0, 54);
+  const subject = topics.length > 0 ? topics.join('、') : '近日见闻';
+  return `${participantNames.join('与')}围绕${subject}交换了${messages.length}条信息，最新线索是“${latest}${latest.length >= 54 ? '…' : ''}”。`;
+}
+
+function cleanDialogue(text: string) {
+  return text
+    .replace(/（[^）]*）/g, ' ')
+    .replace(/[“”]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildResidentActivity(
+  players: Array<{
+    id: string;
+    pathfinding?: { destination: { x: number; y: number }; state: { kind: string } };
+    activity?: { description: string; emoji?: string; until: number };
+  }>,
+  conversations: Array<{
+    id: string;
+    isTyping?: { playerId: string };
+    participants: Array<{ playerId: string; status: { kind: string } }>;
+  }>,
+  names: Map<string, string>,
+) {
+  return players.map((player) => {
+    const conversation = conversations.find((entry) =>
+      entry.participants.some((participant) => participant.playerId === player.id),
+    );
+    if (conversation) {
+      const partnerIds = conversation.participants
+        .map((participant) => participant.playerId)
+        .filter((id) => id !== player.id);
+      const member = conversation.participants.find(
+        (participant) => participant.playerId === player.id,
+      );
+      const status = conversation.isTyping?.playerId === player.id
+        ? '正在发言'
+        : member?.status.kind === 'walkingOver'
+          ? '正在赴约'
+          : '交谈中';
+      return {
+        residentId: player.id,
+        displayName: names.get(player.id) ?? '居民',
+        status,
+        detail: `与 ${partnerIds.map((id) => names.get(id) ?? '居民').join('、')} 相处`,
+      };
+    }
+    if (player.pathfinding) {
+      return {
+        residentId: player.id,
+        displayName: names.get(player.id) ?? '居民',
+        status: '赶路中',
+        detail: `前往坐标 ${player.pathfinding.destination.x}, ${player.pathfinding.destination.y}`,
+      };
+    }
+    return {
+      residentId: player.id,
+      displayName: names.get(player.id) ?? '居民',
+      status: '生活中',
+      detail: player.activity
+        ? `${player.activity.emoji ?? '•'} ${player.activity.description}`
+        : '观察小镇，等待下一次行动',
+    };
+  });
+}
 
 export const decisionCandidate = internalQuery({
   args: {},
@@ -237,7 +381,7 @@ async function ensureEventForWorld(ctx: MutationCtx, worldId: Id<'worlds'>) {
     .first();
   if (existing) return { created: false, eventId: existing._id, reason: '首场赛事已经存在' };
   const world = await ctx.db.get(worldId);
-  if (!world || world.agents.length !== 8) {
+  if (!world || world.agents.length < 8) {
     return { created: false, reason: `等待八位居民，目前为 ${world?.agents.length ?? 0} 位` };
   }
   const playerDescriptions = await ctx.db
@@ -248,12 +392,14 @@ async function ensureEventForWorld(ctx: MutationCtx, worldId: Id<'worlds'>) {
     .query('agentDescriptions')
     .withIndex('worldId', (q) => q.eq('worldId', worldId))
     .collect();
-  if (playerDescriptions.length !== 8 || agentDescriptions.length !== 8) {
+  if (playerDescriptions.length < 8 || agentDescriptions.length < 8) {
     return { created: false, reason: '等待八位居民资料同步' };
   }
   const playerById = new Map(playerDescriptions.map((entry) => [entry.playerId, entry]));
   const agentById = new Map(agentDescriptions.map((entry) => [entry.agentId, entry]));
-  const residents = world.agents.map((agent) => {
+  // The inaugural challenge remains the original eight-person event even after
+  // more residents join normal town life.
+  const residents = world.agents.slice(0, 8).map((agent) => {
     const player = playerById.get(agent.playerId);
     const description = agentById.get(agent.id);
     if (!player || !description) throw new Error(`Missing description for ${agent.id}`);

@@ -1,9 +1,9 @@
-import { GameId } from '../../convex/aiTown/ids.ts';
+import type { GameId } from '../../convex/aiTown/ids.ts';
 import { AgentDescription } from '../../convex/aiTown/agentDescription.ts';
 import { PlayerDescription } from '../../convex/aiTown/playerDescription.ts';
 import { World } from '../../convex/aiTown/world.ts';
 import { WorldMap } from '../../convex/aiTown/worldMap.ts';
-import { Id } from '../../convex/_generated/dataModel';
+import type { Id } from '../../convex/_generated/dataModel';
 import { useMemo } from 'react';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';

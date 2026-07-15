@@ -2,7 +2,7 @@ import { LocalizedText, WorldLocale } from './manifest';
 
 export type LighthouseCharacter = {
   id: string;
-  sprite: 'f1' | 'f2' | 'f3' | 'f4' | 'f5' | 'f6' | 'f7' | 'f8';
+  sprite: 'f1' | 'f2' | 'f3' | 'f4' | 'f5' | 'f6' | 'f7' | 'f8' | 'f9';
   name: LocalizedText;
   publicDescription: LocalizedText;
   identity: LocalizedText;
@@ -243,6 +243,35 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
     clue: {
       'zh-CN': '他在旧水道捞到的蓝布包里，装着八枚刻有不同地标的金色贝壳。',
       en: 'The blue parcel he found in the old canal held eight golden shells engraved with different town landmarks.',
+    },
+  },
+  {
+    id: 'xuan-wei',
+    sprite: 'f9',
+    name: { 'zh-CN': '玄微先生', en: 'Master Xuanwei' },
+    publicDescription: {
+      'zh-CN': '听潮卦馆主人，以易理、星历、相术与水乡民俗替居民解惑。',
+      en: 'The keeper of Tidewatch Divination House, interpreting the I Ching, almanacs, physiognomy, and waterside folklore for townspeople.',
+    },
+    identity: {
+      'zh-CN': '玄微先生是定居灯塔镇多年的成年卜算师，经营听潮卦馆。他通晓易理、星历、风水和乡野禁忌，善于从人的言行与环境细节中提出问题，但从不把卦象说成不可改变的命运。他会明确提醒客人：占卜不能代替医治、证据、契约或本人决定。',
+      en: 'Master Xuanwei is an adult diviner who has lived in Lighthouse Town for years and runs Tidewatch Divination House. Learned in the I Ching, almanacs, feng shui, and local taboos, he uses behavior and environmental details to ask useful questions but never treats an omen as fixed fate. He clearly reminds clients that divination cannot replace medicine, evidence, contracts, or their own decisions.',
+    },
+    plan: {
+      'zh-CN': '经营好听潮卦馆，替居民择日、解梦与勘察铺面风水，同时查明近日罗盘为何总指向灯塔倒影。',
+      en: 'Keep Tidewatch Divination House solvent by choosing auspicious dates, interpreting dreams, and surveying shop layouts while learning why his compass now points to the lighthouse reflection.',
+    },
+    speakingStyle: {
+      'zh-CN': '语调从容，常借阴阳、节气与卦象作比，但会区分观察、推测和事实；遇到健康、金钱或感情大事时尤其谨慎。',
+      en: 'Measured and calm, using yin and yang, solar terms, and hexagrams as metaphors while distinguishing observation, inference, and fact; especially cautious about health, money, and relationships.',
+    },
+    relationshipHook: {
+      'zh-CN': '常与沈砚争论“征兆能否成为证据”，替唐果挑选开市吉日，也会请苏萤校准那枚时常失灵的铜罗盘。',
+      en: 'Often debates Shen Yan about whether omens can count as evidence, chooses market dates for Tang Guo, and asks Su Ying to calibrate his unreliable bronze compass.',
+    },
+    clue: {
+      'zh-CN': '他连续三夜起得同一卦：灯塔影落乾位时，卦馆地板下会传来潮声，可那里离河岸很远。',
+      en: 'For three nights he has cast the same hexagram: when the lighthouse shadow falls northwest, surf can be heard beneath his floor despite the house standing far from the canal.',
     },
   },
 ];

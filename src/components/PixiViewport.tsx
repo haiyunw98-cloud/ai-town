@@ -5,6 +5,7 @@ import { PixiComponent, useApp } from '@pixi/react';
 import { Viewport } from 'pixi-viewport';
 import { Application } from 'pixi.js';
 import { MutableRefObject, ReactNode } from 'react';
+import { initialViewportScale } from './viewportMath';
 
 export type ViewportProps = {
   app: Application;
@@ -31,20 +32,54 @@ export default PixiComponent('Viewport', {
       viewportRef.current = viewport;
     }
     // Activate plugins
+    const minScale = initialViewportScale(
+      props.screenWidth,
+      props.screenHeight,
+      props.worldWidth,
+      props.worldHeight,
+    );
     viewport
       .drag()
       .pinch({})
       .wheel()
       .decelerate()
       .clamp({ direction: 'all', underflow: 'center' })
-      .setZoom(-10)
       .clampZoom({
-        minScale: (1.04 * props.screenWidth) / (props.worldWidth / 2),
+        minScale,
         maxScale: 3.0,
       });
+    viewport.setZoom(minScale, true);
+    viewport.moveCenter(props.worldWidth / 2, props.worldHeight / 2);
     return viewport;
   },
   applyProps(viewport, oldProps: any, newProps: any) {
+    const sizeChanged =
+      oldProps.screenWidth !== newProps.screenWidth ||
+      oldProps.screenHeight !== newProps.screenHeight ||
+      oldProps.worldWidth !== newProps.worldWidth ||
+      oldProps.worldHeight !== newProps.worldHeight;
+
+    if (sizeChanged && newProps.screenWidth > 0 && newProps.screenHeight > 0) {
+      // pixi-viewport's public size fields do not recalculate its hit area or
+      // camera by themselves. The observer panel changes the canvas without a
+      // browser resize, so explicitly resize and reframe the town here.
+      viewport.resize(
+        newProps.screenWidth,
+        newProps.screenHeight,
+        newProps.worldWidth,
+        newProps.worldHeight,
+      );
+      const minScale = initialViewportScale(
+        newProps.screenWidth,
+        newProps.screenHeight,
+        newProps.worldWidth,
+        newProps.worldHeight,
+      );
+      viewport.plugins.get('clamp-zoom')?.options &&
+        (viewport.plugins.get('clamp-zoom')!.options.minScale = minScale);
+      viewport.setZoom(minScale, true);
+      viewport.moveCenter(newProps.worldWidth / 2, newProps.worldHeight / 2);
+    }
     Object.keys(newProps).forEach((p) => {
       if (p !== 'app' && p !== 'viewportRef' && p !== 'children' && oldProps[p] !== newProps[p]) {
         // @ts-expect-error Ignoring TypeScript here

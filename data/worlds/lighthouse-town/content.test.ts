@@ -10,12 +10,22 @@ describe('Lighthouse Town content', () => {
     expect(lighthouseTown.landmarks).toContain('lighthouse');
   });
 
-  test('defines eight unique bilingual residents', () => {
-    expect(lighthouseCharacters).toHaveLength(8);
-    expect(new Set(lighthouseCharacters.map((character) => character.id)).size).toBe(8);
-    expect(new Set(lighthouseCharacters.map((character) => character.sprite)).size).toBe(8);
+  test('defines nine unique bilingual residents', () => {
+    expect(lighthouseCharacters).toHaveLength(9);
+    expect(new Set(lighthouseCharacters.map((character) => character.id)).size).toBe(9);
+    expect(new Set(lighthouseCharacters.map((character) => character.sprite)).size).toBe(9);
     expect(lighthouseCharacters.map((character) => character.name['zh-CN'])).toEqual(
-      expect.arrayContaining(['林澜', '沈砚', '唐果', '墨七', '苏萤', '白露', '顾潮', '阿满']),
+      expect.arrayContaining([
+        '林澜',
+        '沈砚',
+        '唐果',
+        '墨七',
+        '苏萤',
+        '白露',
+        '顾潮',
+        '阿满',
+        '玄微先生',
+      ]),
     );
     for (const character of lighthouseCharacters) {
       expect(character.name['zh-CN']).toBeTruthy();
@@ -29,6 +39,15 @@ describe('Lighthouse Town content', () => {
       expect(character.relationshipHook['zh-CN']).toBeTruthy();
       expect(character.clue['zh-CN']).toBeTruthy();
     }
+  });
+
+  test('keeps the fortune teller grounded and socially connected', () => {
+    const fortuneTeller = lighthouseCharacters.find((character) => character.id === 'xuan-wei');
+    expect(fortuneTeller?.sprite).toBe('f9');
+    expect(fortuneTeller?.identity['zh-CN']).toContain('卜算');
+    expect(fortuneTeller?.identity['zh-CN']).toContain('不能代替');
+    expect(fortuneTeller?.relationshipHook['zh-CN']).toContain('沈砚');
+    expect(fortuneTeller?.plan['zh-CN']).toContain('卦馆');
   });
 
   test('maps residents to the existing Convex description shape', () => {

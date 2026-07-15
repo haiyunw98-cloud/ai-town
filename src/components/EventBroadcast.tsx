@@ -1,11 +1,24 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { Id } from '../../convex/_generated/dataModel';
-import { Locale, useI18n } from '../i18n';
-import { BroadcastSnapshot, buildBroadcastView } from './eventBroadcastView';
+import type { Id } from '../../convex/_generated/dataModel';
+import { useI18n } from '../i18n';
+import type { Locale } from '../i18n';
+import {
+  buildDailyReport,
+  buildBroadcastView,
+  buildTownStory,
+  type BroadcastSnapshot,
+} from './eventBroadcastView';
+import type { GameId } from '../../convex/aiTown/ids';
 
-export default function EventBroadcast({ worldId }: { worldId: Id<'worlds'> }) {
+export default function EventBroadcast({
+  worldId,
+  onSelectResident,
+}: {
+  worldId: Id<'worlds'>;
+  onSelectResident?: (residentId: GameId<'players'>) => void;
+}) {
   const { locale, t } = useI18n();
   const snapshot = useQuery(api.events.observerSnapshot, { worldId }) as
     | BroadcastSnapshot
@@ -20,41 +33,119 @@ export default function EventBroadcast({ worldId }: { worldId: Id<'worlds'> }) {
     return <div className="event-empty">{t('event.loading')}</div>;
   }
   const view = buildBroadcastView(snapshot, locale, now);
+  const story = buildTownStory(snapshot.conversations);
+  const eventCompleted = snapshot.event?.status === 'completed';
+  const exportDailyReport = () => {
+    const report = buildDailyReport(snapshot, locale, Date.now());
+    const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const date = new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(Date.now()).replaceAll('/', '-');
+    anchor.href = url;
+    anchor.download = `灯塔镇观察者日报-${date}.md`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
   return (
     <section className="event-broadcast" aria-label={view.title}>
+      <div className="daily-report-export">
+        <div>
+          <strong>灯塔镇观察者日报</strong>
+          <small>活动、发展、关系与对话自动归纳</small>
+        </div>
+        <button onClick={exportDailyReport} aria-label="导出今日观察者日报">
+          ↓ 导出日报
+        </button>
+      </div>
       {view.mode === 'event' && snapshot.event && (
         <>
-          {snapshot.event.phase === 'announcement' && (
-            <div className="event-poster">
-              <img
-                src="/ai-town/assets/worlds/lighthouse-town/event-poster-v1.png"
-                alt=""
-              />
-              <div className="event-poster-copy">
-                <span>{t('event.specialBroadcast')}</span>
-                <strong>{snapshot.event.name}</strong>
+          {!eventCompleted && (
+            <>
+              <div className="event-poster event-poster-compact">
+                <img
+                  src="/ai-town/assets/worlds/lighthouse-town/event-poster-v1.png"
+                  alt=""
+                />
+                <div className="event-poster-copy">
+                  <span>{t('event.specialBroadcast')}</span>
+                  <strong>{snapshot.event.name}</strong>
+                </div>
+                <div className="event-live-dot">LIVE</div>
               </div>
-            </div>
+              <div className="event-heading lantern-glow">
+                <div>
+                  <span className="event-kicker">{t('event.live')}</span>
+                  <h2>{view.title}</h2>
+                </div>
+                <div className="event-clock" aria-label={t('event.countdown')}>
+                  <span>{view.phaseLabel}</span>
+                  <strong>{view.countdown}</strong>
+                </div>
+              </div>
+              <p className="event-prize"><span>◆</span> {snapshot.event.prize}</p>
+            </>
           )}
-          <div className="event-heading lantern-glow">
-            <div>
-              <span className="event-kicker">{t('event.live')}</span>
-              <h2>{view.title}</h2>
-            </div>
-            <div className="event-clock" aria-label={t('event.countdown')}>
-              <span>{view.phaseLabel}</span>
-              <strong>{snapshot.event.status === 'completed' ? t('event.finished') : view.countdown}</strong>
-            </div>
-          </div>
-          <p className="event-prize"><span>◆</span> {snapshot.event.prize}</p>
-          {view.winnerName && (
+          {eventCompleted && (
+            <details className="event-recap">
+              <summary>
+                <span>上届活动回顾</span>
+                <strong>{view.winnerName ? `${view.winnerName} 获胜` : snapshot.event.name}</strong>
+              </summary>
+              <p>{snapshot.event.prize}</p>
+            </details>
+          )}
+          {view.winnerName && !eventCompleted && (
             <div className="event-winner">{t('event.winner', { name: view.winnerName })}</div>
           )}
-          <div className="event-scoreboard">
+        </>
+      )}
+
+      <div className="town-story">
+        <span className="event-kicker">观察者速报 · 自动归纳</span>
+        <h3>{story.headline}</h3>
+        {story.bullets.length === 0 ? (
+          <p className="event-empty">居民正在生活，新的故事线形成后会出现在这里。</p>
+        ) : (
+          <ul>
+            {story.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}
+          </ul>
+        )}
+      </div>
+
+      <div className="resident-activity">
+        <div className="event-section-title">
+          <h3>{snapshot.residentActivity.length} 人此刻</h3>
+          <span>实时生活状态</span>
+        </div>
+        <div className="resident-activity-grid">
+          {snapshot.residentActivity.map((resident) => (
+            <button
+              key={resident.residentId}
+              onClick={() => onSelectResident?.(resident.residentId as GameId<'players'>)}
+              aria-label={`查看 ${resident.displayName} 并与其交谈`}
+            >
+              <i className={resident.status.includes('交谈') || resident.status.includes('发言') ? 'is-talking' : ''} />
+              <div>
+                <strong>{resident.displayName}</strong>
+                <small>{resident.status} · {resident.detail}</small>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {view.mode === 'event' && snapshot.event && (
+        <details className="event-scoreboard" open={!eventCompleted}>
+          <summary>
             <div className="event-section-title">
               <h3>{t('event.rankings')}</h3>
               <span>{t('event.remaining', { count: view.activeCount })}</span>
             </div>
+          </summary>
             {snapshot.participants.map((participant, index) => (
               <article
                 className={`event-score-row ${participant.active ? '' : 'is-eliminated'}`}
@@ -69,9 +160,36 @@ export default function EventBroadcast({ worldId }: { worldId: Id<'worlds'> }) {
                 <em>{participant.score}</em>
               </article>
             ))}
-          </div>
-        </>
+        </details>
       )}
+
+      <div className="town-conversations">
+        <div className="event-section-title">
+          <h3>居民对话与归纳</h3>
+          <span>{snapshot.conversations.length} 条故事线</span>
+        </div>
+        {snapshot.conversations.map((conversation) => (
+          <article className="town-conversation" key={conversation.conversationId}>
+            <header>
+              <strong>{conversation.participantNames.join(' × ')}</strong>
+              <time>{formatTime(conversation.updatedAt, locale)}</time>
+            </header>
+            <p>{conversation.summary}</p>
+            <details>
+              <summary>展开原始对话（{conversation.messages.length}）</summary>
+              <div className="town-dialogue-list">
+                {conversation.messages.map((message, index) => (
+                  <div key={`${message.createdAt}:${index}`}>
+                    <b>{message.authorName}</b>
+                    <span>{cleanForDisplay(message.text)}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </article>
+        ))}
+      </div>
+
       <div className="event-chronicle">
         <div className="event-section-title">
           <h3>{view.mode === 'event' ? t('event.chronicle') : view.title}</h3>
@@ -87,6 +205,10 @@ export default function EventBroadcast({ worldId }: { worldId: Id<'worlds'> }) {
       </div>
     </section>
   );
+}
+
+function cleanForDisplay(text: string) {
+  return text.replace(/（[^）]*）/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function roleLabel(role: string, locale: Locale) {

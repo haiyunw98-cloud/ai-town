@@ -77,6 +77,7 @@ const people = [
   ['#8a5743', '#d8a77f', '#39292b', '#91b8ad'],
   ['#4e6f62', '#c98f68', '#1f3337', '#b84a3a'],
   ['#6a5378', '#e0b58d', '#352a3b', '#e6b85c'],
+  ['#4f3c68', '#d2a178', '#282331', '#d6ad5b'],
 ];
 
 function personCell(x, y, direction, frame, colors, index) {
@@ -101,7 +102,9 @@ function personCell(x, y, direction, frame, colors, index) {
                   ? `<rect x="10" y="9" width="5" height="3" fill="${accent}"/><rect x="18" y="9" width="5" height="3" fill="${accent}"/><rect x="15" y="10" width="3" height="1" fill="${accent}"/>`
                   : index === 7
                     ? `<path d="M5 8h22L22 3H10z" fill="${accent}"/><rect x="24" y="18" width="4" height="9" fill="${palette.wood}"/>`
-                    : '';
+                    : index === 8
+                      ? `<path d="M7 7h19L21 2H12z" fill="${hair}"/><circle cx="25" cy="7" r="3" fill="${accent}"/><rect x="25" y="10" width="2" height="15" fill="${accent}"/>`
+                      : '';
   const eyes = face
     ? side === 0
       ? `<rect x="12" y="11" width="2" height="2" fill="#302927"/><rect x="19" y="11" width="2" height="2" fill="#302927"/>`
@@ -123,7 +126,7 @@ for (let index = 0; index < people.length; index++) {
   }
 }
 
-const residents = `<svg xmlns="http://www.w3.org/2000/svg" width="384" height="256" viewBox="0 0 384 256" shape-rendering="crispEdges">${personCells.join('')}</svg>`;
+const residents = `<svg xmlns="http://www.w3.org/2000/svg" width="384" height="384" viewBox="0 0 384 384" shape-rendering="crispEdges">${personCells.join('')}</svg>`;
 writeFileSync(resolve(outDir, 'residents.svg'), residents);
 
 console.log(`Generated Lighthouse Town assets in ${outDir}`);

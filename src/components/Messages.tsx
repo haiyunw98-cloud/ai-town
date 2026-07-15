@@ -1,10 +1,10 @@
 import clsx from 'clsx';
-import { Doc, Id } from '../../convex/_generated/dataModel';
+import type { Doc, Id } from '../../convex/_generated/dataModel';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { MessageInput } from './MessageInput';
-import { Player } from '../../convex/aiTown/player';
-import { Conversation } from '../../convex/aiTown/conversation';
+import type { Player } from '../../convex/aiTown/player';
+import type { Conversation } from '../../convex/aiTown/conversation';
 import { useEffect, useRef } from 'react';
 import { useI18n } from '../i18n';
 
@@ -43,7 +43,8 @@ export function Messages({
     descriptions?.playerDescriptions.find((p) => p.playerId === currentlyTyping?.playerId)?.name;
 
   const scrollView = scrollViewRef.current;
-  const isScrolledToBottom = useRef(false);
+  // A newly opened conversation should reveal the latest reply and input immediately.
+  const isScrolledToBottom = useRef(true);
   useEffect(() => {
     if (!scrollView) return undefined;
 
@@ -71,10 +72,12 @@ export function Messages({
     return null;
   }
   const messageNodes: { time: number; node: React.ReactNode }[] = messages.map((m) => {
+    const authorLabel =
+      m.author === humanPlayerId ? (locale === 'zh-CN' ? '你（Me）' : 'You (Me)') : m.authorName;
     const node = (
       <div key={`text-${m._id}`} className="leading-tight mb-6">
         <div className="flex gap-4">
-          <span className="uppercase flex-grow">{m.authorName}</span>
+          <span className="uppercase flex-grow">{authorLabel}</span>
           <time dateTime={m._creationTime.toString()}>
             {new Date(m._creationTime).toLocaleString(locale)}
           </time>

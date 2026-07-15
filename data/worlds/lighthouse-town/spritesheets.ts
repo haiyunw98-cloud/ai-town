@@ -6,5 +6,6 @@ import { data as f5 } from '../../spritesheets/f5';
 import { data as f6 } from '../../spritesheets/f6';
 import { data as f7 } from '../../spritesheets/f7';
 import { data as f8 } from '../../spritesheets/f8';
+import { data as f9 } from '../../spritesheets/f9';
 
-export const lighthouseSpritesheets = { f1, f2, f3, f4, f5, f6, f7, f8 };
+export const lighthouseSpritesheets = { f1, f2, f3, f4, f5, f6, f7, f8, f9 };

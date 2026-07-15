@@ -5,7 +5,7 @@ import { useConvex, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 // import { SignInButton } from '@clerk/clerk-react';
 import { ConvexError } from 'convex/values';
-import { Id } from '../../../convex/_generated/dataModel';
+import type { Id } from '../../../convex/_generated/dataModel';
 import { useCallback } from 'react';
 import { waitForInput } from '../../hooks/sendInput';
 import { useServerGame } from '../../hooks/serverGame';

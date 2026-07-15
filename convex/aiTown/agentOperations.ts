@@ -1,5 +1,6 @@
 import { v } from 'convex/values';
-import { internalAction } from '../_generated/server';
+import type { MutationCtx } from '../_generated/server';
+import { internalAction, internalMutation, internalQuery } from '../_generated/server';
 import { WorldMap, serializedWorldMap } from './worldMap';
 import { rememberConversation } from '../agent/memory';
 import { GameId, agentId, conversationId, playerId } from './ids';
@@ -10,10 +11,95 @@ import {
 } from '../agent/conversation';
 import { assertNever } from '../util/assertNever';
 import { serializedAgent } from './agent';
-import { ACTIVITIES, ACTIVITY_COOLDOWN, CONVERSATION_COOLDOWN } from '../constants';
+import {
+  ACTIVITY_COOLDOWN,
+  CONVERSATION_COOLDOWN,
+  PLAYER_CONVERSATION_COOLDOWN,
+} from '../constants';
 import { api, internal } from '../_generated/api';
 import { sleep } from '../util/sleep';
 import { serializedPlayer } from './player';
+import { pickResidentActivity } from '../../data/worlds/lighthouse-town/activities';
+import { insertInput } from './insertInput';
+import { distance } from '../util/geometry';
+import { townLandmarkById } from '../../data/worlds/lighthouse-town/map';
+
+export async function runAgentOperation(ctx: MutationCtx, operation: string, args: any) {
+  let reference;
+  switch (operation) {
+    case 'agentRememberConversation':
+      reference = internal.aiTown.agentOperations.agentRememberConversation;
+      break;
+    case 'agentGenerateMessage':
+      reference = internal.aiTown.agentOperations.agentGenerateMessage;
+      break;
+    case 'agentDoSomething':
+      reference = internal.aiTown.agentOperations.agentDoSomething;
+      break;
+    default:
+      throw new Error(`Unknown operation: ${operation}`);
+  }
+  await ctx.scheduler.runAfter(0, reference, args);
+}
+
+export const agentSendMessage = internalMutation({
+  args: {
+    worldId: v.id('worlds'),
+    conversationId,
+    agentId,
+    playerId,
+    text: v.string(),
+    messageUuid: v.string(),
+    leaveConversation: v.boolean(),
+    operationId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert('messages', {
+      conversationId: args.conversationId,
+      author: args.playerId,
+      text: args.text,
+      messageUuid: args.messageUuid,
+      worldId: args.worldId,
+    });
+    await insertInput(ctx, args.worldId, 'agentFinishSendingMessage', {
+      conversationId: args.conversationId,
+      agentId: args.agentId,
+      timestamp: Date.now(),
+      leaveConversation: args.leaveConversation,
+      operationId: args.operationId,
+    });
+  },
+});
+
+export const findConversationCandidate = internalQuery({
+  args: {
+    now: v.number(),
+    worldId: v.id('worlds'),
+    player: v.object(serializedPlayer),
+    otherFreePlayers: v.array(v.object(serializedPlayer)),
+  },
+  handler: async (ctx, { now, worldId, player, otherFreePlayers }) => {
+    const { position } = player;
+    const candidates = [];
+
+    for (const otherPlayer of otherFreePlayers) {
+      const lastMember = await ctx.db
+        .query('participatedTogether')
+        .withIndex('edge', (q) =>
+          q.eq('worldId', worldId).eq('player1', player.id).eq('player2', otherPlayer.id),
+        )
+        .order('desc')
+        .first();
+      if (lastMember && now < lastMember.ended + PLAYER_CONVERSATION_COOLDOWN) {
+        continue;
+      }
+      candidates.push({ id: otherPlayer.id, position: otherPlayer.position });
+    }
+
+    candidates.sort((a, b) => distance(a.position, position) - distance(b.position, position));
+    return candidates[0]?.id;
+  },
+});
 
 export const agentRememberConversation = internalAction({
   args: {
@@ -77,7 +163,7 @@ export const agentGenerateMessage = internalAction({
       args.otherPlayerId as GameId<'players'>,
     );
 
-    await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+    await ctx.runMutation(internal.aiTown.agentOperations.agentSendMessage, {
       worldId: args.worldId,
       conversationId: args.conversationId,
       agentId: args.agentId,
@@ -97,6 +183,7 @@ export const agentDoSomething = internalAction({
     agent: v.object(serializedAgent),
     map: v.object(serializedWorldMap),
     otherFreePlayers: v.array(v.object(serializedPlayer)),
+    residentName: v.string(),
     operationId: v.string(),
   },
   handler: async (ctx, args) => {
@@ -124,22 +211,31 @@ export const agentDoSomething = internalAction({
           },
         });
         return;
-      } else {
-        // TODO: have LLM choose the activity & emoji
-        const activity = ACTIVITIES[Math.floor(Math.random() * ACTIVITIES.length)];
-        await sleep(Math.random() * 1000);
+          } else {
+            const activity = pickResidentActivity(args.residentName);
+            const landmark = townLandmarkById(activity.landmarkId);
+            const locatedActivity = `在${landmark.name}：${activity.description}`;
+            await sleep(Math.random() * 1000);
         await ctx.runMutation(api.aiTown.main.sendInput, {
           worldId: args.worldId,
           name: 'finishDoSomething',
           args: {
             operationId: args.operationId,
-            agentId: agent.id,
-            activity: {
-              description: activity.description,
-              emoji: activity.emoji,
-              until: Date.now() + activity.duration,
+                agentId: agent.id,
+                destination: landmark.destination,
+                activity: {
+                  description: locatedActivity,
+                  emoji: activity.emoji,
+                  until: Date.now() + activity.duration + 60_000,
             },
           },
+        });
+        await ctx.runMutation(internal.lives.recordActivity, {
+          worldId: args.worldId,
+              residentId: player.id,
+              kind: activity.category,
+              text: locatedActivity,
+          createdAt: Date.now(),
         });
         return;
       }
@@ -147,7 +243,7 @@ export const agentDoSomething = internalAction({
     const invitee =
       justLeftConversation || recentlyAttemptedInvite
         ? undefined
-        : await ctx.runQuery(internal.aiTown.agent.findConversationCandidate, {
+        : await ctx.runQuery(internal.aiTown.agentOperations.findConversationCandidate, {
             now,
             worldId: args.worldId,
             player: args.player,

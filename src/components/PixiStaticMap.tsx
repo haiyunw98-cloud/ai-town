@@ -1,11 +1,12 @@
 import { PixiComponent, applyDefaultProps } from '@pixi/react';
 import * as PIXI from 'pixi.js';
-import { AnimatedSprite, WorldMap } from '../../convex/aiTown/worldMap';
+import type { AnimatedSprite, WorldMap } from '../../convex/aiTown/worldMap';
 import * as campfire from '../../data/animations/campfire.json';
 import * as gentlesparkle from '../../data/animations/gentlesparkle.json';
 import * as gentlewaterfall from '../../data/animations/gentlewaterfall.json';
 import * as gentlesplash from '../../data/animations/gentlesplash.json';
 import * as windmill from '../../data/animations/windmill.json';
+import { worldArtForMap } from './worldArt';
 
 const animations = {
   'campfire.json': { spritesheet: campfire, url: '/ai-town/assets/spritesheets/campfire.png' },
@@ -44,7 +45,15 @@ export const PixiStaticMap = PixiComponent('StaticMap', {
     const screenytiles = map.bgTiles[0][0].length;
 
     const container = new PIXI.Container();
-    const allLayers = [...map.bgTiles, ...map.objectTiles];
+    const worldArt = worldArtForMap(map.tileSetUrl);
+    if (worldArt) {
+      const art = PIXI.Sprite.from(worldArt.url);
+      art.width = screenxtiles * map.tileDim;
+      art.height = screenytiles * map.tileDim;
+      art.alpha = worldArt.backgroundAlpha;
+      container.addChild(art);
+    }
+    const allLayers = worldArt ? [] : [...map.bgTiles, ...map.objectTiles];
 
     // blit bg & object layers of map onto canvas
     for (let i = 0; i < screenxtiles * screenytiles; i++) {

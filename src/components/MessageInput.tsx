@@ -2,10 +2,10 @@ import clsx from 'clsx';
 import { useMutation, useQuery } from 'convex/react';
 import { KeyboardEvent, useRef } from 'react';
 import { api } from '../../convex/_generated/api';
-import { Id } from '../../convex/_generated/dataModel';
+import type { Id } from '../../convex/_generated/dataModel';
 import { useSendInput } from '../hooks/sendInput';
-import { Player } from '../../convex/aiTown/player';
-import { Conversation } from '../../convex/aiTown/conversation';
+import type { Player } from '../../convex/aiTown/player';
+import type { Conversation } from '../../convex/aiTown/conversation';
 import { useI18n } from '../i18n';
 
 export function MessageInput({

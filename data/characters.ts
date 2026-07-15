@@ -54,6 +54,12 @@ export const characters = [
     spritesheetData: lighthouseSpritesheets.f8,
     speed: 0.1,
   },
+  {
+    name: 'f9',
+    textureUrl: '/ai-town/assets/worlds/lighthouse-town/residents.svg',
+    spritesheetData: lighthouseSpritesheets.f9,
+    speed: 0.1,
+  },
 ];
 
 // Characters move at 0.75 tiles per second.

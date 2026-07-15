@@ -1,8 +1,7 @@
 import { ObjectType, v } from 'convex/values';
 import { GameId, parseGameId } from './ids';
 import { agentId, conversationId, playerId } from './ids';
-import { serializedPlayer } from './player';
-import { Game } from './game';
+import type { Game } from './game';
 import {
   ACTION_TIMEOUT,
   AWKWARD_CONVERSATION_TIMEOUT,
@@ -14,14 +13,11 @@ import {
   MAX_CONVERSATION_MESSAGES,
   MESSAGE_COOLDOWN,
   MIDPOINT_THRESHOLD,
-  PLAYER_CONVERSATION_COOLDOWN,
 } from '../constants';
-import { FunctionArgs } from 'convex/server';
-import { MutationCtx, internalMutation, internalQuery } from '../_generated/server';
+import type { FunctionArgs } from 'convex/server';
 import { distance } from '../util/geometry';
-import { internal } from '../_generated/api';
+import type { internal } from '../_generated/api';
 import { movePlayer } from './movement';
-import { insertInput } from './insertInput';
 
 export class Agent {
   id: GameId<'agents'>;
@@ -68,7 +64,7 @@ export class Agent {
     const recentlyAttemptedInvite =
       this.lastInviteAttempt && now < this.lastInviteAttempt + CONVERSATION_COOLDOWN;
     const doingActivity = player.activity && player.activity.until > now;
-    if (doingActivity && (conversation || player.pathfinding)) {
+    if (doingActivity && conversation) {
       player.activity!.until = now;
     }
     // If we're not in a conversation, do something.
@@ -76,8 +72,13 @@ export class Agent {
     // If we have been wandering but haven't thought about something to do for
     // a while, do something.
     if (!conversation && !doingActivity && (!player.pathfinding || !recentlyAttemptedInvite)) {
+      const playerDescription = game.playerDescriptions.get(player.id);
+      if (!playerDescription) {
+        throw new Error(`No player description for ${player.id}`);
+      }
       this.startOperation(game, now, 'agentDoSomething', {
         worldId: game.worldId,
+        residentName: playerDescription.name,
         player: player.serialize(),
         otherFreePlayers: [...game.world.players.values()]
           .filter((p) => p.id !== player.id)
@@ -285,84 +286,3 @@ export const serializedAgent = {
 export type SerializedAgent = ObjectType<typeof serializedAgent>;
 
 type AgentOperations = typeof internal.aiTown.agentOperations;
-
-export async function runAgentOperation(ctx: MutationCtx, operation: string, args: any) {
-  let reference;
-  switch (operation) {
-    case 'agentRememberConversation':
-      reference = internal.aiTown.agentOperations.agentRememberConversation;
-      break;
-    case 'agentGenerateMessage':
-      reference = internal.aiTown.agentOperations.agentGenerateMessage;
-      break;
-    case 'agentDoSomething':
-      reference = internal.aiTown.agentOperations.agentDoSomething;
-      break;
-    default:
-      throw new Error(`Unknown operation: ${operation}`);
-  }
-  await ctx.scheduler.runAfter(0, reference, args);
-}
-
-export const agentSendMessage = internalMutation({
-  args: {
-    worldId: v.id('worlds'),
-    conversationId,
-    agentId,
-    playerId,
-    text: v.string(),
-    messageUuid: v.string(),
-    leaveConversation: v.boolean(),
-    operationId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await ctx.db.insert('messages', {
-      conversationId: args.conversationId,
-      author: args.playerId,
-      text: args.text,
-      messageUuid: args.messageUuid,
-      worldId: args.worldId,
-    });
-    await insertInput(ctx, args.worldId, 'agentFinishSendingMessage', {
-      conversationId: args.conversationId,
-      agentId: args.agentId,
-      timestamp: Date.now(),
-      leaveConversation: args.leaveConversation,
-      operationId: args.operationId,
-    });
-  },
-});
-
-export const findConversationCandidate = internalQuery({
-  args: {
-    now: v.number(),
-    worldId: v.id('worlds'),
-    player: v.object(serializedPlayer),
-    otherFreePlayers: v.array(v.object(serializedPlayer)),
-  },
-  handler: async (ctx, { now, worldId, player, otherFreePlayers }) => {
-    const { position } = player;
-    const candidates = [];
-
-    for (const otherPlayer of otherFreePlayers) {
-      // Find the latest conversation we're both members of.
-      const lastMember = await ctx.db
-        .query('participatedTogether')
-        .withIndex('edge', (q) =>
-          q.eq('worldId', worldId).eq('player1', player.id).eq('player2', otherPlayer.id),
-        )
-        .order('desc')
-        .first();
-      if (lastMember) {
-        if (now < lastMember.ended + PLAYER_CONVERSATION_COOLDOWN) {
-          continue;
-        }
-      }
-      candidates.push({ id: otherPlayer.id, position });
-    }
-
-    // Sort by distance and take the nearest candidate.
-    candidates.sort((a, b) => distance(a.position, position) - distance(b.position, position));
-    return candidates[0]?.id;
-  },
-});

@@ -45,3 +45,6 @@ convex_local*
 
 # Local brainstorming companion output
 .superpowers/
+
+# Local Convex observer-history exports
+backups/

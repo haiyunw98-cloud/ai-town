@@ -1,12 +1,14 @@
 # 灯塔镇 AI Town
 
-灯塔镇是基于 [a16z-infra/ai-town](https://github.com/a16z-infra/ai-town) 的中文化衍生版本。默认世界是一座架空江南水乡：五名 AI 居民在茶馆、书院、工坊、码头和中央灯塔之间生活、交谈并形成长期记忆。界面支持中英切换，代理对话语言由部署环境统一配置。
+灯塔镇是基于 [a16z-infra/ai-town](https://github.com/a16z-infra/ai-town) 的中文化衍生版本。默认世界是一座架空江南水乡：九名 AI 居民在茶馆、书院、工坊、百草铺、灯笼坊、鱼市、卦馆、码头和中央灯塔之间生活、交谈并形成长期记忆。界面支持中英切换，代理对话语言由部署环境统一配置。
 
 ## 已完成的改造
 
 - 默认简体中文界面，可在页面底部切换英文。
-- 五名原创居民：林澜、沈砚、唐果、墨七、苏萤。
+- 九名原创居民：林澜、沈砚、唐果、墨七、苏萤、白露、顾潮、阿满、玄微先生。
 - 原创灯塔镇地图、江南瓦片和八组四方向人物像素素材。
+- Image 2 视觉方向与活动插画，地图运行资产仍由可复现 SVG 生成器输出。
+- 内置「灯塔镇百万金贝寻宝赛」以及观察者排行榜、倒计时和本地镇志。
 - 日常生活为主线，雾潮与“无海航路”为缓慢展开的谜团暗线。
 - 支持 Ollama、OpenAI、Together.ai 和通用 OpenAI-compatible 服务。
 - 支持 Convex Cloud 与 Docker 自托管 Convex。
@@ -41,7 +43,7 @@ npm run dev
 npx convex env set WORLD_LOCALE zh-CN
 npx convex env set LLM_PROVIDER ollama
 npx convex env set OLLAMA_HOST http://127.0.0.1:11434
-npx convex env set OLLAMA_MODEL qwen3.5:9b
+npx convex env set OLLAMA_MODEL gemma4:12b
 npx convex env set OLLAMA_EMBEDDING_MODEL mxbai-embed-large
 npx convex env set OLLAMA_EMBEDDING_DIMENSION 1024
 ```
@@ -91,17 +93,17 @@ LLM_PROVIDER=custom
 
 ### Ollama：本地 Qwen 或 Gemma
 
-推荐灯塔镇使用中文能力更强的 Qwen。模型标签必须与 `ollama list` 完全一致：
+模型标签必须与 `ollama list` 完全一致。本地已经安装 Gemma 12B 时可以直接使用：
 
 ```bash
 npx convex env set LLM_PROVIDER ollama
-npx convex env set OLLAMA_MODEL qwen3.5:9b
+npx convex env set OLLAMA_MODEL gemma4:12b
 ```
 
-切换到 Gemma 示例：
+切换到 Qwen 示例：
 
 ```bash
-npx convex env set OLLAMA_MODEL gemma3:12b
+npx convex env set OLLAMA_MODEL qwen3.5:9b
 ```
 
 聊天模型不能代替记忆检索所需的嵌入模型。默认使用 `mxbai-embed-large`；也可以改成其他嵌入模型，但必须同步设置其真实维度。
@@ -169,6 +171,26 @@ npm run validate:world
 ```
 
 修改角色或地图后，已有 Convex 世界不会自动被覆盖；请阅读上一节的数据清理风险再重新初始化。
+
+## 观察记录与百万金贝寻宝赛
+
+页面右侧默认打开「赛事直播」。活动尚未创建时，它会显示「灯塔镇镇志」，读取本地 Convex 中已经保存的居民对话；活动开始后显示八人排行榜、金贝数、阶段倒计时、公开采访和淘汰记录。选择「居民详情」仍可查看单个居民及其对话。
+
+首场活动会在八名居民全部初始化后自动公布，也可以手动检查或创建：
+
+```bash
+npx convex run events:ensureFirstEvent '{}'
+npx convex run events:observerSnapshot '{}'
+```
+
+迁移角色或地图前，建议先备份本地观察记录：
+
+```bash
+mkdir -p backups
+npx convex export --path backups/lighthouse-town-before-migration.zip
+```
+
+`backups/` 已被 Git 忽略。当前工作区迁移前的旧五人世界记录保存在 `backups/lighthouse-town-before-eight-residents.zip`，可使用 `npx convex import` 恢复到单独部署中查看。
 
 ## 测试
 
