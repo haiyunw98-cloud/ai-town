@@ -231,6 +231,99 @@ describe('event broadcast view model', () => {
     expect(report).not.toMatch(/因此导致|内心认为|形成派系|社会中心|证明了/);
   });
 
+  test('maps runtime resident ids from localized activity names before attributing records', () => {
+    const now = new Date(1970, 0, 2, 12).getTime();
+    const at = (hour: number) => new Date(1970, 0, 2, hour).getTime();
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [{
+          conversationId: 'c:runtime',
+          participantNames: ['Lin Lan', 'Su Ying'],
+          summary: 'Runtime identity conversation.',
+          updatedAt: at(10),
+          messages: [],
+        }],
+        residentActivity: [
+          { residentId: 'p:0', displayName: 'Lin Lan', status: 'On duty', detail: 'Checking the light' },
+        ],
+        dailyLifeEvents: [
+          { residentId: 'p:0', displayName: 'Resident', kind: 'work', text: 'Runtime ID life record', createdAt: at(8) },
+        ],
+        dailyMessages: [
+          {
+            messageId: 'm:runtime',
+            conversationId: 'c:runtime',
+            authorId: 'p:0',
+            authorName: 'Resident',
+            text: 'Runtime ID dialogue',
+            createdAt: at(9),
+            observerIntervention: false,
+          },
+        ],
+      },
+      'zh-CN',
+      now,
+    );
+    const residentSection = report.slice(
+      report.indexOf('## 居民逐人记录'),
+      report.indexOf('## 关系记录'),
+    );
+    const linLan = residentSection.slice(
+      residentSection.indexOf('### 林澜'),
+      residentSection.indexOf('### 沈砚'),
+    );
+    const suYing = residentSection.slice(
+      residentSection.indexOf('### 苏萤'),
+      residentSection.indexOf('### 白露'),
+    );
+
+    expect(linLan).toContain('On duty');
+    expect(linLan).toContain('Runtime ID life record');
+    expect(suYing).not.toContain('Runtime ID life record');
+    expect(report).toContain('[p:0] 林澜：“Runtime ID dialogue”');
+    expect(report).toContain('[p:0] 林澜｜Runtime ID dialogue');
+  });
+
+  test('escapes hostile dynamic text without corrupting later Markdown sections', () => {
+    const now = new Date(1970, 0, 2, 12).getTime();
+    const hostile = '<!-- A&B # heading `code` | *bold* [link](url) {x} + - . ! \\ -->\nnext';
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [{
+          eventKey: hostile,
+          sequence: 1,
+          kind: 'hostile',
+          text: hostile,
+          createdAt: now,
+        }],
+        conversations: [{
+          conversationId: 'c:hostile',
+          participantNames: [hostile, '苏萤'],
+          summary: hostile,
+          updatedAt: now,
+          messages: [{ authorName: hostile, text: hostile, createdAt: now }],
+        }],
+        residentActivity: [{ residentId: 'p:hostile', displayName: 'Lin Lan', status: hostile, detail: hostile }],
+        dailyLifeEvents: [{ residentId: 'p:hostile', displayName: hostile, kind: 'work', text: hostile, createdAt: now }],
+        dailyMessages: [],
+      },
+      'zh-CN',
+      now,
+    );
+
+    expect(report).not.toContain('<!--');
+    expect(report).toContain('&lt;\\!\\-\\- A&amp;B \\# heading');
+    expect(report).toContain('\\`code\\`');
+    expect(report).toContain('\\| \\*bold\\* \\[link\\]\\(url\\) \\{x\\} \\+ \\- \\. \\!');
+    expect(report).toContain(' / next');
+    expect(report.match(/^## .+$/gm)?.at(-1)).toBe('## 数据说明');
+  });
+
   test('prefers known resident ids and falls back to names only for unrecognized ids', () => {
     const now = new Date(1970, 0, 2, 12).getTime();
     const at = (hour: number) => new Date(1970, 0, 2, hour).getTime();
@@ -314,9 +407,9 @@ describe('event broadcast view model', () => {
     expect(suYing).not.toContain('ID 优先生活记录');
     expect(suYing).toContain('姓名回退状态');
     expect(suYing).toContain('姓名回退生活记录');
-    expect(rawMessages).toContain('[lin-lan] 林澜｜ID 优先原始消息');
+    expect(rawMessages).toContain('[lin\\-lan] 林澜｜ID 优先原始消息');
     expect(rawMessages).toContain('[p:unknown] 苏萤｜姓名回退原始消息');
-    expect(conversations).toContain('[lin-lan] 林澜：“ID 优先原始消息”');
+    expect(conversations).toContain('[lin\\-lan] 林澜：“ID 优先原始消息”');
     expect(conversations).not.toContain('苏萤：“ID 优先原始消息”');
     expect(conversations).toContain('苏萤：“仅姓名旧消息”');
   });
