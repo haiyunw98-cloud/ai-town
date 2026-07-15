@@ -4,7 +4,7 @@ import {
   sanitizeProviderError,
 } from './llmConfig';
 
-export { EMBEDDING_DIMENSION } from './llmConfig';
+export { EMBEDDING_DIMENSION } from './embeddingDimension';
 export type { LLMConfig } from './llmConfig';
 
 export function detectMismatchedLLMProvider() {
@@ -59,7 +59,10 @@ export async function chatCompletion(
         ...authHeaders(config),
       },
 
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...body,
+        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+      }),
     });
     if (!result.ok) {
       const error = sanitizeProviderError(await result.text());

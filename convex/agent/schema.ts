@@ -1,7 +1,7 @@
 import { v } from 'convex/values';
 import { playerId, conversationId } from '../aiTown/ids';
 import { defineTable } from 'convex/server';
-import { EMBEDDING_DIMENSION } from '../util/llm';
+import { EMBEDDING_DIMENSION } from '../util/embeddingDimension';
 
 export const memoryFields = {
   playerId,

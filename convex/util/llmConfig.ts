@@ -7,6 +7,7 @@ export interface LLMConfig {
   chatModel: string;
   embeddingModel: string;
   embeddingDimension: number;
+  reasoningEffort?: 'none';
   stopWords: string[];
   apiKey: string | undefined;
 }
@@ -131,6 +132,7 @@ export function resolveLLMConfig(env: Env = process.env): LLMConfig {
     chatModel: env.OLLAMA_MODEL ?? 'qwen3.5:9b',
     embeddingModel: env.OLLAMA_EMBEDDING_MODEL ?? 'mxbai-embed-large',
     embeddingDimension,
+    reasoningEffort: 'none',
     stopWords: ['<|eot_id|>', '<|im_end|>'],
     apiKey: undefined,
   };
@@ -142,5 +144,3 @@ export function sanitizeProviderError(value: string): string {
     .replace(/\bsk-[a-zA-Z0-9_-]+\b/g, '[REDACTED]')
     .slice(0, 500);
 }
-
-export const EMBEDDING_DIMENSION = resolveEmbeddingDimension();

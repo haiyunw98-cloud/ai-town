@@ -13,6 +13,7 @@ describe('resolveLLMConfig', () => {
         chatModel: 'qwen3.5:9b',
         embeddingModel: 'mxbai-embed-large',
         embeddingDimension: 1024,
+        reasoningEffort: 'none',
         apiKey: undefined,
       }),
     );
