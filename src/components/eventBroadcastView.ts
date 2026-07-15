@@ -268,13 +268,19 @@ function conversationExcerptMessages(conversation: Conversation, data: DailyRepo
     .slice(-4);
 }
 
+function conversationExcerptAuthor(message: DailyMessage | Conversation['messages'][number]) {
+  return 'authorId' in message
+    ? residentIdentity(message.authorId, message.authorName)
+    : cleanMarkdown(message.authorName);
+}
+
 function buildConversationsSection(data: DailyReportData) {
   const lines: string[] = [];
   for (const conversation of data.conversations) {
     lines.push(`### ${conversation.participantNames.map(cleanMarkdown).join(' × ')}`, '');
     lines.push(`- 摘要：${cleanMarkdown(conversation.summary)}`);
     const excerpts = conversationExcerptMessages(conversation, data).map(
-      (message) => `${cleanMarkdown(message.authorName)}：“${cleanMarkdown(message.text).slice(0, 100)}”`,
+      (message) => `${conversationExcerptAuthor(message)}：“${cleanMarkdown(message.text).slice(0, 100)}”`,
     );
     lines.push(excerpts.length > 0 ? `- 对话摘录：${excerpts.join('；')}` : '- 对话摘录：当日无记录');
     lines.push('');

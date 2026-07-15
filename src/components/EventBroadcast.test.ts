@@ -239,7 +239,22 @@ describe('event broadcast view model', () => {
         event: null,
         participants: [],
         logs: [],
-        conversations: [],
+        conversations: [
+          {
+            conversationId: 'c:1',
+            participantNames: ['林澜', '苏萤'],
+            summary: '矛盾身份记录测试。',
+            updatedAt: at(11),
+            messages: [],
+          },
+          {
+            conversationId: 'c:legacy',
+            participantNames: ['苏萤', '顾潮'],
+            summary: '仅姓名旧消息测试。',
+            updatedAt: at(9),
+            messages: [{ authorName: '苏萤', text: '仅姓名旧消息', createdAt: at(9) }],
+          },
+        ],
         residentActivity: [
           { residentId: 'lin-lan', displayName: '苏萤', status: 'ID 优先状态', detail: '来自矛盾记录' },
           { residentId: 'p:unknown', displayName: '苏萤', status: '姓名回退状态', detail: '来自未识别 ID' },
@@ -288,6 +303,10 @@ describe('event broadcast view model', () => {
       report.indexOf('## 原始对话附录'),
       report.indexOf('## 数据说明'),
     );
+    const conversations = report.slice(
+      report.indexOf('## 当日对话'),
+      report.indexOf('## 赛事与公共事件'),
+    );
 
     expect(linLan).toContain('ID 优先状态');
     expect(linLan).toContain('ID 优先生活记录');
@@ -297,6 +316,9 @@ describe('event broadcast view model', () => {
     expect(suYing).toContain('姓名回退生活记录');
     expect(rawMessages).toContain('[lin-lan] 林澜｜ID 优先原始消息');
     expect(rawMessages).toContain('[p:unknown] 苏萤｜姓名回退原始消息');
+    expect(conversations).toContain('[lin-lan] 林澜：“ID 优先原始消息”');
+    expect(conversations).not.toContain('苏萤：“ID 优先原始消息”');
+    expect(conversations).toContain('苏萤：“仅姓名旧消息”');
   });
 
   test('uses the latest four same-day raw messages in chronological order', () => {
@@ -340,7 +362,7 @@ describe('event broadcast view model', () => {
     );
     expect(conversationSection).not.toContain('第一条。');
     expect(report).not.toContain('昨日消息。');
-    expect(conversationSection).toContain('顾潮：“第二条。”；顾潮：“第三条。”；顾潮：“第四条。”；顾潮：“第五条。”');
+    expect(conversationSection).toContain('[p:1] 顾潮：“第二条。”；[p:1] 顾潮：“第三条。”；[p:1] 顾潮：“第四条。”；[p:1] 顾潮：“第五条。”');
     expect(report).toContain('第一条。');
   });
 
