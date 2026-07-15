@@ -29,12 +29,28 @@ const running: BroadcastSnapshot = {
   logs: [],
   conversations: [],
   residentActivity: [],
+  dailyMessages: [{
+    messageId: 'm:1',
+    conversationId: 'c:1',
+    authorId: 'p:1',
+    authorName: '顾潮',
+    text: '今晚去机关坊试灯。',
+    createdAt: 21_000,
+    observerIntervention: false,
+  }],
 };
 
 describe('event broadcast view model', () => {
   test('uses town chronicle mode before an event exists', () => {
     const view = buildBroadcastView(
-      { event: null, participants: [], logs: [], conversations: [], residentActivity: [] },
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [],
+      },
       'zh-CN',
       10_000,
     );
@@ -115,5 +131,6 @@ describe('event broadcast view model', () => {
     expect(report).toContain('关系进展');
     expect(report).toContain('## 重要对话');
     expect(report).toContain('顾潮 × 苏萤');
+    expect(report).toContain('顾潮：“今晚去机关坊试灯。”');
   });
 });

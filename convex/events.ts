@@ -73,7 +73,15 @@ export const observerSnapshot = query({
           .first();
     const worldId = args.worldId ?? worldStatus?.worldId;
     if (!worldId) {
-      return { event: null, participants: [], logs: [], conversations: [], residentActivity: [], dailyLifeEvents: [] };
+      return {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyLifeEvents: [],
+        dailyMessages: [],
+      };
     }
     const descriptions = await ctx.db
       .query('playerDescriptions')
@@ -85,7 +93,7 @@ export const observerSnapshot = query({
       .filter((q) => q.eq(q.field('worldId'), worldId))
       .collect())
       .sort((left, right) => right.createdAt - left.createdAt)
-      .slice(0, 200)
+      .slice(0, 500)
       .map((entry) => ({
         residentId: entry.residentId,
         displayName: names.get(entry.residentId) ?? '居民',
@@ -97,7 +105,16 @@ export const observerSnapshot = query({
       .query('messages')
       .filter((q) => q.eq(q.field('worldId'), worldId))
       .order('desc')
-      .take(80);
+      .take(500);
+    const dailyMessages = messages.map((message) => ({
+      messageId: String(message._id),
+      conversationId: message.conversationId,
+      authorId: message.author,
+      authorName: names.get(message.author) ?? (message.author.startsWith('p:') ? '居民' : '观察者'),
+      text: message.text,
+      createdAt: message._creationTime,
+      observerIntervention: !names.has(message.author),
+    }));
     const world = await ctx.db.get(worldId);
     const conversations = groupConversationMessages(messages, names, world?.conversations ?? []);
     const residentActivity = buildResidentActivity(world?.players ?? [], world?.conversations ?? [], names);
@@ -113,6 +130,7 @@ export const observerSnapshot = query({
         conversations,
         residentActivity,
         dailyLifeEvents,
+        dailyMessages,
         logs: messages.map((message, index) => ({
           eventKey: `message:${message._id}`,
           sequence: index,
@@ -157,6 +175,7 @@ export const observerSnapshot = query({
       conversations,
       residentActivity,
       dailyLifeEvents,
+      dailyMessages,
     };
   },
 });

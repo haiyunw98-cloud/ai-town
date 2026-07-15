@@ -45,6 +45,15 @@ export type BroadcastSnapshot = {
     status: string;
     detail: string;
   }>;
+  dailyMessages: Array<{
+    messageId: string;
+    conversationId: string;
+    authorId: string;
+    authorName: string;
+    text: string;
+    createdAt: number;
+    observerIntervention: boolean;
+  }>;
   dailyLifeEvents?: Array<{
     residentId: string;
     displayName: string;
@@ -124,7 +133,11 @@ export function buildDailyReport(
       lines.push(`### ${conversation.participantNames.join(' × ')}`);
       lines.push('');
       lines.push(`- 摘要：${cleanMarkdown(conversation.summary)}`);
-      const excerpts = conversation.messages.slice(-4).map(
+      const originalMessages = snapshot.dailyMessages.filter(
+        (message) => message.conversationId === conversation.conversationId
+          && sameLocalDay(message.createdAt, now),
+      );
+      const excerpts = (originalMessages.length > 0 ? originalMessages : conversation.messages).map(
         (message) => `${message.authorName}：“${cleanMarkdown(message.text).slice(0, 100)}”`,
       );
       if (excerpts.length > 0) lines.push(`- 对话摘录：${excerpts.join('；')}`);
