@@ -44,7 +44,7 @@ export default function EventBroadcast({
       year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(Date.now()).replaceAll('/', '-');
     anchor.href = url;
-    anchor.download = `灯塔镇观察者日报-${date}.md`;
+    anchor.download = `灯塔镇完整观察日报-${date}.md`;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
@@ -54,11 +54,11 @@ export default function EventBroadcast({
     <section className="event-broadcast" aria-label={view.title}>
       <div className="daily-report-export">
         <div>
-          <strong>灯塔镇观察者日报</strong>
-          <small>活动、发展、关系与对话自动归纳</small>
+          <strong>灯塔镇完整观察日报</strong>
+          <small>人物、关系、地点、活动与原始对话</small>
         </div>
-        <button onClick={exportDailyReport} aria-label="导出今日观察者日报">
-          ↓ 导出日报
+        <button onClick={exportDailyReport} aria-label="导出完整观察日报">
+          ↓ 导出完整日报
         </button>
       </div>
       {view.mode === 'event' && snapshot.event && (

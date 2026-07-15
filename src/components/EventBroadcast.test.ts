@@ -468,4 +468,13 @@ describe('event broadcast view model', () => {
     expect(source).toContain('logs: legacyMessages.map((message, index) => ({');
     expect(source).toContain('const dailyMessages = messages.map((message) => ({');
   });
+
+  test('labels the one-click export as a complete observation report', () => {
+    const source = readFileSync(new URL('./EventBroadcast.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('导出完整日报');
+    expect(source).toContain('人物、关系、地点、活动与原始对话');
+    expect(source).toContain('aria-label="导出完整观察日报"');
+    expect(source).toContain('灯塔镇完整观察日报-');
+  });
 });
