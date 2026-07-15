@@ -231,6 +231,74 @@ describe('event broadcast view model', () => {
     expect(report).not.toMatch(/因此导致|内心认为|形成派系|社会中心|证明了/);
   });
 
+  test('prefers known resident ids and falls back to names only for unrecognized ids', () => {
+    const now = new Date(1970, 0, 2, 12).getTime();
+    const at = (hour: number) => new Date(1970, 0, 2, hour).getTime();
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [
+          { residentId: 'lin-lan', displayName: '苏萤', status: 'ID 优先状态', detail: '来自矛盾记录' },
+          { residentId: 'p:unknown', displayName: '苏萤', status: '姓名回退状态', detail: '来自未识别 ID' },
+        ],
+        dailyLifeEvents: [
+          { residentId: 'lin-lan', displayName: '苏萤', kind: 'work', text: 'ID 优先生活记录', createdAt: at(8) },
+          { residentId: 'p:unknown', displayName: '苏萤', kind: 'work', text: '姓名回退生活记录', createdAt: at(9) },
+        ],
+        dailyMessages: [
+          {
+            messageId: 'm:id-first',
+            conversationId: 'c:1',
+            authorId: 'lin-lan',
+            authorName: '苏萤',
+            text: 'ID 优先原始消息',
+            createdAt: at(10),
+            observerIntervention: false,
+          },
+          {
+            messageId: 'm:name-fallback',
+            conversationId: 'c:1',
+            authorId: 'p:unknown',
+            authorName: '苏萤',
+            text: '姓名回退原始消息',
+            createdAt: at(11),
+            observerIntervention: false,
+          },
+        ],
+      },
+      'zh-CN',
+      now,
+    );
+    const residentSection = report.slice(
+      report.indexOf('## 居民逐人记录'),
+      report.indexOf('## 关系记录'),
+    );
+    const linLan = residentSection.slice(
+      residentSection.indexOf('### 林澜'),
+      residentSection.indexOf('### 沈砚'),
+    );
+    const suYing = residentSection.slice(
+      residentSection.indexOf('### 苏萤'),
+      residentSection.indexOf('### 白露'),
+    );
+    const rawMessages = report.slice(
+      report.indexOf('## 原始对话附录'),
+      report.indexOf('## 数据说明'),
+    );
+
+    expect(linLan).toContain('ID 优先状态');
+    expect(linLan).toContain('ID 优先生活记录');
+    expect(suYing).not.toContain('ID 优先状态');
+    expect(suYing).not.toContain('ID 优先生活记录');
+    expect(suYing).toContain('姓名回退状态');
+    expect(suYing).toContain('姓名回退生活记录');
+    expect(rawMessages).toContain('[lin-lan] 林澜｜ID 优先原始消息');
+    expect(rawMessages).toContain('[p:unknown] 苏萤｜姓名回退原始消息');
+  });
+
   test('uses the latest four same-day raw messages in chronological order', () => {
     const now = new Date(1970, 0, 2, 12).getTime();
     const at = (hour: number) => new Date(1970, 0, 2, hour).getTime();

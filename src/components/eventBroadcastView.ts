@@ -129,18 +129,28 @@ function buildOverviewSection(data: DailyReportData) {
   ]);
 }
 
+function resolveResidentProfile(residentId: string, displayName: string) {
+  return residentLifeProfiles.find((profile) => profile.id === residentId)
+    ?? residentLifeProfiles.find((profile) => profile.name === displayName);
+}
+
+function matchesResidentProfile(profileId: string, residentId: string, displayName: string) {
+  return resolveResidentProfile(residentId, displayName)?.id === profileId;
+}
+
 function residentIdentity(residentId: string, displayName: string) {
-  return residentId ? `[${cleanMarkdown(residentId)}] ${cleanMarkdown(displayName)}` : cleanMarkdown(displayName);
+  const resolvedName = resolveResidentProfile(residentId, displayName)?.name ?? displayName;
+  return residentId ? `[${cleanMarkdown(residentId)}] ${cleanMarkdown(resolvedName)}` : cleanMarkdown(resolvedName);
 }
 
 function buildResidentSection(data: DailyReportData) {
   const lines: string[] = [];
   for (const profile of residentLifeProfiles) {
     const activity = data.snapshot.residentActivity.find((entry) =>
-      entry.residentId === profile.id || entry.displayName === profile.name,
+      matchesResidentProfile(profile.id, entry.residentId, entry.displayName),
     );
     const events = data.lifeEvents.filter((entry) =>
-      entry.residentId === profile.id || entry.displayName === profile.name,
+      matchesResidentProfile(profile.id, entry.residentId, entry.displayName),
     );
     lines.push(`### ${profile.name}｜${profile.occupation}`);
     lines.push('');
