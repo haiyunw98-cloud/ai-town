@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 
 const root = resolve(import.meta.dirname, '..');
 const assetDir = resolve(root, 'public/assets/worlds/lighthouse-town');
-const requiredAssets = ['tileset.svg', 'residents.svg', 'asset-sources.md'];
+const requiredAssets = ['tileset.svg', 'residents.svg', 'event-poster-v1.png', 'asset-sources.md'];
 const failures = [];
 
 const chineseReadme = resolve(root, 'README.zh-CN.md');
@@ -74,6 +74,28 @@ if (!existsSync(mapPath)) {
   }
 
   const blocked = (x, y) => map.objmap.some((layer) => layer[x][y] !== -1);
+  const uniqueSpawns = new Set(map.spawnPoints.map(({ x, y }) => `${x},${y}`));
+  if (map.spawnPoints.length !== 8 || uniqueSpawns.size !== 8) {
+    failures.push('map must expose eight unique resident spawn points');
+  }
+  const requiredCheckpoints = [
+    'plaza',
+    'teahouse',
+    'academy',
+    'lotusPond',
+    'dock',
+    'workshop',
+    'herbShop',
+    'lanternShop',
+  ];
+  for (const name of requiredCheckpoints) {
+    const checkpoint = map.eventCheckpoints?.[name];
+    if (!checkpoint) {
+      failures.push(`missing event checkpoint: ${name}`);
+    } else if (blocked(checkpoint.x, checkpoint.y)) {
+      failures.push(`event checkpoint ${name} is blocked`);
+    }
+  }
   const targetKey = `${map.lighthousePlaza.x},${map.lighthousePlaza.y}`;
   for (const spawn of map.spawnPoints) {
     const queue = [spawn];

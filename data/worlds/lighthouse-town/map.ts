@@ -62,8 +62,10 @@ function placeBuilding(x: number, y: number, sign: number) {
 
 placeBuilding(3, 18, 18); // 临桥茶馆
 placeBuilding(3, 5, 19); // 云溪书院
+placeBuilding(14, 5, 24); // 百草铺
+placeBuilding(14, 18, 26); // 鱼市货栈
 placeBuilding(34, 18, 20); // 机关工坊
-placeBuilding(34, 5, 21); // 水巷民居
+placeBuilding(34, 5, 25); // 长明灯笼坊
 
 // The lighthouse is deliberately inland and faces an open public plaza.
 objects[23][10] = 17;
@@ -86,26 +88,49 @@ for (let y = 0; y < mapheight; y++) {
 }
 for (const [x, y, tile] of [
   [6, 12, 9],
+  [14, 12, 29],
   [16, 12, 9],
+  [27, 12, 29],
   [33, 12, 9],
+  [37, 12, 9],
   [6, 24, 11],
+  [9, 9, 28],
   [15, 24, 11],
+  [18, 22, 27],
   [27, 24, 11],
   [33, 24, 11],
+  [37, 24, 28],
 ] as const) {
   objects[x][y] = tile;
 }
+
+// Boats and market details make the canals feel inhabited without changing collision rules.
+objects[10][9] = 22;
+objects[31][22] = 22;
+objects[25][7] = 30;
 
 export const bgtiles = [ground];
 export const objmap = [objects];
 export const animatedsprites: never[] = [];
 
 export const lighthousePlaza = { x: 22, y: 15 };
+export const eventCheckpoints = {
+  plaza: { x: 22, y: 15 },
+  teahouse: { x: 5, y: 20 },
+  academy: { x: 5, y: 7 },
+  lotusPond: { x: 27, y: 8 },
+  dock: { x: 23, y: 6 },
+  workshop: { x: 35, y: 20 },
+  herbShop: { x: 15, y: 7 },
+  lanternShop: { x: 35, y: 7 },
+} as const;
 export const spawnPoints = [
   { x: 5, y: 12 },
   { x: 15, y: 12 },
   { x: 27, y: 12 },
   { x: 35, y: 12 },
   { x: 5, y: 24 },
+  { x: 15, y: 24 },
+  { x: 27, y: 24 },
   { x: 35, y: 24 },
 ];
