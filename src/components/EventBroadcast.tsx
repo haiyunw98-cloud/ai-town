@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useQuery } from 'convex/react';
+import { useEffect, useRef, useState } from 'react';
+import { useAction, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { useI18n } from '../i18n';
@@ -8,10 +8,31 @@ import {
   buildDailyReport,
   buildBroadcastView,
   buildTownStory,
+  resolveSocialNarrative,
   shanghaiDayKey,
   type BroadcastSnapshot,
 } from './eventBroadcastView';
+import {
+  buildSocialObservationDigest,
+  buildSocialObservationFacts,
+  buildSocialObservationReport,
+} from './socialObservationReport';
 import type { GameId } from '../../convex/aiTown/ids';
+
+function downloadMarkdown(body: string, filename: string) {
+  const blob = new Blob([body], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  try {
+    document.body.append(anchor);
+    anchor.click();
+  } finally {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+}
 
 export default function EventBroadcast({
   worldId,
@@ -24,7 +45,10 @@ export default function EventBroadcast({
   const snapshot = useQuery(api.events.observerSnapshot, { worldId }) as
     | BroadcastSnapshot
     | undefined;
+  const generateSocialObservation = useAction(api.socialObservations.generate);
   const [now, setNow] = useState(Date.now());
+  const [socialReportPending, setSocialReportPending] = useState(false);
+  const socialReportPendingRef = useRef(false);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
@@ -36,29 +60,49 @@ export default function EventBroadcast({
   const view = buildBroadcastView(snapshot, locale, now);
   const story = buildTownStory(snapshot.conversations);
   const eventCompleted = snapshot.event?.status === 'completed';
-  const exportDailyReport = () => {
+  const exportFacts = () => {
     const exportNow = Date.now();
-    const report = buildDailyReport(snapshot, locale, exportNow);
-    const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `灯塔镇完整观察日报-${shanghaiDayKey(exportNow)}.md`;
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    downloadMarkdown(
+      buildDailyReport(snapshot, locale, exportNow),
+      `灯塔镇事实流水账-${shanghaiDayKey(exportNow)}.md`,
+    );
+  };
+  const exportSocialObservation = async () => {
+    if (socialReportPendingRef.current) return;
+    socialReportPendingRef.current = true;
+    setSocialReportPending(true);
+    const exportNow = Date.now();
+    try {
+      const facts = buildSocialObservationFacts(snapshot, locale, exportNow);
+      const result = await resolveSocialNarrative(() =>
+        generateSocialObservation({ digest: buildSocialObservationDigest(facts) }),
+      );
+      downloadMarkdown(
+        buildSocialObservationReport(facts, result),
+        `灯塔镇社会观察日志-${shanghaiDayKey(exportNow)}.md`,
+      );
+    } finally {
+      socialReportPendingRef.current = false;
+      setSocialReportPending(false);
+    }
   };
   return (
     <section className="event-broadcast" aria-label={view.title}>
       <div className="daily-report-export">
         <div>
-          <strong>灯塔镇完整观察日报</strong>
+          <strong>灯塔镇双日报</strong>
           <small>人物、关系、地点、活动与原始对话</small>
         </div>
-        <button onClick={exportDailyReport} aria-label="导出完整观察日报">
-          ↓ 导出完整日报
-        </button>
+        <div className="daily-report-actions">
+          <button onClick={exportFacts}>↓ 导出事实流水账</button>
+          <button
+            onClick={() => void exportSocialObservation()}
+            disabled={socialReportPending}
+            aria-busy={socialReportPending}
+          >
+            {socialReportPending ? '正在整理社会观察' : '生成社会观察日志'}
+          </button>
+        </div>
       </div>
       {view.mode === 'event' && snapshot.event && (
         <>

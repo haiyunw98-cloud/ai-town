@@ -1,8 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { jest } from '@jest/globals';
 import {
   buildDailyReport,
   buildBroadcastView,
   buildTownStory,
+  resolveSocialNarrative,
   type BroadcastSnapshot,
 } from './eventBroadcastView';
 
@@ -830,15 +832,51 @@ describe('event broadcast view model', () => {
     expect(source).toContain('const dailyMessages = messages.map((message) => ({');
   });
 
-  test('labels the one-click export as a complete observation report', () => {
+  test('offers separate factual and social report exports with a local fallback flow', () => {
     const source = readFileSync(new URL('./EventBroadcast.tsx', import.meta.url), 'utf8');
+    const styles = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 
-    expect(source).toContain('导出完整日报');
+    expect(source).toContain('导出事实流水账');
+    expect(source).toContain('生成社会观察日志');
+    expect(source).toContain('正在整理社会观察');
     expect(source).toContain('人物、关系、地点、活动与原始对话');
-    expect(source).toContain('aria-label="导出完整观察日报"');
-    expect(source).toContain('灯塔镇完整观察日报-');
+    expect(source).toContain('灯塔镇事实流水账-');
+    expect(source).toContain('灯塔镇社会观察日志-');
+    expect(source).toContain('useAction(api.socialObservations.generate)');
     expect(source).toContain('const exportNow = Date.now();');
     expect(source).toContain('buildDailyReport(snapshot, locale, exportNow)');
+    expect(source).toContain('buildSocialObservationFacts(snapshot, locale, exportNow)');
+    expect(source).toContain('buildSocialObservationDigest(facts)');
+    expect(source).toContain('buildSocialObservationReport(facts, result)');
     expect(source).toContain('shanghaiDayKey(exportNow)');
+    expect(source).toContain('resolveSocialNarrative');
+    expect(source).toContain('downloadMarkdown(');
+    expect(source).toContain('disabled={socialReportPending}');
+    expect(styles).toContain('.daily-report-actions');
+    expect(styles).toContain('.daily-report-actions button[disabled]');
+  });
+
+  test.each([
+    ['a rejected action', () => Promise.reject(new Error('Ollama unavailable'))],
+    ['an invalid action result', () => Promise.resolve({ source: 'model', narrative: 42 })],
+  ])('returns the deterministic social fallback for %s', async (_case, generate) => {
+    const action = jest.fn(generate);
+
+    const result = await resolveSocialNarrative(action);
+
+    expect(action).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ source: 'fallback', narrative: '' });
+  });
+
+  test('keeps a valid local model narrative for report composition', async () => {
+    const generate = jest.fn(() => Promise.resolve({
+      source: 'model' as const,
+      narrative: '记录显示，居民合作仍需持续观察。',
+    }));
+
+    await expect(resolveSocialNarrative(generate)).resolves.toEqual({
+      source: 'model',
+      narrative: '记录显示，居民合作仍需持续观察。',
+    });
   });
 });

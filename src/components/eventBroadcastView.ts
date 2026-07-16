@@ -66,6 +66,32 @@ export type BroadcastSnapshot = {
   }>;
 };
 
+export type ResolvedSocialNarrative = {
+  source: 'model' | 'fallback';
+  narrative: string;
+};
+
+export async function resolveSocialNarrative(
+  generate: () => Promise<unknown>,
+): Promise<ResolvedSocialNarrative> {
+  try {
+    const generated = await generate();
+    if (typeof generated !== 'object' || generated === null) {
+      return { source: 'fallback', narrative: '' };
+    }
+    const candidate = generated as Record<string, unknown>;
+    if (
+      (candidate.source === 'model' || candidate.source === 'fallback')
+      && typeof candidate.narrative === 'string'
+    ) {
+      return { source: candidate.source, narrative: candidate.narrative };
+    }
+  } catch {
+    // A manually requested report always has a deterministic local fallback.
+  }
+  return { source: 'fallback', narrative: '' };
+}
+
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 export function shanghaiDayKey(timestamp: number) {
