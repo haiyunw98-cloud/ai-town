@@ -1,11 +1,61 @@
 import {
   buildSocialObservationDigest,
   buildSocialObservationFacts,
+  buildSocialObservationReport,
+  type SocialNarrative,
   type SocialObservationFacts,
 } from './socialObservationReport';
 import type { BroadcastSnapshot } from './eventBroadcastView';
 
 const now = Date.parse('2026-07-17T04:00:00Z');
+
+const factsFixture: SocialObservationFacts = {
+  dayKey: '2026-07-17',
+  generatedAt: '2026-07-17T04:00:00.000Z',
+  recordRange: '09:00:00–11:30:00',
+  residentCount: 2,
+  messageCount: 2,
+  lifeEventCount: 2,
+  observerInterventions: 1,
+  conversations: [
+    {
+      conversationId: 'conversation:1',
+      participants: ['林澜', '观察者'],
+      messageCount: 2,
+      messages: [
+        { at: '10:00:00', author: '林澜', text: '我已经整理好记录。', observerIntervention: false },
+        { at: '10:01:00', author: '观察者', text: '请继续记录。', observerIntervention: true },
+      ],
+    },
+  ],
+  residentFacts: [
+    {
+      residentId: 'lin-lan',
+      name: '林澜',
+      activities: ['工作：整理航标记录'],
+      partners: ['观察者'],
+      quotes: ['我已经整理好记录。'],
+    },
+    {
+      residentId: 'su-ying',
+      name: '苏萤',
+      activities: [],
+      partners: [],
+      quotes: [],
+    },
+  ],
+  institutionUses: [
+    { institution: '灯塔书院', count: 2 },
+    { institution: '无使用机构', count: 0 },
+  ],
+  activityFacts: [
+    { at: '09:00:00', resident: '林澜', kind: '工作', text: '整理航标记录' },
+    { at: '10:30:00', resident: '林澜', kind: '出行', text: '前往灯塔书院' },
+  ],
+  publicFacts: [
+    { at: '11:30:00', kind: '公告', text: '灯塔书院今日开放' },
+  ],
+};
 
 function hasLoneSurrogate(value: string) {
   for (let index = 0; index < value.length; index += 1) {
@@ -514,5 +564,100 @@ describe('social observation fact layer', () => {
     expect(digest).toContain('灯塔书院代表事实');
     expect(digest).toContain('活动代表事实');
     expect(digest).toContain('公共代表事实');
+  });
+
+  test('composes the ten factual report sections in a fixed order with fallback disclosure', () => {
+    const fallbackResult: SocialNarrative = { source: 'fallback', narrative: '不应采用' };
+    const report = buildSocialObservationReport(factsFixture, fallbackResult);
+    const sectionTitles = [
+      '观察范围与数据覆盖',
+      '当日社会结构概览',
+      '居民互动网络与关系动向',
+      '友情、亲密关系与合作迹象',
+      '商业生活、劳动与机构使用',
+      '公共生活、规范、分歧与协调',
+      '观察者介入及其可见影响',
+      '本地模型辅助的谨慎观察',
+      '后续值得持续记录的线索',
+      '方法与边界说明',
+    ];
+
+    expect(report).toContain('# 灯塔镇社会观察日志');
+    expect(report).toContain('日期：2026-07-17');
+    expect(report.match(/^## .+$/gm)).toEqual(sectionTitles.map((title) => `## ${title}`));
+    expect(report).toContain('记录范围：09:00:00–11:30:00');
+    expect(report).toContain('居民：2；消息：2；生活事件：2');
+    expect(report).toContain('林澜');
+    expect(report).toContain('活动：1 项');
+    expect(report).toContain('当日可见伙伴：观察者');
+    expect(report).toContain('conversation:1');
+    expect(report).toContain('灯塔书院：2 次');
+    expect(report).not.toContain('无使用机构');
+    expect(report).toContain('灯塔书院今日开放');
+    expect(report).toContain('观察者介入消息：1 条');
+    expect(report).not.toContain('造成的变化');
+    expect(report).toContain('本次未使用模型扩写；本节仅保留程序生成的事实统计。');
+    expect(report).toMatch(/继续记录.+是否延续/);
+    expect(report).toContain('人物设定不等于当日事实');
+    expect(report).toContain('可能/值得记录不是因果结论，也不代表稳定人格');
+    expect(report).not.toContain('已经证明');
+  });
+
+  test('contains model narrative as escaped single-line text without swallowing later sections', () => {
+    const report = buildSocialObservationReport(factsFixture, {
+      source: 'model',
+      narrative: '<script>alert(1)</script>\n## 伪造章节',
+    });
+
+    expect(report).not.toContain('<script>');
+    expect(report).not.toContain('\n## 伪造章节');
+    expect(report).toContain('＜script＞alert﹙1﹚＜/script＞ ＃＃ 伪造章节');
+    expect(report.match(/^## 方法与边界说明$/gm)).toHaveLength(1);
+    expect(report.match(/^## .+$/gm)).toHaveLength(10);
+  });
+
+  test('uses the uniform empty-record line for empty fact arrays', () => {
+    const report = buildSocialObservationReport(
+      {
+        ...factsFixture,
+        recordRange: '当日无记录',
+        residentCount: 0,
+        messageCount: 0,
+        lifeEventCount: 0,
+        observerInterventions: 0,
+        conversations: [],
+        residentFacts: [],
+        institutionUses: [],
+        activityFacts: [],
+        publicFacts: [],
+      },
+      { source: 'model', narrative: '   ' },
+    );
+
+    expect(report.match(/^- 当日无记录$/gm)?.length ?? 0).toBeGreaterThanOrEqual(6);
+    expect(report).toContain('本次未使用模型扩写；本节仅保留程序生成的事实统计。');
+  });
+
+  test('encodes resident and institution text without allowing forged report headings', () => {
+    const structuralPayload = '动态值\n## 伪造标题<script>alert(1)</script>';
+    const report = buildSocialObservationReport(
+      {
+        ...factsFixture,
+        residentFacts: [{
+          residentId: structuralPayload,
+          name: structuralPayload,
+          activities: [structuralPayload],
+          partners: [structuralPayload],
+          quotes: [],
+        }],
+        institutionUses: [{ institution: structuralPayload, count: 1 }],
+      },
+      { source: 'fallback', narrative: '' },
+    );
+
+    expect(report).not.toContain('\n## 伪造标题');
+    expect(report).not.toContain('<script>');
+    expect(report).toContain('动态值 ＃＃ 伪造标题＜script＞alert﹙1﹚＜/script＞');
+    expect(report.match(/^## .+$/gm)).toHaveLength(10);
   });
 });

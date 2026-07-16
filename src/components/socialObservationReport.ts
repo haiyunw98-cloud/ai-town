@@ -59,6 +59,11 @@ export type SocialObservationFacts = {
   publicFacts: SocialObservationPublicFact[];
 };
 
+export type SocialNarrative = {
+  source: 'model' | 'fallback';
+  narrative: string;
+};
+
 type DailyMessage = BroadcastSnapshot['dailyMessages'][number];
 type LifeEvent = NonNullable<BroadcastSnapshot['dailyLifeEvents']>[number];
 type PublicLog = BroadcastSnapshot['logs'][number];
@@ -487,4 +492,107 @@ export function buildSocialObservationDigest(facts: SocialObservationFacts) {
     digestSection('【公共记录】', publicLines, 1),
   ];
   return boundedDigest(metadataLines, sections);
+}
+
+function reportList(lines: string[]) {
+  return (lines.length > 0 ? lines : ['当日无记录'])
+    .map((line) => `- ${line}`)
+    .join('\n');
+}
+
+export function buildSocialObservationReport(
+  facts: SocialObservationFacts,
+  result: SocialNarrative,
+): string {
+  const residentOverview = facts.residentFacts.map((resident) =>
+    `${encodeDigestDynamicText(resident.name, 80)}（${encodeDigestDynamicText(resident.residentId, 120)}）：活动：${resident.activities.length} 项；当日可见伙伴：${resident.partners.length} 位`,
+  );
+  const conversations = facts.conversations.map((conversation) =>
+    `会话 ${encodeDigestDynamicText(conversation.conversationId, 120)}：参与者：${conversation.participants.map((participant) => encodeDigestDynamicText(participant, 80)).join('、')}；消息：${conversation.messageCount} 条`,
+  );
+  const visiblePartners = facts.residentFacts.flatMap((resident) =>
+    resident.partners.length > 0
+      ? [`${encodeDigestDynamicText(resident.name, 80)}：当日可见伙伴：${resident.partners.map((partner) => encodeDigestDynamicText(partner, 80)).join('、')}`]
+      : [],
+  );
+  const workAndInstitutionUses = [
+    ...facts.activityFacts.map((activity) =>
+      `活动 ${encodeDigestDynamicText(activity.at, 20)}｜${encodeDigestDynamicText(activity.resident, 80)}｜${encodeDigestDynamicText(activity.kind, 80)}｜${encodeDigestDynamicText(activity.text)}`,
+    ),
+    ...facts.institutionUses
+      .filter((use) => use.count > 0)
+      .map((use) => `机构 ${encodeDigestDynamicText(use.institution, 120)}：${use.count} 次`),
+  ];
+  const publicLife = facts.publicFacts.map((fact) =>
+    `${encodeDigestDynamicText(fact.at, 20)}｜${encodeDigestDynamicText(fact.kind, 80)}｜${encodeDigestDynamicText(fact.text)}`,
+  );
+  const narrative = result.source === 'model' && result.narrative.trim().length > 0
+    ? encodeDigestDynamicText(result.narrative)
+    : '本次未使用模型扩写；本节仅保留程序生成的事实统计。';
+  const followUpLines = [
+    ...facts.conversations.map((conversation) =>
+      `继续记录会话 ${encodeDigestDynamicText(conversation.conversationId, 120)} 中的当日互动是否延续。`,
+    ),
+    ...facts.residentFacts.flatMap((resident) =>
+      resident.activities.length > 0
+        ? [`继续记录 ${encodeDigestDynamicText(resident.name, 80)} 的当日活动是否延续。`]
+        : [],
+    ),
+    ...facts.institutionUses
+      .filter((use) => use.count > 0)
+      .map((use) => `继续记录 ${encodeDigestDynamicText(use.institution, 120)} 的当日使用是否延续。`),
+    ...facts.publicFacts.map((fact) =>
+      `继续记录 ${encodeDigestDynamicText(fact.kind, 80)} 类公共记录是否延续。`,
+    ),
+  ];
+
+  return [
+    '# 灯塔镇社会观察日志',
+    '',
+    `日期：${encodeDigestDynamicText(facts.dayKey)}`,
+    '',
+    '## 观察范围与数据覆盖',
+    '',
+    `- 记录范围：${encodeDigestDynamicText(facts.recordRange)}`,
+    `- 居民：${facts.residentCount}；消息：${facts.messageCount}；生活事件：${facts.lifeEventCount}`,
+    '',
+    '## 当日社会结构概览',
+    '',
+    reportList(residentOverview),
+    '',
+    '## 居民互动网络与关系动向',
+    '',
+    reportList(conversations),
+    '',
+    '## 友情、亲密关系与合作迹象',
+    '',
+    reportList(visiblePartners),
+    '',
+    '## 商业生活、劳动与机构使用',
+    '',
+    reportList(workAndInstitutionUses),
+    '',
+    '## 公共生活、规范、分歧与协调',
+    '',
+    reportList(publicLife),
+    '',
+    '## 观察者介入及其可见影响',
+    '',
+    `- 观察者介入消息：${facts.observerInterventions} 条`,
+    '',
+    '## 本地模型辅助的谨慎观察',
+    '',
+    `- ${narrative}`,
+    '',
+    '## 后续值得持续记录的线索',
+    '',
+    reportList(followUpLines),
+    '',
+    '## 方法与边界说明',
+    '',
+    '- 本日志仅组合当日快照中的可见记录，不补全原因、动机或结论。',
+    '- 人物设定不等于当日事实。',
+    '- 当日可见伙伴只表示当日共同会话，不代表稳定友情、亲密关系或合作关系。',
+    '- 可能/值得记录不是因果结论，也不代表稳定人格。',
+  ].join('\n');
 }
