@@ -171,6 +171,48 @@ describe('social observation fact layer', () => {
     expect(academyCount).toBe(0);
   });
 
+  test('keeps distinct raw conversation ids from merging resident partners', () => {
+    const facts = buildSocialObservationFacts(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [
+          {
+            messageId: 'message:lin-lan',
+            conversationId: 'a\nb',
+            authorId: 'lin-lan',
+            authorName: '林澜',
+            text: '林澜的独立记录',
+            createdAt: now - 1_000,
+            observerIntervention: false,
+          },
+          {
+            messageId: 'message:su-ying',
+            conversationId: 'a / b',
+            authorId: 'su-ying',
+            authorName: '苏萤',
+            text: '苏萤的独立记录',
+            createdAt: now,
+            observerIntervention: false,
+          },
+        ],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+
+    expect(facts.conversations.map((conversation) => conversation.conversationId))
+      .toEqual(['a\nb', 'a / b']);
+    expect(facts.residentFacts.find((resident) => resident.name === '林澜')?.partners)
+      .not.toContain('苏萤');
+    expect(facts.residentFacts.find((resident) => resident.name === '苏萤')?.partners)
+      .not.toContain('林澜');
+  });
+
   test('keeps an observer name collision out of resident facts', () => {
     const facts = buildSocialObservationFacts(
       {

@@ -163,7 +163,7 @@ function buildConversations(
   }
 
   return [...grouped.entries()].map(([conversationId, group]) => ({
-    conversationId: normalizeRecordText(conversationId),
+    conversationId,
     participants: [...new Set(group.map((message) => messageAuthor(message, runtimeProfileIds)))],
     messageCount: group.length,
     messages: group.map((message) => ({
@@ -193,9 +193,7 @@ function buildResidentFacts(
       !message.observerIntervention
         && resolveProfileId(message.authorId, message.authorName, runtimeProfileIds) === profile.id,
     );
-    const conversationIds = new Set(residentMessages.map((message) =>
-      normalizeRecordText(message.conversationId),
-    ));
+    const conversationIds = new Set(residentMessages.map((message) => message.conversationId));
     const partners: string[] = [];
     for (const conversation of conversations) {
       if (!conversationIds.has(conversation.conversationId)) continue;
