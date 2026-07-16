@@ -2,6 +2,7 @@ import {
   buildSocialObservationDigest,
   buildSocialObservationFacts,
   buildSocialObservationReport,
+  escapeReportMarkdown,
   type SocialNarrative,
   type SocialObservationFacts,
 } from './socialObservationReport';
@@ -64,6 +65,20 @@ function reportSection(report: string, title: string) {
   const contentStart = startIndex + sectionStart.length;
   const nextSection = report.indexOf('\n\n## ', contentStart);
   return report.slice(contentStart, nextSection < 0 ? undefined : nextSection);
+}
+
+function paddedDynamicText(prefix: string, graphemeLength: number) {
+  return Array.from(`${prefix}${'&<>'.repeat(graphemeLength)}`)
+    .slice(0, graphemeLength)
+    .join('');
+}
+
+function expectAccurateOmission(report: string, title: string, total: number) {
+  const section = reportSection(report, title);
+  const displayed = section
+    .split('\n')
+    .filter((line) => line.startsWith('- ') && !line.startsWith('- 另有')).length;
+  expect(section).toContain(`- 另有 ${total - displayed} 条记录未在本节展开`);
 }
 
 function hasLoneSurrogate(value: string) {
@@ -643,16 +658,14 @@ describe('social observation fact layer', () => {
     expect(report800).not.toContain('模型观察已截断');
     expect(report1400).not.toContain('模型观察已截断');
 
-    const family = '👨‍👩‍👧‍👦';
+    const oversizedNarrative = '长'.repeat(6000);
     const oversizedReport = buildSocialObservationReport(factsFixture, {
-      source: 'model', narrative: family.repeat(6000),
+      source: 'model', narrative: oversizedNarrative,
     });
     const modelSection = reportSection(oversizedReport, '本地模型辅助的谨慎观察');
-    const beforeMarker = modelSection.replace(/…（模型观察已截断）$/, '');
 
     expect(modelSection).toContain('…（模型观察已截断）');
-    expect(modelSection.match(new RegExp(family, 'gu'))).toHaveLength(1600);
-    expect(beforeMarker).not.toMatch(/[\u200d\ufe0e\ufe0f\p{M}]$/u);
+    expect(modelSection.match(/长/g)).toHaveLength(1600);
   });
 
   test('uses the uniform empty-record line for empty fact arrays', () => {
@@ -796,5 +809,129 @@ describe('social observation fact layer', () => {
       .toContain('另有 4 位参与者未展开');
     expect(report.match(/会话 conversation:0：/g)).toHaveLength(1);
     expect(report.match(/^## 方法与边界说明$/gm)).toHaveLength(1);
+  });
+
+  test('closes the total report budget after worst-case HTML entity expansion', () => {
+    const conversations = Array.from({ length: 500 }, (_, index) => {
+      const recordIndex = index % 250;
+      return {
+        conversationId: paddedDynamicText(`conversation-${recordIndex}-`, 80),
+        participants: Array.from({ length: 10 }, (__, participant) =>
+          paddedDynamicText(`居民-${recordIndex}-${participant}-`, 60)),
+        messageCount: 1,
+        messages: [],
+      };
+    });
+    const residents = Array.from({ length: 20 }, (_, index) => ({
+      residentId: `resident:${index}`,
+      name: paddedDynamicText(`居民-${index}-`, 60),
+      activities: [paddedDynamicText(`活动-${index}-`, 120)],
+      partners: [paddedDynamicText(`伙伴-${index}-`, 60)],
+      quotes: [],
+    }));
+    const activityFacts = Array.from({ length: 500 }, (_, index) => {
+      const recordIndex = index % 250;
+      return {
+        at: paddedDynamicText('时间-', 20),
+        resident: paddedDynamicText(`居民-${recordIndex}-`, 60),
+        kind: paddedDynamicText('工作-', 40),
+        text: paddedDynamicText(`活动-${recordIndex}-`, 120),
+      };
+    });
+    const publicFacts = Array.from({ length: 500 }, (_, index) => {
+      const recordIndex = index % 250;
+      return {
+        at: paddedDynamicText('时间-', 20),
+        kind: paddedDynamicText(`公告-${recordIndex}-`, 40),
+        text: paddedDynamicText(`公共-${recordIndex}-`, 120),
+      };
+    });
+    const worstFacts: SocialObservationFacts = {
+      ...factsFixture,
+      dayKey: paddedDynamicText('2026-07-17-', 40),
+      recordRange: paddedDynamicText('09:00-11:30-', 80),
+      residentCount: residents.length,
+      messageCount: conversations.length,
+      lifeEventCount: activityFacts.length,
+      conversations,
+      residentFacts: residents,
+      institutionUses: Array.from({ length: 20 }, (_, index) => ({
+        institution: paddedDynamicText(`机构-${index}-`, 80), count: 1,
+      })),
+      activityFacts,
+      publicFacts,
+    };
+    const reports = [
+      buildSocialObservationReport(worstFacts, { source: 'fallback', narrative: '' }),
+      buildSocialObservationReport(worstFacts, {
+        source: 'model', narrative: '模型观察'.repeat(350),
+      }),
+    ];
+
+    for (const report of reports) {
+      expect(report.length).toBeLessThanOrEqual(12_000);
+      expect(report.match(/^## .+$/gm)).toHaveLength(10);
+      expect(report.match(/^## 方法与边界说明$/gm)).toHaveLength(1);
+      expectAccurateOmission(report, '当日社会结构概览', 20);
+      expectAccurateOmission(report, '居民互动网络与关系动向', 250);
+      expectAccurateOmission(report, '友情、亲密关系与合作迹象', 20);
+      expectAccurateOmission(report, '商业生活、劳动与机构使用', 270);
+      expectAccurateOmission(report, '公共生活、规范、分歧与协调', 250);
+      expectAccurateOmission(report, '后续值得持续记录的线索', 540);
+    }
+    expect(reportSection(reports[1], '本地模型辅助的谨慎观察'))
+      .toContain('模型观察'.repeat(350));
+  });
+
+  test('escapes list markers only when dynamic text starts a report list item', () => {
+    const report = buildSocialObservationReport(
+      {
+        ...factsFixture,
+        residentFacts: [{
+          residentId: 'resident:list',
+          name: '- 居民列表',
+          activities: ['记录'],
+          partners: [],
+          quotes: [],
+        }],
+        institutionUses: [{ institution: '+ 机构列表', count: 1 }],
+        publicFacts: [{
+          at: '11:00:00', kind: '公告',
+          text: '1. 公共列表 https://example.com/a-b?q=1.5',
+        }],
+      },
+      { source: 'model', narrative: '- 模型列表' },
+    );
+
+    expect(report).not.toMatch(/^- (?:-|\+|\d+\.) /gm);
+    expect(report).toContain('\\- 居民列表');
+    expect(report).toContain('\\+ 机构列表');
+    expect(report).toContain('1\\. 公共列表');
+    expect(reportSection(report, '本地模型辅助的谨慎观察')).toContain('- \\- 模型列表');
+    expect(report).toContain('https://example.com/a-b?q=1.5');
+  });
+
+  test('keeps fallback grapheme clusters intact without Intl.Segmenter', () => {
+    const family = '👨‍👩‍👧‍👦';
+    const combining = 'e\u0301';
+    const escaped = escapeReportMarkdown(
+      `${family}${combining}${family}`,
+      2,
+      '…',
+      200,
+      null,
+    );
+    const beforeMarker = escaped.replace(/…$/, '');
+    const variationEscaped = escapeReportMarkdown(
+      `A✈️${combining}x`,
+      3,
+      '…',
+      200,
+      null,
+    );
+
+    expect(escaped).toBe(`${family}…`);
+    expect(beforeMarker).not.toMatch(/[\u200d\ufe0e\ufe0f\p{M}]$/u);
+    expect(variationEscaped).toBe('A…');
   });
 });
