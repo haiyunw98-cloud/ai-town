@@ -42,6 +42,21 @@ const running: BroadcastSnapshot = {
 };
 
 describe('event broadcast view model', () => {
+  test('attributes observer intervention only to actual human player ids', async () => {
+    const eventsModule = await import('../../convex/events') as Record<string, unknown>;
+
+    expect(eventsModule).toHaveProperty('isObserverIntervention');
+    const isObserverIntervention = eventsModule.isObserverIntervention as (
+      humanPlayerIds: ReadonlySet<string>,
+      authorId: string,
+    ) => boolean;
+    const humanPlayerIds = new Set(['p:human']);
+
+    expect(isObserverIntervention(humanPlayerIds, 'p:human')).toBe(true);
+    expect(isObserverIntervention(humanPlayerIds, 'p:named-ai')).toBe(false);
+    expect(isObserverIntervention(humanPlayerIds, 'p:missing-description-ai')).toBe(false);
+  });
+
   test('uses town chronicle mode before an event exists', () => {
     const view = buildBroadcastView(
       {
@@ -459,6 +474,195 @@ describe('event broadcast view model', () => {
     expect(report).toContain('第一条。');
   });
 
+  test('builds complete report conversations from all same-day raw messages', () => {
+    const dayStart = Date.parse('2026-07-15T16:00:00Z');
+    const now = dayStart + 12 * 60 * 60 * 1000;
+    const dailyMessages = Array.from({ length: 90 }, (_, index) => {
+      const conversationId = index < 20
+        ? 'c:early'
+        : `c:${1 + Math.floor((index - 20) / 10)}`;
+      const isLinLan = index % 2 === 0;
+      return {
+        messageId: `m:${index}`,
+        conversationId,
+        authorId: isLinLan ? 'lin-lan' : 'su-ying',
+        authorName: isLinLan ? '林澜' : '苏萤',
+        text: `完整消息 ${index}`,
+        createdAt: dayStart + index * 60_000,
+        observerIntervention: false,
+      };
+    });
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: Array.from({ length: 6 }, (_, index) => ({
+          conversationId: `c:${index + 2}`,
+          participantNames: ['林澜', '苏萤'],
+          summary: `旧卡片摘要 ${index + 2}`,
+          updatedAt: dayStart + (index + 1) * 60_000,
+          messages: [],
+        })),
+        residentActivity: [],
+        dailyMessages,
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+    const interactionSection = report.slice(
+      report.indexOf('### 当日实际互动'),
+      report.indexOf('## 机构与地点'),
+    );
+    const conversationSection = report.slice(
+      report.indexOf('## 当日对话'),
+      report.indexOf('## 赛事与公共事件'),
+    );
+
+    expect(report).toContain('当日对话：8 组');
+    expect(interactionSection).toContain('林澜 × 苏萤｜消息 20 条');
+    expect(conversationSection).toContain('参与者共交换 20 条消息');
+    expect(conversationSection).toContain('完整消息 19');
+  });
+
+  test('marks resident settings separately and records daily partners and representative quotes', () => {
+    const now = Date.parse('2026-07-16T04:00:00Z');
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [
+          { residentId: 'p:0', displayName: 'Lin Lan', status: '值守中', detail: '检查灯光' },
+          { residentId: 'p:1', displayName: 'Su Ying', status: '工作中', detail: '整理工具' },
+        ],
+        dailyMessages: [
+          {
+            messageId: 'm:lin', conversationId: 'c:partners', authorId: 'p:0', authorName: 'Lin Lan',
+            text: '我记录了今晚的灯光。', createdAt: now - 2_000, observerIntervention: false,
+          },
+          {
+            messageId: 'm:su', conversationId: 'c:partners', authorId: 'p:1', authorName: 'Su Ying',
+            text: '我来检查装置。', createdAt: now - 1_000, observerIntervention: false,
+          },
+        ],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+    const residentSection = report.slice(
+      report.indexOf('### 林澜'),
+      report.indexOf('### 沈砚'),
+    );
+
+    expect(residentSection).toContain('[人物设定] 住所：灯塔东侧守望人小屋');
+    expect(residentSection).toContain('[人物设定] 性格：温和、谨慎、责任感强、慢热');
+    expect(residentSection).toContain('[人物设定] 穿着：');
+    expect(residentSection).toContain('[人物设定] 饮食：');
+    expect(residentSection).toContain('[人物设定] 生计：');
+    expect(residentSection).toContain('[人物设定] 当前目标：');
+    expect(residentSection).toContain('[当日事实] 对话伙伴：苏萤');
+    expect(residentSection).toContain('[当日事实] 代表发言：[p:0] 林澜：“我记录了今晚的灯光。”');
+  });
+
+  test('uses Shanghai day boundaries for report filtering and exported day keys', async () => {
+    const reportModule = await import('./eventBroadcastView') as Record<string, unknown>;
+
+    expect(reportModule).toHaveProperty('shanghaiDayKey');
+    const shanghaiDayKey = reportModule.shanghaiDayKey as (timestamp: number) => string;
+    const now = Date.parse('2026-07-15T16:30:00Z');
+    expect(shanghaiDayKey(now)).toBe('2026-07-16');
+    expect(shanghaiDayKey(Date.parse('2026-07-15T15:59:00Z'))).toBe('2026-07-15');
+
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [
+          {
+            messageId: 'm:before', conversationId: 'c:before', authorId: 'lin-lan', authorName: '林澜',
+            text: '上海前一日消息', createdAt: Date.parse('2026-07-15T15:59:00Z'), observerIntervention: false,
+          },
+          {
+            messageId: 'm:current', conversationId: 'c:current', authorId: 'lin-lan', authorName: '林澜',
+            text: '上海当日消息', createdAt: Date.parse('2026-07-15T16:00:00Z'), observerIntervention: false,
+          },
+        ],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+
+    expect(report).toContain('日期：2026年07月16日');
+    expect(report).toContain('上海当日消息');
+    expect(report).not.toContain('上海前一日消息');
+  });
+
+  test('excludes ordinary conversation logs from public events', () => {
+    const now = Date.parse('2026-07-16T04:00:00Z');
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [{
+          eventKey: 'message:1', sequence: 1, kind: 'conversation',
+          text: '普通消息日志', createdAt: now,
+        }],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+    const publicSection = report.slice(
+      report.indexOf('## 赛事与公共事件'),
+      report.indexOf('## 生活记录附录'),
+    );
+
+    expect(report).toContain('当日公共事件日志：0 条');
+    expect(publicSection).toContain('- 当日无记录');
+    expect(publicSection).not.toContain('普通消息日志');
+    expect(report).toContain('记录范围：当日无记录');
+  });
+
+  test('renders the complete same-day record range in Shanghai time', () => {
+    const now = Date.parse('2026-07-16T04:00:00Z');
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [
+          { eventKey: 'public:1', sequence: 1, kind: 'announcement', text: '公共日志', createdAt: Date.parse('2026-07-16T02:00:00Z') },
+          { eventKey: 'message:later', sequence: 2, kind: 'conversation', text: '不计入范围', createdAt: Date.parse('2026-07-16T03:00:00Z') },
+        ],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [{
+          messageId: 'm:range', conversationId: 'c:range', authorId: 'lin-lan', authorName: '林澜',
+          text: '范围消息', createdAt: Date.parse('2026-07-16T01:00:00Z'), observerIntervention: false,
+        }],
+        dailyLifeEvents: [{
+          residentId: 'lin-lan', displayName: '林澜', kind: 'work', text: '范围生活记录',
+          createdAt: Date.parse('2026-07-16T00:00:00Z'),
+        }],
+      },
+      'zh-CN',
+      now,
+    );
+
+    expect(report).toContain('记录范围：08:00:00–10:00:00');
+    expect(report).not.toContain('不计入范围');
+  });
+
   test('keeps complete raw message capture separate from 80-message legacy views', () => {
     const source = readFileSync(new URL('../../convex/events.ts', import.meta.url), 'utf8');
 
@@ -476,5 +680,8 @@ describe('event broadcast view model', () => {
     expect(source).toContain('人物、关系、地点、活动与原始对话');
     expect(source).toContain('aria-label="导出完整观察日报"');
     expect(source).toContain('灯塔镇完整观察日报-');
+    expect(source).toContain('const exportNow = Date.now();');
+    expect(source).toContain('buildDailyReport(snapshot, locale, exportNow)');
+    expect(source).toContain('shanghaiDayKey(exportNow)');
   });
 });

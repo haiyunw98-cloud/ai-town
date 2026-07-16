@@ -10,13 +10,20 @@ import {
   query,
 } from './_generated/server';
 import { insertInput } from './aiTown/insertInput';
-import { GameId, parseGameId } from './aiTown/ids';
+import { parseGameId } from './aiTown/ids';
 import { eventCheckpoints } from '../data/worlds/lighthouse-town/map';
 import { requestEventDecision } from './events/model';
 import { advanceEvent, createInitialEvent } from './events/stateMachine';
 import { EventPhase, TownEventState } from './events/types';
 
 const EVENT_NAME = '灯塔镇百万金贝寻宝赛';
+
+export function isObserverIntervention(
+  humanPlayerIds: ReadonlySet<string>,
+  authorId: string,
+) {
+  return humanPlayerIds.has(authorId);
+}
 
 export const ensureFirstEvent = mutation({
   args: {},
@@ -88,6 +95,10 @@ export const observerSnapshot = query({
       .withIndex('worldId', (q) => q.eq('worldId', worldId))
       .collect();
     const names = new Map(descriptions.map((entry) => [entry.playerId, entry.name]));
+    const world = await ctx.db.get(worldId);
+    const humanPlayerIds = new Set(
+      (world?.players ?? []).filter((player) => !!player.human).map((player) => player.id),
+    );
     const dailyLifeEvents = (await ctx.db
       .query('lifeEvents')
       .filter((q) => q.eq(q.field('worldId'), worldId))
@@ -114,9 +125,8 @@ export const observerSnapshot = query({
       authorName: names.get(message.author) ?? (message.author.startsWith('p:') ? '居民' : '观察者'),
       text: message.text,
       createdAt: message._creationTime,
-      observerIntervention: !names.has(message.author),
+      observerIntervention: isObserverIntervention(humanPlayerIds, message.author),
     }));
-    const world = await ctx.db.get(worldId);
     const conversations = groupConversationMessages(legacyMessages, names, world?.conversations ?? []);
     const residentActivity = buildResidentActivity(world?.players ?? [], world?.conversations ?? [], names);
     const event = await ctx.db
@@ -538,7 +548,7 @@ async function queuePhaseMovement(
       ? destinations[index % destinations.length]
       : eventCheckpoints.plaza;
     await insertInput(ctx, worldId, 'eventMove', {
-      playerId: parseGameId('players', participant.residentId) as GameId<'players'>,
+      playerId: parseGameId('players', participant.residentId),
       destination,
       description: participant.active ? phaseActivity(phase) : '在灯塔广场担任赛事评论员',
       until: Date.now() + 5 * 60_000,

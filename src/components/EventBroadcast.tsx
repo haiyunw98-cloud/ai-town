@@ -8,6 +8,7 @@ import {
   buildDailyReport,
   buildBroadcastView,
   buildTownStory,
+  shanghaiDayKey,
   type BroadcastSnapshot,
 } from './eventBroadcastView';
 import type { GameId } from '../../convex/aiTown/ids';
@@ -36,15 +37,13 @@ export default function EventBroadcast({
   const story = buildTownStory(snapshot.conversations);
   const eventCompleted = snapshot.event?.status === 'completed';
   const exportDailyReport = () => {
-    const report = buildDailyReport(snapshot, locale, Date.now());
+    const exportNow = Date.now();
+    const report = buildDailyReport(snapshot, locale, exportNow);
     const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
-    const date = new Intl.DateTimeFormat('zh-CN', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(Date.now()).replaceAll('/', '-');
     anchor.href = url;
-    anchor.download = `灯塔镇完整观察日报-${date}.md`;
+    anchor.download = `灯塔镇完整观察日报-${shanghaiDayKey(exportNow)}.md`;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
@@ -230,5 +229,7 @@ function roleLabel(role: string, locale: Locale) {
 }
 
 function formatTime(timestamp: number, locale: Locale) {
-  return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(timestamp);
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai',
+  }).format(timestamp);
 }

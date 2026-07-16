@@ -65,13 +65,18 @@ export type BroadcastSnapshot = {
   }>;
 };
 
-const sameLocalDay = (timestamp: number, now: number) => {
-  const left = new Date(timestamp);
-  const right = new Date(now);
-  return left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate();
-};
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+export function shanghaiDayKey(timestamp: number) {
+  const shanghaiDate = new Date(timestamp + SHANGHAI_OFFSET_MS);
+  const year = shanghaiDate.getUTCFullYear();
+  const month = String(shanghaiDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(shanghaiDate.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+const sameLocalDay = (timestamp: number, now: number) =>
+  shanghaiDayKey(timestamp) === shanghaiDayKey(now);
 
 const escapeMarkdown = (value: string) => value
   .replace(/\r\n|\r|\n/g, ' / ')
@@ -83,8 +88,18 @@ const escapeMarkdown = (value: string) => value
 
 type LifeEvent = NonNullable<BroadcastSnapshot['dailyLifeEvents']>[number];
 type DailyMessage = BroadcastSnapshot['dailyMessages'][number];
-type Conversation = BroadcastSnapshot['conversations'][number];
+type LegacyConversation = BroadcastSnapshot['conversations'][number];
+type LegacyMessage = LegacyConversation['messages'][number];
 type EventLog = BroadcastSnapshot['logs'][number];
+
+type ReportConversation = {
+  conversationId: string;
+  participantNames: string[];
+  summary: string;
+  updatedAt: number;
+  messageCount: number;
+  messages: Array<DailyMessage | LegacyMessage>;
+};
 
 type DailyReportData = {
   snapshot: BroadcastSnapshot;
@@ -92,7 +107,7 @@ type DailyReportData = {
   now: number;
   lifeEvents: LifeEvent[];
   dailyMessages: DailyMessage[];
-  conversations: Conversation[];
+  conversations: ReportConversation[];
   logs: EventLog[];
   residentProfileIdsByRuntimeId: Map<string, string>;
 };
@@ -109,13 +124,25 @@ function reportSection(title: string, content: string[]) {
 function formatReportDate(timestamp: number, locale: Locale) {
   return new Intl.DateTimeFormat(locale, {
     year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'long',
+    timeZone: 'Asia/Shanghai',
   }).format(timestamp);
 }
 
 function formatReportTime(timestamp: number, locale: Locale) {
   return new Intl.DateTimeFormat(locale, {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23', timeZone: 'Asia/Shanghai',
   }).format(timestamp);
+}
+
+function reportRecordRange(data: DailyReportData) {
+  const timestamps = [
+    ...data.lifeEvents.map((event) => event.createdAt),
+    ...data.dailyMessages.map((message) => message.createdAt),
+    ...data.logs.map((log) => log.createdAt),
+  ];
+  if (timestamps.length === 0) return '当日无记录';
+  return `${formatReportTime(Math.min(...timestamps), data.locale)}–${formatReportTime(Math.max(...timestamps), data.locale)}`;
 }
 
 function buildMetadataSection(data: DailyReportData) {
@@ -123,6 +150,7 @@ function buildMetadataSection(data: DailyReportData) {
     `- 日期：${formatReportDate(data.now, data.locale)}`,
     `- 生成时间：${formatReportTime(data.now, data.locale)}`,
     `- 本地日期筛选：${formatReportDate(data.now, data.locale)}`,
+    `- 记录范围：${reportRecordRange(data)}`,
   ]);
 }
 
@@ -168,11 +196,76 @@ function matchesResidentProfile(
   return resolveResidentProfile(data, residentId, displayName)?.id === profileId;
 }
 
+function residentDisplayName(data: DailyReportData, residentId: string, displayName: string) {
+  return resolveResidentProfile(data, residentId, displayName)?.name ?? displayName;
+}
+
 function residentIdentity(data: DailyReportData, residentId: string, displayName: string) {
-  const resolvedName = resolveResidentProfile(data, residentId, displayName)?.name ?? displayName;
+  const resolvedName = residentDisplayName(data, residentId, displayName);
   return residentId
     ? `[${escapeMarkdown(residentId)}] ${escapeMarkdown(resolvedName)}`
     : escapeMarkdown(resolvedName);
+}
+
+function buildReportConversations(data: DailyReportData) {
+  const legacyById = new Map(
+    data.snapshot.conversations.map((conversation) => [conversation.conversationId, conversation]),
+  );
+  const grouped = new Map<string, DailyMessage[]>();
+  for (const message of data.dailyMessages) {
+    const messages = grouped.get(message.conversationId) ?? [];
+    messages.push(message);
+    grouped.set(message.conversationId, messages);
+  }
+  const conversations: ReportConversation[] = [...grouped.entries()].map(
+    ([conversationId, messages]) => {
+      const participantNames = [...new Set(messages.map((message) =>
+        residentDisplayName(data, message.authorId, message.authorName),
+      ))];
+      return {
+        conversationId,
+        participantNames,
+        summary: legacyById.get(conversationId)?.summary
+          ?? `参与者共交换 ${messages.length} 条消息。`,
+        updatedAt: messages.at(-1)?.createdAt ?? data.now,
+        messageCount: messages.length,
+        messages,
+      };
+    },
+  );
+  for (const conversation of data.snapshot.conversations) {
+    if (grouped.has(conversation.conversationId)
+      || !sameLocalDay(conversation.updatedAt, data.now)) continue;
+    const messages = conversation.messages
+      .filter((message) => sameLocalDay(message.createdAt, data.now))
+      .sort(chronological);
+    conversations.push({
+      conversationId: conversation.conversationId,
+      participantNames: conversation.participantNames,
+      summary: conversation.summary,
+      updatedAt: conversation.updatedAt,
+      messageCount: messages.length,
+      messages,
+    });
+  }
+  return conversations.sort((left, right) => left.updatedAt - right.updatedAt);
+}
+
+function residentConversationFacts(data: DailyReportData, profileId: string) {
+  const residentMessages = data.dailyMessages.filter((message) =>
+    matchesResidentProfile(data, profileId, message.authorId, message.authorName),
+  );
+  const conversationIds = new Set(residentMessages.map((message) => message.conversationId));
+  const partnerNames = new Set<string>();
+  for (const message of data.dailyMessages) {
+    if (!conversationIds.has(message.conversationId)) continue;
+    const partner = resolveResidentProfile(data, message.authorId, message.authorName);
+    if (partner && partner.id !== profileId) partnerNames.add(partner.name);
+  }
+  return {
+    partnerNames: [...partnerNames],
+    representativeQuotes: residentMessages.slice(-3),
+  };
 }
 
 function buildResidentSection(data: DailyReportData) {
@@ -184,13 +277,20 @@ function buildResidentSection(data: DailyReportData) {
     const events = data.lifeEvents.filter((entry) =>
       matchesResidentProfile(data, profile.id, entry.residentId, entry.displayName),
     );
+    const conversationFacts = residentConversationFacts(data, profile.id);
     lines.push(`### ${escapeMarkdown(profile.name)}｜${escapeMarkdown(profile.occupation)}`);
     lines.push('');
     lines.push(`- 居民 ID：${escapeMarkdown(profile.id)}`);
+    lines.push(`- [人物设定] 住所：${escapeMarkdown(profile.home)}`);
+    lines.push(`- [人物设定] 性格：${profile.personality.map(escapeMarkdown).join('、')}`);
+    lines.push(`- [人物设定] 穿着：${escapeMarkdown(profile.outfit)}`);
+    lines.push(`- [人物设定] 饮食：${escapeMarkdown(profile.diet)}`);
+    lines.push(`- [人物设定] 生计：${escapeMarkdown(profile.business)}`);
+    lines.push(`- [人物设定] 当前目标：${escapeMarkdown(profile.currentGoal)}`);
     lines.push(activity
-      ? `- 当前状态：${escapeMarkdown(activity.status)}；${escapeMarkdown(activity.detail)}`
-      : '- 当前状态：当日无记录');
-    lines.push('- 当日活动：');
+      ? `- [当日事实] 当前状态：${escapeMarkdown(activity.status)}；${escapeMarkdown(activity.detail)}`
+      : '- [当日事实] 当前状态：当日无记录');
+    lines.push('- [当日事实] 当日活动：');
     if (events.length === 0) {
       lines.push('  - 当日无记录');
     } else {
@@ -198,6 +298,14 @@ function buildResidentSection(data: DailyReportData) {
         lines.push(`  - ${residentIdentity(data, event.residentId, event.displayName)}｜${escapeMarkdown(event.text)}`);
       }
     }
+    lines.push(`- [当日事实] 对话伙伴：${conversationFacts.partnerNames.length > 0
+      ? conversationFacts.partnerNames.map(escapeMarkdown).join('、')
+      : '当日无记录'}`);
+    lines.push(`- [当日事实] 代表发言：${conversationFacts.representativeQuotes.length > 0
+      ? conversationFacts.representativeQuotes.map((message) =>
+        `${residentIdentity(data, message.authorId, message.authorName)}：“${escapeMarkdown(message.text).slice(0, 100)}”`,
+      ).join('；')
+      : '当日无记录'}`);
     lines.push('');
   }
   return reportSection('居民逐人记录', lines);
@@ -218,14 +326,7 @@ function buildRelationshipsSection(data: DailyReportData) {
     lines.push('- 当日无记录');
   } else {
     for (const conversation of data.conversations) {
-      const rawMessages = data.dailyMessages.filter(
-        (message) => message.conversationId === conversation.conversationId,
-      );
-      const fallbackMessages = conversation.messages.filter((message) =>
-        sameLocalDay(message.createdAt, data.now),
-      );
-      const messageCount = rawMessages.length > 0 ? rawMessages.length : fallbackMessages.length;
-      lines.push(`- ${conversation.participantNames.map(escapeMarkdown).join(' × ')}｜消息 ${messageCount} 条`);
+      lines.push(`- ${conversation.participantNames.map(escapeMarkdown).join(' × ')}｜消息 ${conversation.messageCount} 条`);
     }
   }
   return reportSection('关系记录', lines);
@@ -289,20 +390,13 @@ function buildActivityClassificationSection(data: DailyReportData) {
   return reportSection('活动分类', lines);
 }
 
-function conversationExcerptMessages(conversation: Conversation, data: DailyReportData) {
-  const rawMessages = data.dailyMessages.filter(
-    (message) => message.conversationId === conversation.conversationId,
-  );
-  if (rawMessages.length > 0) return rawMessages.slice(-4);
-  return conversation.messages
-    .filter((message) => sameLocalDay(message.createdAt, data.now))
-    .sort(chronological)
-    .slice(-4);
+function conversationExcerptMessages(conversation: ReportConversation) {
+  return conversation.messages.slice(-4);
 }
 
 function conversationExcerptAuthor(
   data: DailyReportData,
-  message: DailyMessage | Conversation['messages'][number],
+  message: DailyMessage | LegacyMessage,
 ) {
   return 'authorId' in message
     ? residentIdentity(data, message.authorId, message.authorName)
@@ -314,7 +408,7 @@ function buildConversationsSection(data: DailyReportData) {
   for (const conversation of data.conversations) {
     lines.push(`### ${conversation.participantNames.map(escapeMarkdown).join(' × ')}`, '');
     lines.push(`- 摘要：${escapeMarkdown(conversation.summary)}`);
-    const excerpts = conversationExcerptMessages(conversation, data).map(
+    const excerpts = conversationExcerptMessages(conversation).map(
       (message) => `${conversationExcerptAuthor(data, message)}：“${escapeMarkdown(message.text).slice(0, 100)}”`,
     );
     lines.push(excerpts.length > 0 ? `- 对话摘录：${excerpts.join('；')}` : '- 对话摘录：当日无记录');
@@ -381,14 +475,13 @@ export function buildDailyReport(
     dailyMessages: snapshot.dailyMessages
       .filter((message) => sameLocalDay(message.createdAt, now))
       .sort(chronological),
-    conversations: snapshot.conversations
-      .filter((conversation) => sameLocalDay(conversation.updatedAt, now))
-      .sort((left, right) => left.updatedAt - right.updatedAt),
+    conversations: [],
     logs: snapshot.logs
-      .filter((entry) => sameLocalDay(entry.createdAt, now))
+      .filter((entry) => entry.kind !== 'conversation' && sameLocalDay(entry.createdAt, now))
       .sort(chronological),
     residentProfileIdsByRuntimeId: buildRuntimeResidentProfileMap(snapshot),
   };
+  data.conversations = buildReportConversations(data);
   const lines = [
     '# 灯塔镇完整观察日报',
     '',
