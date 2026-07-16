@@ -494,87 +494,183 @@ export function buildSocialObservationDigest(facts: SocialObservationFacts) {
   return boundedDigest(metadataLines, sections);
 }
 
-function reportList(lines: string[]) {
-  return (lines.length > 0 ? lines : ['当日无记录'])
+const REPORT_MODEL_GRAPHEME_LIMIT = 1_600;
+const REPORT_MODEL_TRUNCATION_MARKER = '…（模型观察已截断）';
+const REPORT_NAME_GRAPHEME_LIMIT = 60;
+const REPORT_ID_GRAPHEME_LIMIT = 80;
+const REPORT_TEXT_GRAPHEME_LIMIT = 120;
+const REPORT_PARTICIPANT_LIMIT = 6;
+
+type GraphemeSegmenterConstructor = new (
+  locale?: string | string[],
+  options?: { granularity: 'grapheme' },
+) => { segment(value: string): Iterable<{ segment: string }> };
+
+const GraphemeSegmenter = (Intl as unknown as {
+  Segmenter?: GraphemeSegmenterConstructor;
+}).Segmenter;
+const reportGraphemeSegmenter = GraphemeSegmenter
+  ? new GraphemeSegmenter('zh-CN', { granularity: 'grapheme' })
+  : undefined;
+
+function reportGraphemes(value: string) {
+  if (!reportGraphemeSegmenter) return Array.from(value);
+  return Array.from(reportGraphemeSegmenter.segment(value), ({ segment }) => segment);
+}
+
+function escapeReportMarkdown(
+  value: string,
+  maxGraphemes = REPORT_TEXT_GRAPHEME_LIMIT,
+  truncationMarker = '…',
+) {
+  const normalized = value
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const graphemes = reportGraphemes(normalized);
+  const truncated = graphemes.length > maxGraphemes;
+  const escaped = graphemes
+    .slice(0, maxGraphemes)
+    .join('')
+    .replace(/\\/g, '\\\\')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/([`*_\[\]{}#|~])/g, '\\$1');
+  return truncated ? `${escaped}${truncationMarker}` : escaped;
+}
+
+function uniqueReportLines(lines: string[]) {
+  return [...new Set(lines)];
+}
+
+function selectReportLines(lines: string[], limit: number) {
+  const uniqueLines = uniqueReportLines(lines);
+  return {
+    lines: uniqueLines.slice(0, limit),
+    omitted: Math.max(0, uniqueLines.length - limit),
+  };
+}
+
+function reportList(lines: string[], omitted = 0) {
+  const displayedLines = lines.length > 0 ? [...lines] : ['当日无记录'];
+  if (omitted > 0) displayedLines.push(`另有 ${omitted} 条记录未在本节展开`);
+  return displayedLines
     .map((line) => `- ${line}`)
     .join('\n');
+}
+
+function boundedReportList(lines: string[], limit: number) {
+  const selected = selectReportLines(lines, limit);
+  return reportList(selected.lines, selected.omitted);
+}
+
+function reportParticipants(participants: string[]) {
+  const uniqueParticipants = uniqueReportLines(
+    participants.map((participant) =>
+      escapeReportMarkdown(participant, REPORT_NAME_GRAPHEME_LIMIT)),
+  );
+  if (uniqueParticipants.length === 0) return '当日无记录';
+  const displayed = uniqueParticipants.slice(0, REPORT_PARTICIPANT_LIMIT).join('、');
+  const omitted = uniqueParticipants.length - REPORT_PARTICIPANT_LIMIT;
+  return omitted > 0 ? `${displayed}；另有 ${omitted} 位参与者未展开` : displayed;
 }
 
 export function buildSocialObservationReport(
   facts: SocialObservationFacts,
   result: SocialNarrative,
 ): string {
-  const residentOverview = facts.residentFacts.map((resident) =>
-    `${encodeDigestDynamicText(resident.name, 80)}：活动：${resident.activities.length} 项；当日可见伙伴：${resident.partners.length} 位`,
-  );
+  const residentOverview = facts.residentFacts
+    .filter((resident) =>
+      resident.activities.length > 0
+      || resident.partners.length > 0
+      || resident.quotes.length > 0,
+    )
+    .map((resident) =>
+      `${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT)}：活动：${resident.activities.length} 项；当日可见伙伴：${resident.partners.length} 位`,
+    );
   const conversations = facts.conversations.map((conversation) =>
-    `会话 ${encodeDigestDynamicText(conversation.conversationId, 120)}：参与者：${conversation.participants.map((participant) => encodeDigestDynamicText(participant, 80)).join('、')}；消息：${conversation.messageCount} 条`,
+    `会话 ${escapeReportMarkdown(conversation.conversationId, REPORT_ID_GRAPHEME_LIMIT)}：参与者：${reportParticipants(conversation.participants)}；消息：${conversation.messageCount} 条`,
   );
   const visiblePartners = facts.residentFacts.flatMap((resident) =>
     resident.partners.length > 0
-      ? [`${encodeDigestDynamicText(resident.name, 80)}：当日可见伙伴：${resident.partners.map((partner) => encodeDigestDynamicText(partner, 80)).join('、')}`]
+      ? [`${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT)}：当日可见伙伴：${reportParticipants(resident.partners)}`]
       : [],
   );
+  const activityLines = facts.activityFacts.map((activity) =>
+    `活动 ${escapeReportMarkdown(activity.at, 20)}｜${escapeReportMarkdown(activity.resident, REPORT_NAME_GRAPHEME_LIMIT)}｜${escapeReportMarkdown(activity.kind, 40)}｜${escapeReportMarkdown(activity.text)}`,
+  );
+  const institutionLines = facts.institutionUses
+    .filter((use) => use.count > 0)
+    .map((use) =>
+      `机构 ${escapeReportMarkdown(use.institution, REPORT_ID_GRAPHEME_LIMIT)}：${use.count} 次`,
+    );
+  const selectedActivities = selectReportLines(activityLines, 12);
+  const selectedInstitutions = selectReportLines(institutionLines, 9);
   const workAndInstitutionUses = [
-    ...facts.activityFacts.map((activity) =>
-      `活动 ${encodeDigestDynamicText(activity.at, 20)}｜${encodeDigestDynamicText(activity.resident, 80)}｜${encodeDigestDynamicText(activity.kind, 80)}｜${encodeDigestDynamicText(activity.text)}`,
-    ),
-    ...facts.institutionUses
-      .filter((use) => use.count > 0)
-      .map((use) => `机构 ${encodeDigestDynamicText(use.institution, 120)}：${use.count} 次`),
+    ...selectedActivities.lines,
+    ...selectedInstitutions.lines,
   ];
+  const omittedWorkAndInstitutionUses = selectedActivities.omitted
+    + selectedInstitutions.omitted;
   const publicLife = facts.publicFacts.map((fact) =>
-    `${encodeDigestDynamicText(fact.at, 20)}｜${encodeDigestDynamicText(fact.kind, 80)}｜${encodeDigestDynamicText(fact.text)}`,
+    `${escapeReportMarkdown(fact.at, 20)}｜${escapeReportMarkdown(fact.kind, 40)}｜${escapeReportMarkdown(fact.text)}`,
   );
   const narrative = result.source === 'model' && result.narrative.trim().length > 0
-    ? encodeDigestDynamicText(result.narrative)
+    ? escapeReportMarkdown(
+      result.narrative,
+      REPORT_MODEL_GRAPHEME_LIMIT,
+      REPORT_MODEL_TRUNCATION_MARKER,
+    )
     : '本次未使用模型扩写；本节仅保留程序生成的事实统计。';
   const followUpLines = [
     ...facts.conversations.map((conversation) =>
-      `继续记录会话 ${encodeDigestDynamicText(conversation.conversationId, 120)} 中的当日互动是否延续。`,
+      `继续记录会话 ${escapeReportMarkdown(conversation.conversationId, REPORT_ID_GRAPHEME_LIMIT)} 中的当日互动是否延续。`,
     ),
     ...facts.residentFacts.flatMap((resident) =>
       resident.activities.length > 0
-        ? [`继续记录 ${encodeDigestDynamicText(resident.name, 80)} 的当日活动是否延续。`]
+        ? [`继续记录 ${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT)} 的当日活动是否延续。`]
         : [],
     ),
     ...facts.institutionUses
       .filter((use) => use.count > 0)
-      .map((use) => `继续记录 ${encodeDigestDynamicText(use.institution, 120)} 的当日使用是否延续。`),
+      .map((use) =>
+        `继续记录 ${escapeReportMarkdown(use.institution, REPORT_ID_GRAPHEME_LIMIT)} 的当日使用是否延续。`,
+      ),
     ...facts.publicFacts.map((fact) =>
-      `继续记录 ${encodeDigestDynamicText(fact.kind, 80)} 类公共记录是否延续。`,
+      `继续记录 ${escapeReportMarkdown(fact.kind, 40)} 类公共记录是否延续。`,
     ),
   ];
 
   return [
     '# 灯塔镇社会观察日志',
     '',
-    `日期：${encodeDigestDynamicText(facts.dayKey)}`,
+    `日期：${escapeReportMarkdown(facts.dayKey, 40)}`,
     '',
     '## 观察范围与数据覆盖',
     '',
-    `- 记录范围：${encodeDigestDynamicText(facts.recordRange)}`,
+    `- 记录范围：${escapeReportMarkdown(facts.recordRange, 80)}`,
     `- 居民：${facts.residentCount}；消息：${facts.messageCount}；生活事件：${facts.lifeEventCount}`,
     '',
     '## 当日社会结构概览',
     '',
-    reportList(residentOverview),
+    boundedReportList(residentOverview, 9),
     '',
     '## 居民互动网络与关系动向',
     '',
-    reportList(conversations),
+    boundedReportList(conversations, 12),
     '',
     '## 友情、亲密关系与合作迹象',
     '',
-    reportList(visiblePartners),
+    boundedReportList(visiblePartners, 9),
     '',
     '## 商业生活、劳动与机构使用',
     '',
-    reportList(workAndInstitutionUses),
+    reportList(workAndInstitutionUses, omittedWorkAndInstitutionUses),
     '',
     '## 公共生活、规范、分歧与协调',
     '',
-    reportList(publicLife),
+    boundedReportList(publicLife, 12),
     '',
     '## 观察者介入及其可见影响',
     '',
@@ -586,7 +682,7 @@ export function buildSocialObservationReport(
     '',
     '## 后续值得持续记录的线索',
     '',
-    reportList(followUpLines),
+    boundedReportList(followUpLines, 12),
     '',
     '## 方法与边界说明',
     '',

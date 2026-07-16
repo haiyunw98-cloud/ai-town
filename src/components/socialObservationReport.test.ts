@@ -57,6 +57,15 @@ const factsFixture: SocialObservationFacts = {
   ],
 };
 
+function reportSection(report: string, title: string) {
+  const sectionStart = `## ${title}\n\n`;
+  const startIndex = report.indexOf(sectionStart);
+  if (startIndex < 0) throw new Error(`Missing report section: ${title}`);
+  const contentStart = startIndex + sectionStart.length;
+  const nextSection = report.indexOf('\n\n## ', contentStart);
+  return report.slice(contentStart, nextSection < 0 ? undefined : nextSection);
+}
+
 function hasLoneSurrogate(value: string) {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -612,9 +621,38 @@ describe('social observation fact layer', () => {
 
     expect(report).not.toContain('<script>');
     expect(report).not.toContain('\n## 伪造章节');
-    expect(report).toContain('＜script＞alert﹙1﹚＜/script＞ ＃＃ 伪造章节');
+    expect(report).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(report).toContain('伪造章节');
+    expect(reportSection(report, '本地模型辅助的谨慎观察').split('\n')).toHaveLength(1);
     expect(report.match(/^## 方法与边界说明$/gm)).toHaveLength(1);
     expect(report.match(/^## .+$/gm)).toHaveLength(10);
+  });
+
+  test('keeps medium model narratives complete and truncates oversized text on grapheme boundaries', () => {
+    const narrative800 = '甲'.repeat(800);
+    const narrative1400 = '乙'.repeat(1400);
+    const report800 = buildSocialObservationReport(factsFixture, {
+      source: 'model', narrative: narrative800,
+    });
+    const report1400 = buildSocialObservationReport(factsFixture, {
+      source: 'model', narrative: narrative1400,
+    });
+
+    expect(reportSection(report800, '本地模型辅助的谨慎观察')).toContain(narrative800);
+    expect(reportSection(report1400, '本地模型辅助的谨慎观察')).toContain(narrative1400);
+    expect(report800).not.toContain('模型观察已截断');
+    expect(report1400).not.toContain('模型观察已截断');
+
+    const family = '👨‍👩‍👧‍👦';
+    const oversizedReport = buildSocialObservationReport(factsFixture, {
+      source: 'model', narrative: family.repeat(6000),
+    });
+    const modelSection = reportSection(oversizedReport, '本地模型辅助的谨慎观察');
+    const beforeMarker = modelSection.replace(/…（模型观察已截断）$/, '');
+
+    expect(modelSection).toContain('…（模型观察已截断）');
+    expect(modelSection.match(new RegExp(family, 'gu'))).toHaveLength(1600);
+    expect(beforeMarker).not.toMatch(/[\u200d\ufe0e\ufe0f\p{M}]$/u);
   });
 
   test('uses the uniform empty-record line for empty fact arrays', () => {
@@ -639,8 +677,37 @@ describe('social observation fact layer', () => {
     expect(report).toContain('本次未使用模型扩写；本节仅保留程序生成的事实统计。');
   });
 
+  test('does not list configured residents without any same-day facts', () => {
+    const facts = buildSocialObservationFacts(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+    const report = buildSocialObservationReport(facts, { source: 'fallback', narrative: '' });
+
+    expect(facts.residentFacts.length).toBeGreaterThan(0);
+    expect(reportSection(report, '当日社会结构概览')).toBe('- 当日无记录');
+    for (const title of [
+      '居民互动网络与关系动向',
+      '友情、亲密关系与合作迹象',
+      '商业生活、劳动与机构使用',
+      '公共生活、规范、分歧与协调',
+      '后续值得持续记录的线索',
+    ]) {
+      expect(reportSection(report, title)).toBe('- 当日无记录');
+    }
+  });
+
   test('encodes resident and institution text without allowing forged report headings', () => {
-    const structuralPayload = '动态值\n## 伪造标题<script>alert(1)</script>';
+    const structuralPayload = '中文、；（）“” https://x.co/a-b?q=1.5\n## 伪造标题\n- 伪造列表\n|伪造|表格|<script>x</script>';
     const report = buildSocialObservationReport(
       {
         ...factsFixture,
@@ -657,8 +724,77 @@ describe('social observation fact layer', () => {
     );
 
     expect(report).not.toContain('\n## 伪造标题');
+    expect(report).not.toContain('\n- 伪造列表');
+    expect(report).not.toContain('|伪造|表格|');
     expect(report).not.toContain('<script>');
-    expect(report).toContain('动态值 ＃＃ 伪造标题＜script＞alert﹙1﹚＜/script＞');
+    expect(report).toContain('中文、；（）“” https://x.co/a-b?q=1.5');
+    expect(report).toContain('\\|伪造\\|表格\\|');
+    expect(report).toContain('&lt;script&gt;x&lt;/script&gt;');
+    expect(report).toContain('伪造标题');
     expect(report.match(/^## .+$/gm)).toHaveLength(10);
+  });
+
+  test('bounds and deduplicates every high-volume report section without losing later headings', () => {
+    const conversations = Array.from({ length: 500 }, (_, index) => {
+      const recordIndex = index % 250;
+      return {
+        conversationId: `conversation:${recordIndex}`,
+        participants: Array.from({ length: 10 }, (__, participant) =>
+          `居民${recordIndex}-${participant}`),
+        messageCount: 1,
+        messages: [],
+      };
+    });
+    const residents = Array.from({ length: 20 }, (_, index) => ({
+      residentId: `resident:${index}`,
+      name: `居民${index}`,
+      activities: [`活动${index}`],
+      partners: [`伙伴${index}`],
+      quotes: [],
+    }));
+    const activityFacts = Array.from({ length: 500 }, (_, index) => {
+      const recordIndex = index % 250;
+      return {
+        at: '10:00:00', resident: `居民${recordIndex}`, kind: '工作',
+        text: `活动记录${recordIndex}`,
+      };
+    });
+    const publicFacts = Array.from({ length: 500 }, (_, index) => {
+      const recordIndex = index % 250;
+      return { at: '11:00:00', kind: `公告${recordIndex}`, text: `公共记录${recordIndex}` };
+    });
+    const report = buildSocialObservationReport(
+      {
+        ...factsFixture,
+        residentCount: residents.length,
+        messageCount: conversations.length,
+        lifeEventCount: activityFacts.length,
+        conversations,
+        residentFacts: residents,
+        institutionUses: Array.from({ length: 20 }, (_, index) => ({
+          institution: `机构${index}`, count: 1,
+        })),
+        activityFacts,
+        publicFacts,
+      },
+      { source: 'fallback', narrative: '' },
+    );
+
+    expect(report.length).toBeLessThanOrEqual(12_000);
+    expect(report.match(/^## .+$/gm)).toHaveLength(10);
+    for (const title of [
+      '当日社会结构概览',
+      '居民互动网络与关系动向',
+      '友情、亲密关系与合作迹象',
+      '商业生活、劳动与机构使用',
+      '公共生活、规范、分歧与协调',
+      '后续值得持续记录的线索',
+    ]) {
+      expect(reportSection(report, title)).toMatch(/另有 \d+ 条记录未在本节展开/);
+    }
+    expect(reportSection(report, '居民互动网络与关系动向'))
+      .toContain('另有 4 位参与者未展开');
+    expect(report.match(/会话 conversation:0：/g)).toHaveLength(1);
+    expect(report.match(/^## 方法与边界说明$/gm)).toHaveLength(1);
   });
 });
