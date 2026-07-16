@@ -588,6 +588,7 @@ describe('social observation fact layer', () => {
     expect(report).toContain('记录范围：09:00:00–11:30:00');
     expect(report).toContain('居民：2；消息：2；生活事件：2');
     expect(report).toContain('林澜');
+    expect(report).not.toContain('lin-lan');
     expect(report).toContain('活动：1 项');
     expect(report).toContain('当日可见伙伴：观察者');
     expect(report).toContain('conversation:1');

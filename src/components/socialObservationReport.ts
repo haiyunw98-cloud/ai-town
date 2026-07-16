@@ -505,7 +505,7 @@ export function buildSocialObservationReport(
   result: SocialNarrative,
 ): string {
   const residentOverview = facts.residentFacts.map((resident) =>
-    `${encodeDigestDynamicText(resident.name, 80)}（${encodeDigestDynamicText(resident.residentId, 120)}）：活动：${resident.activities.length} 项；当日可见伙伴：${resident.partners.length} 位`,
+    `${encodeDigestDynamicText(resident.name, 80)}：活动：${resident.activities.length} 项；当日可见伙伴：${resident.partners.length} 位`,
   );
   const conversations = facts.conversations.map((conversation) =>
     `会话 ${encodeDigestDynamicText(conversation.conversationId, 120)}：参与者：${conversation.participants.map((participant) => encodeDigestDynamicText(participant, 80)).join('、')}；消息：${conversation.messageCount} 条`,
