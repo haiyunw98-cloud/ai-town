@@ -355,13 +355,6 @@ describe('event broadcast view model', () => {
             updatedAt: at(11),
             messages: [],
           },
-          {
-            conversationId: 'c:legacy',
-            participantNames: ['苏萤', '顾潮'],
-            summary: '仅姓名旧消息测试。',
-            updatedAt: at(9),
-            messages: [{ authorName: '苏萤', text: '仅姓名旧消息', createdAt: at(9) }],
-          },
         ],
         residentActivity: [
           { residentId: 'lin-lan', displayName: '苏萤', status: 'ID 优先状态', detail: '来自矛盾记录' },
@@ -426,7 +419,6 @@ describe('event broadcast view model', () => {
     expect(rawMessages).toContain('[p:unknown] 苏萤｜姓名回退原始消息');
     expect(conversations).toContain('[lin\\-lan] 林澜：“ID 优先原始消息”');
     expect(conversations).not.toContain('苏萤：“ID 优先原始消息”');
-    expect(conversations).toContain('苏萤：“仅姓名旧消息”');
   });
 
   test('uses the latest four same-day raw messages in chronological order', () => {
@@ -524,6 +516,43 @@ describe('event broadcast view model', () => {
     expect(interactionSection).toContain('林澜 × 苏萤｜消息 20 条');
     expect(conversationSection).toContain('参与者共交换 20 条消息');
     expect(conversationSection).toContain('完整消息 19');
+  });
+
+  test('does not create report conversations from legacy-only cards', () => {
+    const now = Date.parse('2026-07-16T04:00:00Z');
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [{
+          conversationId: 'c:phantom',
+          participantNames: ['幽灵甲', '幽灵乙'],
+          summary: '不应进入日报的旧卡片摘要',
+          updatedAt: now,
+          messages: [{ authorName: '幽灵甲', text: '旧卡片消息', createdAt: now }],
+        }],
+        residentActivity: [],
+        dailyMessages: [],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+    const interactionSection = report.slice(
+      report.indexOf('### 当日实际互动'),
+      report.indexOf('## 机构与地点'),
+    );
+    const conversationSection = report.slice(
+      report.indexOf('## 当日对话'),
+      report.indexOf('## 赛事与公共事件'),
+    );
+
+    expect(report).toContain('当日对话：0 组');
+    expect(interactionSection).toContain('- 当日无记录');
+    expect(conversationSection).toContain('- 当日无记录');
+    expect(report).not.toContain('幽灵甲');
+    expect(report).not.toContain('不应进入日报的旧卡片摘要');
   });
 
   test('marks resident settings separately and records daily partners and representative quotes', () => {

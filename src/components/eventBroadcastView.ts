@@ -88,8 +88,6 @@ const escapeMarkdown = (value: string) => value
 
 type LifeEvent = NonNullable<BroadcastSnapshot['dailyLifeEvents']>[number];
 type DailyMessage = BroadcastSnapshot['dailyMessages'][number];
-type LegacyConversation = BroadcastSnapshot['conversations'][number];
-type LegacyMessage = LegacyConversation['messages'][number];
 type EventLog = BroadcastSnapshot['logs'][number];
 
 type ReportConversation = {
@@ -98,7 +96,7 @@ type ReportConversation = {
   summary: string;
   updatedAt: number;
   messageCount: number;
-  messages: Array<DailyMessage | LegacyMessage>;
+  messages: DailyMessage[];
 };
 
 type DailyReportData = {
@@ -217,7 +215,7 @@ function buildReportConversations(data: DailyReportData) {
     messages.push(message);
     grouped.set(message.conversationId, messages);
   }
-  const conversations: ReportConversation[] = [...grouped.entries()].map(
+  return [...grouped.entries()].map(
     ([conversationId, messages]) => {
       const participantNames = [...new Set(messages.map((message) =>
         residentDisplayName(data, message.authorId, message.authorName),
@@ -232,23 +230,7 @@ function buildReportConversations(data: DailyReportData) {
         messages,
       };
     },
-  );
-  for (const conversation of data.snapshot.conversations) {
-    if (grouped.has(conversation.conversationId)
-      || !sameLocalDay(conversation.updatedAt, data.now)) continue;
-    const messages = conversation.messages
-      .filter((message) => sameLocalDay(message.createdAt, data.now))
-      .sort(chronological);
-    conversations.push({
-      conversationId: conversation.conversationId,
-      participantNames: conversation.participantNames,
-      summary: conversation.summary,
-      updatedAt: conversation.updatedAt,
-      messageCount: messages.length,
-      messages,
-    });
-  }
-  return conversations.sort((left, right) => left.updatedAt - right.updatedAt);
+  ).sort((left, right) => left.updatedAt - right.updatedAt);
 }
 
 function residentConversationFacts(data: DailyReportData, profileId: string) {
@@ -394,22 +376,13 @@ function conversationExcerptMessages(conversation: ReportConversation) {
   return conversation.messages.slice(-4);
 }
 
-function conversationExcerptAuthor(
-  data: DailyReportData,
-  message: DailyMessage | LegacyMessage,
-) {
-  return 'authorId' in message
-    ? residentIdentity(data, message.authorId, message.authorName)
-    : escapeMarkdown(message.authorName);
-}
-
 function buildConversationsSection(data: DailyReportData) {
   const lines: string[] = [];
   for (const conversation of data.conversations) {
     lines.push(`### ${conversation.participantNames.map(escapeMarkdown).join(' × ')}`, '');
     lines.push(`- 摘要：${escapeMarkdown(conversation.summary)}`);
     const excerpts = conversationExcerptMessages(conversation).map(
-      (message) => `${conversationExcerptAuthor(data, message)}：“${escapeMarkdown(message.text).slice(0, 100)}”`,
+      (message) => `${residentIdentity(data, message.authorId, message.authorName)}：“${escapeMarkdown(message.text).slice(0, 100)}”`,
     );
     lines.push(excerpts.length > 0 ? `- 对话摘录：${excerpts.join('；')}` : '- 对话摘录：当日无记录');
     lines.push('');
