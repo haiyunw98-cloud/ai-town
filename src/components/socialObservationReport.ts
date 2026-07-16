@@ -540,12 +540,6 @@ function extendsFallbackGrapheme(value: string) {
     || (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff);
 }
 
-function endsWithUnsafeGraphemePart(value: string) {
-  const codePoints = Array.from(value);
-  const finalCodePoint = codePoints[codePoints.length - 1] ?? '';
-  return finalCodePoint === '\u200d' || extendsFallbackGrapheme(finalCodePoint);
-}
-
 function fallbackReportGraphemes(value: string) {
   const clusters: string[] = [];
   let joinNext = false;
@@ -617,9 +611,6 @@ export function escapeReportMarkdown(
       renderedLength += encodedGraphemes[included].length;
       included += 1;
     }
-    while (included > 0 && endsWithUnsafeGraphemePart(graphemes[included - 1])) {
-      included -= 1;
-    }
     escaped = `${encodedGraphemes.slice(0, included).join('')}${truncationMarker}`;
   }
   if (/^[-+]\s/u.test(normalized)) return `\\${escaped}`;
@@ -627,27 +618,47 @@ export function escapeReportMarkdown(
   return escaped;
 }
 
-function uniqueReportLines(lines: string[]) {
-  return [...new Set(lines)];
+type ReportSectionItem = {
+  rawKey: string;
+  renderedLine: string;
+};
+
+function reportSectionItem(rawKey: unknown, renderedLine: string): ReportSectionItem {
+  return { rawKey: JSON.stringify(rawKey), renderedLine };
+}
+
+function uniqueReportItems(items: ReportSectionItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.rawKey)) return false;
+    seen.add(item.rawKey);
+    return true;
+  });
+}
+
+function uniqueRawStrings(values: string[]) {
+  return [...new Set(values)];
 }
 
 function renderReportSection(
   title: string,
-  sourceLines: string[],
+  sourceItems: ReportSectionItem[],
   maxItems: number,
   characterBudget: number,
   additionalOmitted = 0,
 ) {
   const prefix = `## ${title}\n\n`;
-  const uniqueLines = uniqueReportLines(sourceLines);
-  if (uniqueLines.length === 0 && additionalOmitted === 0) {
+  const uniqueItems = uniqueReportItems(sourceItems);
+  if (uniqueItems.length === 0 && additionalOmitted === 0) {
     return `${prefix}- 当日无记录`;
   }
-  const candidates = uniqueLines.slice(0, maxItems);
-  const totalRecords = uniqueLines.length + additionalOmitted;
+  const candidates = uniqueItems.slice(0, maxItems);
+  const totalRecords = uniqueItems.length + additionalOmitted;
   for (let displayed = candidates.length; displayed >= 0; displayed -= 1) {
     const omitted = totalRecords - displayed;
-    const bodyLines = candidates.slice(0, displayed).map((line) => `- ${line}`);
+    const bodyLines = candidates
+      .slice(0, displayed)
+      .map((item) => `- ${item.renderedLine}`);
     if (omitted > 0) bodyLines.push(`- 另有 ${omitted} 条记录未在本节展开`);
     const section = `${prefix}${bodyLines.join('\n')}`;
     if (section.length <= characterBudget) return section;
@@ -656,17 +667,18 @@ function renderReportSection(
 }
 
 function reportParticipants(participants: string[]) {
-  const uniqueParticipants = uniqueReportLines(
-    participants.map((participant) =>
+  const uniqueParticipants = uniqueRawStrings(participants);
+  const displayed = uniqueParticipants
+    .slice(0, REPORT_PARTICIPANT_LIMIT)
+    .map((participant) =>
       escapeReportMarkdown(
         participant,
         REPORT_NAME_GRAPHEME_LIMIT,
         '…',
         REPORT_NAME_RENDERED_LIMIT,
-      )),
-  );
+      ))
+    .join('、');
   if (uniqueParticipants.length === 0) return '当日无记录';
-  const displayed = uniqueParticipants.slice(0, REPORT_PARTICIPANT_LIMIT).join('、');
   const omitted = uniqueParticipants.length - REPORT_PARTICIPANT_LIMIT;
   return omitted > 0 ? `${displayed}；另有 ${omitted} 位参与者未展开` : displayed;
 }
@@ -682,26 +694,41 @@ export function buildSocialObservationReport(
       || resident.quotes.length > 0,
     )
     .map((resident) =>
-      `${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT, '…', REPORT_NAME_RENDERED_LIMIT)}：活动：${resident.activities.length} 项；当日可见伙伴：${resident.partners.length} 位`,
+      reportSectionItem(
+        ['resident-overview', resident],
+        `${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT, '…', REPORT_NAME_RENDERED_LIMIT)}：活动：${resident.activities.length} 项；当日可见伙伴：${resident.partners.length} 位`,
+      ),
     );
   const conversations = facts.conversations.map((conversation) =>
-    `会话 ${escapeReportMarkdown(conversation.conversationId, REPORT_ID_GRAPHEME_LIMIT, '…', REPORT_ID_RENDERED_LIMIT)}：参与者：${reportParticipants(conversation.participants)}；消息：${conversation.messageCount} 条`,
+    reportSectionItem(
+      ['conversation', conversation],
+      `会话 ${escapeReportMarkdown(conversation.conversationId, REPORT_ID_GRAPHEME_LIMIT, '…', REPORT_ID_RENDERED_LIMIT)}：参与者：${reportParticipants(conversation.participants)}；消息：${conversation.messageCount} 条`,
+    ),
   );
   const visiblePartners = facts.residentFacts.flatMap((resident) =>
     resident.partners.length > 0
-      ? [`${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT, '…', REPORT_NAME_RENDERED_LIMIT)}：当日可见伙伴：${reportParticipants(resident.partners)}`]
+      ? [reportSectionItem(
+        ['visible-partners', resident],
+        `${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT, '…', REPORT_NAME_RENDERED_LIMIT)}：当日可见伙伴：${reportParticipants(resident.partners)}`,
+      )]
       : [],
   );
   const activityLines = facts.activityFacts.map((activity) =>
-    `活动 ${escapeReportMarkdown(activity.at, 20, '…', 60)}｜${escapeReportMarkdown(activity.resident, REPORT_NAME_GRAPHEME_LIMIT, '…', REPORT_NAME_RENDERED_LIMIT)}｜${escapeReportMarkdown(activity.kind, 40, '…', 120)}｜${escapeReportMarkdown(activity.text, REPORT_TEXT_GRAPHEME_LIMIT, '…', REPORT_TEXT_RENDERED_LIMIT)}`,
+    reportSectionItem(
+      ['activity', activity],
+      `活动 ${escapeReportMarkdown(activity.at, 20, '…', 60)}｜${escapeReportMarkdown(activity.resident, REPORT_NAME_GRAPHEME_LIMIT, '…', REPORT_NAME_RENDERED_LIMIT)}｜${escapeReportMarkdown(activity.kind, 40, '…', 120)}｜${escapeReportMarkdown(activity.text, REPORT_TEXT_GRAPHEME_LIMIT, '…', REPORT_TEXT_RENDERED_LIMIT)}`,
+    ),
   );
   const institutionLines = facts.institutionUses
     .filter((use) => use.count > 0)
     .map((use) =>
-      `机构 ${escapeReportMarkdown(use.institution, REPORT_ID_GRAPHEME_LIMIT, '…', REPORT_ID_RENDERED_LIMIT)}：${use.count} 次`,
+      reportSectionItem(
+        ['institution', use],
+        `机构 ${escapeReportMarkdown(use.institution, REPORT_ID_GRAPHEME_LIMIT, '…', REPORT_ID_RENDERED_LIMIT)}：${use.count} 次`,
+      ),
     );
-  const uniqueActivityLines = uniqueReportLines(activityLines);
-  const uniqueInstitutionLines = uniqueReportLines(institutionLines);
+  const uniqueActivityLines = uniqueReportItems(activityLines);
+  const uniqueInstitutionLines = uniqueReportItems(institutionLines);
   const workAndInstitutionUses = [
     ...uniqueActivityLines.slice(0, 12),
     ...uniqueInstitutionLines.slice(0, 9),
@@ -709,7 +736,10 @@ export function buildSocialObservationReport(
   const omittedWorkAndInstitutionUses = Math.max(0, uniqueActivityLines.length - 12)
     + Math.max(0, uniqueInstitutionLines.length - 9);
   const publicLife = facts.publicFacts.map((fact) =>
-    `${escapeReportMarkdown(fact.at, 20, '…', 60)}｜${escapeReportMarkdown(fact.kind, 40, '…', 120)}｜${escapeReportMarkdown(fact.text, REPORT_TEXT_GRAPHEME_LIMIT, '…', REPORT_TEXT_RENDERED_LIMIT)}`,
+    reportSectionItem(
+      ['public-fact', fact],
+      `${escapeReportMarkdown(fact.at, 20, '…', 60)}｜${escapeReportMarkdown(fact.kind, 40, '…', 120)}｜${escapeReportMarkdown(fact.text, REPORT_TEXT_GRAPHEME_LIMIT, '…', REPORT_TEXT_RENDERED_LIMIT)}`,
+    ),
   );
   const narrative = result.source === 'model' && result.narrative.trim().length > 0
     ? escapeReportMarkdown(
@@ -721,20 +751,32 @@ export function buildSocialObservationReport(
     : '本次未使用模型扩写；本节仅保留程序生成的事实统计。';
   const followUpLines = [
     ...facts.conversations.map((conversation) =>
-      `继续记录会话 ${escapeReportMarkdown(conversation.conversationId, REPORT_ID_GRAPHEME_LIMIT, '…', REPORT_ID_RENDERED_LIMIT)} 中的当日互动是否延续。`,
+      reportSectionItem(
+        ['follow-up-conversation', conversation.conversationId],
+        `继续记录会话 ${escapeReportMarkdown(conversation.conversationId, REPORT_ID_GRAPHEME_LIMIT, '…', REPORT_ID_RENDERED_LIMIT)} 中的当日互动是否延续。`,
+      ),
     ),
     ...facts.residentFacts.flatMap((resident) =>
       resident.activities.length > 0
-        ? [`继续记录 ${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT, '…', REPORT_NAME_RENDERED_LIMIT)} 的当日活动是否延续。`]
+        ? [reportSectionItem(
+          ['follow-up-resident', resident.residentId, resident.name],
+          `继续记录 ${escapeReportMarkdown(resident.name, REPORT_NAME_GRAPHEME_LIMIT, '…', REPORT_NAME_RENDERED_LIMIT)} 的当日活动是否延续。`,
+        )]
         : [],
     ),
     ...facts.institutionUses
       .filter((use) => use.count > 0)
       .map((use) =>
-        `继续记录 ${escapeReportMarkdown(use.institution, REPORT_ID_GRAPHEME_LIMIT, '…', REPORT_ID_RENDERED_LIMIT)} 的当日使用是否延续。`,
+        reportSectionItem(
+          ['follow-up-institution', use.institution],
+          `继续记录 ${escapeReportMarkdown(use.institution, REPORT_ID_GRAPHEME_LIMIT, '…', REPORT_ID_RENDERED_LIMIT)} 的当日使用是否延续。`,
+        ),
       ),
     ...facts.publicFacts.map((fact) =>
-      `继续记录 ${escapeReportMarkdown(fact.kind, 40, '…', 120)} 类公共记录是否延续。`,
+      reportSectionItem(
+        ['follow-up-public', fact.kind],
+        `继续记录 ${escapeReportMarkdown(fact.kind, 40, '…', 120)} 类公共记录是否延续。`,
+      ),
     ),
   ];
 
@@ -742,8 +784,14 @@ export function buildSocialObservationReport(
     renderReportSection(
       '观察范围与数据覆盖',
       [
-        `记录范围：${escapeReportMarkdown(facts.recordRange, 80, '…', REPORT_ID_RENDERED_LIMIT)}`,
-        `居民：${facts.residentCount}；消息：${facts.messageCount}；生活事件：${facts.lifeEventCount}`,
+        reportSectionItem(
+          ['coverage-range', facts.recordRange],
+          `记录范围：${escapeReportMarkdown(facts.recordRange, 80, '…', REPORT_ID_RENDERED_LIMIT)}`,
+        ),
+        reportSectionItem(
+          ['coverage-counts', facts.residentCount, facts.messageCount, facts.lifeEventCount],
+          `居民：${facts.residentCount}；消息：${facts.messageCount}；生活事件：${facts.lifeEventCount}`,
+        ),
       ],
       2,
       reportSectionBudgets.coverage,
@@ -768,11 +816,17 @@ export function buildSocialObservationReport(
       reportSectionBudgets.publicLife,
     ),
     renderReportSection(
-      '观察者介入及其可见影响', [`观察者介入消息：${facts.observerInterventions} 条`],
+      '观察者介入及其可见影响', [reportSectionItem(
+        ['observer-interventions', facts.observerInterventions],
+        `观察者介入消息：${facts.observerInterventions} 条`,
+      )],
       1, reportSectionBudgets.observer,
     ),
     renderReportSection(
-      '本地模型辅助的谨慎观察', [narrative], 1, reportSectionBudgets.model,
+      '本地模型辅助的谨慎观察', [reportSectionItem(
+        ['model-narrative', result.source, result.narrative],
+        narrative,
+      )], 1, reportSectionBudgets.model,
     ),
     renderReportSection(
       '后续值得持续记录的线索', followUpLines, 12, reportSectionBudgets.followUp,
@@ -780,10 +834,19 @@ export function buildSocialObservationReport(
     renderReportSection(
       '方法与边界说明',
       [
-        '本日志仅组合当日快照中的可见记录，不补全原因、动机或结论。',
-        '人物设定不等于当日事实。',
-        '当日可见伙伴只表示当日共同会话，不代表稳定友情、亲密关系或合作关系。',
-        '可能/值得记录不是因果结论，也不代表稳定人格。',
+        reportSectionItem(
+          'method-facts-only',
+          '本日志仅组合当日快照中的可见记录，不补全原因、动机或结论。',
+        ),
+        reportSectionItem('method-settings', '人物设定不等于当日事实。'),
+        reportSectionItem(
+          'method-partners',
+          '当日可见伙伴只表示当日共同会话，不代表稳定友情、亲密关系或合作关系。',
+        ),
+        reportSectionItem(
+          'method-causality',
+          '可能/值得记录不是因果结论，也不代表稳定人格。',
+        ),
       ],
       4,
       reportSectionBudgets.method,
