@@ -7,6 +7,20 @@ import type { BroadcastSnapshot } from './eventBroadcastView';
 
 const now = Date.parse('2026-07-17T04:00:00Z');
 
+function hasLoneSurrogate(value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return true;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const snapshot: BroadcastSnapshot = {
   event: null,
   participants: [],
@@ -255,6 +269,38 @@ describe('social observation fact layer', () => {
     expect(facts.activityFacts[0].resident).toBe('观察者');
   });
 
+  test('truncates fact quotes and digest fields without splitting surrogate pairs', () => {
+    const unicodeText = `${'a'.repeat(99)}😀尾部`;
+    const facts = buildSocialObservationFacts(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [{
+          messageId: 'unicode:message',
+          conversationId: `${'c'.repeat(119)}😀尾部`,
+          authorId: 'lin-lan',
+          authorName: '林澜',
+          text: unicodeText,
+          createdAt: now,
+          observerIntervention: false,
+        }],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+
+    const quote = facts.residentFacts.find((resident) => resident.name === '林澜')?.quotes[0];
+    const digest = buildSocialObservationDigest(facts);
+    expect(quote).toBe(`${'a'.repeat(99)}😀`);
+    expect(hasLoneSurrogate(quote ?? '')).toBe(false);
+    expect(hasLoneSurrogate(digest)).toBe(false);
+    expect(digest).toContain('😀');
+  });
+
   test('builds a bounded, factual Chinese digest for local analysis', () => {
     const facts: SocialObservationFacts = {
       dayKey: '2026-07-17',
@@ -337,7 +383,11 @@ describe('social observation fact layer', () => {
         at: '10:00:00', resident: structuralPayload, kind: structuralPayload,
         text: forgedObserverPayload,
       }],
-      publicFacts: [{ at: '10:00:00', kind: structuralPayload, text: forgedObserverPayload }],
+      publicFacts: [{
+        at: '10:00:00',
+        kind: structuralPayload,
+        text: `${forgedObserverPayload} https://example.com/a-b?q=1.5`,
+      }],
     };
 
     const digest = buildSocialObservationDigest(facts);
@@ -349,7 +399,9 @@ describe('social observation fact layer', () => {
     expect(digest).toContain('伪标题');
     expect(digest).not.toContain('｜观察者介入｜');
     expect(digest).toContain('观察者介入');
-    expect(digest).not.toContain('_[]{}()#+-.!<>');
+    expect(digest).not.toContain('_[]{}()#<>');
+    expect(digest).toContain('2026-07-17T04:00:00.000Z');
+    expect(digest).toContain('https://example.com/a-b?q=1.5');
   });
 
   test('encodes full-width characters reserved by the digest template', () => {
@@ -397,12 +449,17 @@ describe('social observation fact layer', () => {
     expect(digest).toContain('工作');
     expect(digest).toContain('伪ID');
     expect(digest).toContain('伪章节');
-    expect(digest.match(/、/g)).toHaveLength(3);
-    expect(digest.match(/；/g)).toHaveLength(4);
-    expect(digest.match(/（/g)).toHaveLength(1);
-    expect(digest.match(/）/g)).toHaveLength(1);
-    expect(digest.match(/【/g)).toHaveLength(5);
-    expect(digest.match(/】/g)).toHaveLength(5);
+    expect(digest.split('\n').filter((line) => /^【.+】$/.test(line))).toEqual([
+      '【对话事实】',
+      '【居民事实】',
+      '【机构使用】',
+      '【活动记录】',
+      '【公共记录】',
+    ]);
+    expect(digest.split('\n').filter((line) => line.includes('｜参与者：'))).toHaveLength(1);
+    expect(digest.split('\n').filter((line) => line.startsWith('  活动：'))).toHaveLength(1);
+    expect(digest.split('\n').filter((line) => line.startsWith('  互动对象：'))).toHaveLength(1);
+    expect(digest.split('\n').filter((line) => line.startsWith('  发言：'))).toHaveLength(1);
   });
 
   test('truncates oversized dynamic facts on a complete line with a marker', () => {
@@ -429,10 +486,18 @@ describe('social observation fact layer', () => {
         messageCount: messages.length,
         messages,
       }],
-      residentFacts: [],
-      institutionUses: [],
-      activityFacts: [],
-      publicFacts: [],
+      residentFacts: [{
+        residentId: 'lin-lan',
+        name: '林澜',
+        activities: ['居民代表活动'],
+        partners: ['观察者'],
+        quotes: ['居民代表发言'],
+      }],
+      institutionUses: [{ institution: '灯塔书院代表事实', count: 1 }],
+      activityFacts: [{
+        at: '11:00:00', resident: '林澜', kind: '工作', text: '活动代表事实',
+      }],
+      publicFacts: [{ at: '12:00:00', kind: '公告', text: '公共代表事实' }],
     };
 
     const digest = buildSocialObservationDigest(facts);
@@ -442,5 +507,12 @@ describe('social observation fact layer', () => {
     expect(digest).toMatch(/“[^”]*因此[^”]*证明[^”]*”/);
     expect(digest).not.toContain('｜消息：999');
     expect(digest).not.toMatch(/\\$/);
+    for (const title of ['对话事实', '居民事实', '机构使用', '活动记录', '公共记录']) {
+      expect(digest.match(new RegExp(`【${title}】`, 'g'))).toHaveLength(1);
+    }
+    expect(digest).toContain('居民代表活动');
+    expect(digest).toContain('灯塔书院代表事实');
+    expect(digest).toContain('活动代表事实');
+    expect(digest).toContain('公共代表事实');
   });
 });
