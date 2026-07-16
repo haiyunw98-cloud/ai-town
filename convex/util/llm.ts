@@ -1,8 +1,4 @@
-import {
-  LLMConfig,
-  resolveLLMConfig,
-  sanitizeProviderError,
-} from './llmConfig';
+import { LLMConfig, resolveLLMConfig, sanitizeProviderError } from './llmConfig';
 
 export { EMBEDDING_DIMENSION } from './embeddingDimension';
 export type { LLMConfig } from './llmConfig';
@@ -46,7 +42,6 @@ export async function chatCompletion(
   body.model = body.model ?? config.chatModel;
   const stopWords = body.stop ? (typeof body.stop === 'string' ? [body.stop] : body.stop) : [];
   if (config.stopWords) stopWords.push(...config.stopWords);
-  console.log(body);
   const {
     result: content,
     retries,
@@ -83,7 +78,6 @@ export async function chatCompletion(
       if (content === undefined) {
         throw new Error('Unexpected result from OpenAI: ' + JSON.stringify(json));
       }
-      console.log(content);
       return content;
     }
   });
