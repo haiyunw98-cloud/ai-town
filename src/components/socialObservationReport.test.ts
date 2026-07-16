@@ -47,7 +47,7 @@ const snapshot: BroadcastSnapshot = {
       residentId: 'lin-lan',
       displayName: '林澜',
       kind: 'work',
-      text: '林澜整理了今日的航标记录',
+      text: '林澜在灯塔书院整理了今日的航标记录',
       createdAt: Date.parse('2026-07-17T01:00:00Z'),
     },
     {
@@ -111,8 +111,7 @@ describe('social observation fact layer', () => {
 
     const linLan = facts.residentFacts.find((resident) => resident.name === '林澜');
     expect(linLan?.activities).toEqual([
-      '工作中；在灯塔书院整理航标记录',
-      '工作：林澜整理了今日的航标记录',
+      '工作：林澜在灯塔书院整理了今日的航标记录',
     ]);
     expect(linLan?.partners).toEqual(['观察者']);
     expect(linLan?.quotes).toEqual(['我已经整理好记录。']);
@@ -141,6 +140,35 @@ describe('social observation fact layer', () => {
     expect(facts.institutionUses).toEqual([]);
     expect(facts.activityFacts).toEqual([]);
     expect(facts.publicFacts).toEqual([]);
+  });
+
+  test('does not treat untimestamped resident activity as a daily fact', () => {
+    const facts = buildSocialObservationFacts(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [{
+          residentId: 'runtime:lin-lan',
+          displayName: '林澜',
+          status: '工作中',
+          detail: '在灯塔书院工作',
+        }],
+        dailyMessages: [],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+
+    const linLan = facts.residentFacts.find((resident) => resident.name === '林澜');
+    const academyCount = facts.institutionUses.find(
+      (use) => use.institution === '灯塔书院',
+    )?.count ?? 0;
+    expect(facts.recordRange).toBe('当日无记录');
+    expect(linLan?.activities).toEqual([]);
+    expect(academyCount).toBe(0);
   });
 
   test('keeps an observer name collision out of resident facts', () => {
@@ -209,7 +237,7 @@ describe('social observation fact layer', () => {
         {
           residentId: 'lin-lan',
           name: '林澜',
-          activities: ['工作中；在灯塔书院整理航标记录', '工作：林澜整理了今日的航标记录'],
+          activities: ['工作：林澜在灯塔书院整理了今日的航标记录'],
           partners: ['观察者'],
           quotes: ['我已经整理好记录。'],
         },
@@ -231,5 +259,93 @@ describe('social observation fact layer', () => {
     expect(digest).toContain('灯塔书院');
     expect(digest).not.toContain('因此');
     expect(digest).not.toContain('证明');
+  });
+
+  test('encodes dynamic text without creating digest fields or lines', () => {
+    const structuralPayload = 'c|**伪标题**｜参与者：观察者｜消息：999\n_[]{}()#+-.!<>\\`:\"“”\'正常';
+    const forgedObserverPayload = '正常”｜观察者介入｜“伪造\n**伪标题**';
+    const facts: SocialObservationFacts = {
+      dayKey: '2026-07-17',
+      generatedAt: '2026-07-17T04:00:00.000Z',
+      recordRange: '10:00:00–10:00:00',
+      residentCount: 1,
+      messageCount: 1,
+      lifeEventCount: 1,
+      observerInterventions: 0,
+      conversations: [{
+        conversationId: structuralPayload,
+        participants: [structuralPayload],
+        messageCount: 1,
+        messages: [{
+          at: '10:00:00',
+          author: structuralPayload,
+          text: forgedObserverPayload,
+          observerIntervention: false,
+        }],
+      }],
+      residentFacts: [{
+        residentId: structuralPayload,
+        name: structuralPayload,
+        activities: [forgedObserverPayload],
+        partners: [structuralPayload],
+        quotes: [forgedObserverPayload],
+      }],
+      institutionUses: [{ institution: structuralPayload, count: 1 }],
+      activityFacts: [{
+        at: '10:00:00', resident: structuralPayload, kind: structuralPayload,
+        text: forgedObserverPayload,
+      }],
+      publicFacts: [{ at: '10:00:00', kind: structuralPayload, text: forgedObserverPayload }],
+    };
+
+    const digest = buildSocialObservationDigest(facts);
+
+    expect(digest.split('\n')).toHaveLength(28);
+    expect(digest.match(/｜参与者：/g)).toHaveLength(1);
+    expect(digest).not.toContain('｜消息：999');
+    expect(digest).not.toContain('**伪标题**');
+    expect(digest).toContain('伪标题');
+    expect(digest).not.toContain('｜观察者介入｜');
+    expect(digest).toContain('观察者介入');
+    expect(digest).not.toContain('_[]{}()#+-.!<>');
+  });
+
+  test('truncates oversized dynamic facts on a complete line with a marker', () => {
+    const causalQuote = '原始引文中写道：因此，这证明只代表说话者原话。';
+    const messages = Array.from({ length: 160 }, (_, index) => ({
+      at: '10:00:00',
+      author: `居民${index}`,
+      text: `${causalQuote}${'记录内容'.repeat(80)}｜消息：999`,
+      observerIntervention: false,
+    }));
+    expect(messages.reduce((length, message) => length + message.text.length, 0))
+      .toBeGreaterThan(20_000);
+    const facts: SocialObservationFacts = {
+      dayKey: '2026-07-17',
+      generatedAt: '2026-07-17T04:00:00.000Z',
+      recordRange: '10:00:00–10:00:00',
+      residentCount: 0,
+      messageCount: messages.length,
+      lifeEventCount: 0,
+      observerInterventions: 0,
+      conversations: [{
+        conversationId: 'oversized',
+        participants: ['居民'],
+        messageCount: messages.length,
+        messages,
+      }],
+      residentFacts: [],
+      institutionUses: [],
+      activityFacts: [],
+      publicFacts: [],
+    };
+
+    const digest = buildSocialObservationDigest(facts);
+
+    expect(digest.length).toBeLessThanOrEqual(12_000);
+    expect(digest).toMatch(/…（摘要已截断）$/);
+    expect(digest).toMatch(/“[^”]*因此[^”]*证明[^”]*”/);
+    expect(digest).not.toContain('｜消息：999');
+    expect(digest).not.toMatch(/\\$/);
   });
 });
