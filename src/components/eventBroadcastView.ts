@@ -262,7 +262,11 @@ function residentConversationFacts(data: DailyReportData, profileId: string) {
   const conversationIds = new Set(residentMessages.map((message) => message.conversationId));
   const partnerNames = new Set<string>();
   for (const message of data.dailyMessages) {
-    if (message.observerIntervention || !conversationIds.has(message.conversationId)) continue;
+    if (!conversationIds.has(message.conversationId)) continue;
+    if (message.observerIntervention) {
+      partnerNames.add('观察者');
+      continue;
+    }
     const partner = resolveResidentProfile(data, message.authorId, message.authorName);
     if (partner && partner.id !== profileId) partnerNames.add(partner.name);
   }

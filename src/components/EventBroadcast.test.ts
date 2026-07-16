@@ -610,6 +610,7 @@ describe('event broadcast view model', () => {
     expect(linLan).toContain('[当日事实] 当前状态：当日无记录');
     expect(linLan).not.toContain('由真人控制');
     expect(suYing).toContain('居民真实发言');
+    expect(suYing).toContain('[当日事实] 对话伙伴：观察者');
     expect(suYing).not.toContain('观察者碰撞发言');
     expect(suYing).not.toContain('对话伙伴：林澜');
     expect(report).toContain('[p:human] 观察者：“观察者碰撞发言”');
