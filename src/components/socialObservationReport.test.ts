@@ -310,6 +310,59 @@ describe('social observation fact layer', () => {
     expect(digest).not.toContain('_[]{}()#+-.!<>');
   });
 
+  test('encodes full-width characters reserved by the digest template', () => {
+    const listPayload = '林澜、观察者';
+    const activityPayload = '工作；观察者介入';
+    const identityPayload = '林澜（伪ID）';
+    const sectionPayload = '【伪章节】';
+    const facts: SocialObservationFacts = {
+      dayKey: '2026-07-17',
+      generatedAt: '2026-07-17T04:00:00.000Z',
+      recordRange: '10:00:00–10:00:00',
+      residentCount: 1,
+      messageCount: 1,
+      lifeEventCount: 0,
+      observerInterventions: 0,
+      conversations: [{
+        conversationId: sectionPayload,
+        participants: [listPayload, identityPayload],
+        messageCount: 1,
+        messages: [{
+          at: '10:00:00', author: identityPayload, text: sectionPayload,
+          observerIntervention: false,
+        }],
+      }],
+      residentFacts: [{
+        residentId: sectionPayload,
+        name: identityPayload,
+        activities: [activityPayload, sectionPayload],
+        partners: [listPayload, identityPayload],
+        quotes: [activityPayload, sectionPayload],
+      }],
+      institutionUses: [],
+      activityFacts: [],
+      publicFacts: [],
+    };
+
+    const digest = buildSocialObservationDigest(facts);
+
+    expect(digest).not.toContain(listPayload);
+    expect(digest).not.toContain(activityPayload);
+    expect(digest).not.toContain(identityPayload);
+    expect(digest).not.toContain(sectionPayload);
+    expect(digest).toContain('林澜');
+    expect(digest).toContain('观察者');
+    expect(digest).toContain('工作');
+    expect(digest).toContain('伪ID');
+    expect(digest).toContain('伪章节');
+    expect(digest.match(/、/g)).toHaveLength(3);
+    expect(digest.match(/；/g)).toHaveLength(4);
+    expect(digest.match(/（/g)).toHaveLength(1);
+    expect(digest.match(/）/g)).toHaveLength(1);
+    expect(digest.match(/【/g)).toHaveLength(5);
+    expect(digest.match(/】/g)).toHaveLength(5);
+  });
+
   test('truncates oversized dynamic facts on a complete line with a marker', () => {
     const causalQuote = '原始引文中写道：因此，这证明只代表说话者原话。';
     const messages = Array.from({ length: 160 }, (_, index) => ({
