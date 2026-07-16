@@ -5,34 +5,15 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { useI18n } from '../i18n';
 import type { Locale } from '../i18n';
 import {
-  buildDailyReport,
   buildBroadcastView,
   buildTownStory,
-  resolveSocialNarrative,
-  shanghaiDayKey,
   type BroadcastSnapshot,
 } from './eventBroadcastView';
 import {
-  buildSocialObservationDigest,
-  buildSocialObservationFacts,
-  buildSocialObservationReport,
-} from './socialObservationReport';
+  exportFactualReport,
+  exportSocialReport,
+} from './reportExportController';
 import type { GameId } from '../../convex/aiTown/ids';
-
-function downloadMarkdown(body: string, filename: string) {
-  const blob = new Blob([body], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  try {
-    document.body.append(anchor);
-    anchor.click();
-  } finally {
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  }
-}
 
 export default function EventBroadcast({
   worldId,
@@ -61,31 +42,15 @@ export default function EventBroadcast({
   const story = buildTownStory(snapshot.conversations);
   const eventCompleted = snapshot.event?.status === 'completed';
   const exportFacts = () => {
-    const exportNow = Date.now();
-    downloadMarkdown(
-      buildDailyReport(snapshot, locale, exportNow),
-      `灯塔镇事实流水账-${shanghaiDayKey(exportNow)}.md`,
-    );
+    exportFactualReport({ snapshot, locale, exportNow: Date.now() });
   };
-  const exportSocialObservation = async () => {
-    if (socialReportPendingRef.current) return;
-    socialReportPendingRef.current = true;
-    setSocialReportPending(true);
-    const exportNow = Date.now();
-    try {
-      const facts = buildSocialObservationFacts(snapshot, locale, exportNow);
-      const result = await resolveSocialNarrative(() =>
-        generateSocialObservation({ digest: buildSocialObservationDigest(facts) }),
-      );
-      downloadMarkdown(
-        buildSocialObservationReport(facts, result),
-        `灯塔镇社会观察日志-${shanghaiDayKey(exportNow)}.md`,
-      );
-    } finally {
-      socialReportPendingRef.current = false;
-      setSocialReportPending(false);
-    }
-  };
+  const exportSocialObservation = () => exportSocialReport(socialReportPendingRef, {
+    snapshot,
+    locale,
+    exportNow: Date.now(),
+    generate: generateSocialObservation,
+    setPending: setSocialReportPending,
+  });
   return (
     <section className="event-broadcast" aria-label={view.title}>
       <div className="daily-report-export">
@@ -94,7 +59,7 @@ export default function EventBroadcast({
           <small>人物、关系、地点、活动与原始对话</small>
         </div>
         <div className="daily-report-actions">
-          <button onClick={exportFacts}>↓ 导出事实流水账</button>
+          <button onClick={exportFacts}>导出事实流水账</button>
           <button
             onClick={() => void exportSocialObservation()}
             disabled={socialReportPending}
