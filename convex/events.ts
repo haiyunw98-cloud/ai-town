@@ -25,6 +25,17 @@ export function isObserverIntervention(
   return humanPlayerIds.has(authorId);
 }
 
+export function collectHumanPlayerIds(
+  currentPlayers: ReadonlyArray<{ id: string; human?: string }>,
+  archivedPlayers: ReadonlyArray<{ id: string; human?: string }>,
+) {
+  return new Set(
+    [...currentPlayers, ...archivedPlayers]
+      .filter((player) => !!player.human)
+      .map((player) => player.id),
+  );
+}
+
 export const ensureFirstEvent = mutation({
   args: {},
   handler: async (ctx) => {
@@ -96,9 +107,11 @@ export const observerSnapshot = query({
       .collect();
     const names = new Map(descriptions.map((entry) => [entry.playerId, entry.name]));
     const world = await ctx.db.get(worldId);
-    const humanPlayerIds = new Set(
-      (world?.players ?? []).filter((player) => !!player.human).map((player) => player.id),
-    );
+    const archivedPlayers = await ctx.db
+      .query('archivedPlayers')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
+      .collect();
+    const humanPlayerIds = collectHumanPlayerIds(world?.players ?? [], archivedPlayers);
     const dailyLifeEvents = (await ctx.db
       .query('lifeEvents')
       .filter((q) => q.eq(q.field('worldId'), worldId))
@@ -259,6 +272,7 @@ function cleanDialogue(text: string) {
 function buildResidentActivity(
   players: Array<{
     id: string;
+    human?: string;
     pathfinding?: { destination: { x: number; y: number }; state: { kind: string } };
     activity?: { description: string; emoji?: string; until: number };
   }>,
@@ -270,6 +284,7 @@ function buildResidentActivity(
   names: Map<string, string>,
 ) {
   return players.map((player) => {
+    const observerControlled = !!player.human;
     const conversation = conversations.find((entry) =>
       entry.participants.some((participant) => participant.playerId === player.id),
     );
@@ -288,6 +303,7 @@ function buildResidentActivity(
       return {
         residentId: player.id,
         displayName: names.get(player.id) ?? '居民',
+        observerControlled,
         status,
         detail: `与 ${partnerIds.map((id) => names.get(id) ?? '居民').join('、')} 相处`,
       };
@@ -296,6 +312,7 @@ function buildResidentActivity(
       return {
         residentId: player.id,
         displayName: names.get(player.id) ?? '居民',
+        observerControlled,
         status: '赶路中',
         detail: `前往坐标 ${player.pathfinding.destination.x}, ${player.pathfinding.destination.y}`,
       };
@@ -303,6 +320,7 @@ function buildResidentActivity(
     return {
       residentId: player.id,
       displayName: names.get(player.id) ?? '居民',
+      observerControlled,
       status: '生活中',
       detail: player.activity
         ? `${player.activity.emoji ?? '•'} ${player.activity.description}`

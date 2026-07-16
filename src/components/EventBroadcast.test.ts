@@ -46,13 +46,28 @@ describe('event broadcast view model', () => {
     const eventsModule = await import('../../convex/events') as Record<string, unknown>;
 
     expect(eventsModule).toHaveProperty('isObserverIntervention');
+    expect(eventsModule).toHaveProperty('collectHumanPlayerIds');
     const isObserverIntervention = eventsModule.isObserverIntervention as (
       humanPlayerIds: ReadonlySet<string>,
       authorId: string,
     ) => boolean;
-    const humanPlayerIds = new Set(['p:human']);
+    const collectHumanPlayerIds = eventsModule.collectHumanPlayerIds as (
+      currentPlayers: Array<{ id: string; human?: string }>,
+      archivedPlayers: Array<{ id: string; human?: string }>,
+    ) => Set<string>;
+    const humanPlayerIds = collectHumanPlayerIds(
+      [
+        { id: 'p:human', human: 'current-user' },
+        { id: 'p:named-ai' },
+      ],
+      [
+        { id: 'p:archived-human', human: 'former-user' },
+        { id: 'p:missing-description-ai' },
+      ],
+    );
 
     expect(isObserverIntervention(humanPlayerIds, 'p:human')).toBe(true);
+    expect(isObserverIntervention(humanPlayerIds, 'p:archived-human')).toBe(true);
     expect(isObserverIntervention(humanPlayerIds, 'p:named-ai')).toBe(false);
     expect(isObserverIntervention(humanPlayerIds, 'p:missing-description-ai')).toBe(false);
   });
@@ -555,6 +570,89 @@ describe('event broadcast view model', () => {
     expect(report).not.toContain('不应进入日报的旧卡片摘要');
   });
 
+  test('keeps observer name collisions outside resident identity and daily facts', () => {
+    const now = Date.parse('2026-07-16T04:00:00Z');
+    const residentActivity = [
+      {
+        residentId: 'p:human', displayName: 'Lin Lan', status: '观察中', detail: '由真人控制',
+        observerControlled: true,
+      },
+      {
+        residentId: 'p:su', displayName: 'Su Ying', status: '工作中', detail: '整理工具',
+        observerControlled: false,
+      },
+    ] as Array<BroadcastSnapshot['residentActivity'][number] & { observerControlled: boolean }>;
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity,
+        dailyMessages: [
+          {
+            messageId: 'm:observer', conversationId: 'c:collision', authorId: 'p:human', authorName: '苏萤',
+            text: '观察者碰撞发言', createdAt: now - 1_000, observerIntervention: true,
+          },
+          {
+            messageId: 'm:resident', conversationId: 'c:collision', authorId: 'p:su', authorName: 'Su Ying',
+            text: '居民真实发言', createdAt: now, observerIntervention: false,
+          },
+        ],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+    const linLan = report.slice(report.indexOf('### 林澜'), report.indexOf('### 沈砚'));
+    const suYing = report.slice(report.indexOf('### 苏萤'), report.indexOf('### 白露'));
+
+    expect(linLan).toContain('[当日事实] 当前状态：当日无记录');
+    expect(linLan).not.toContain('由真人控制');
+    expect(suYing).toContain('居民真实发言');
+    expect(suYing).not.toContain('观察者碰撞发言');
+    expect(suYing).not.toContain('对话伙伴：林澜');
+    expect(report).toContain('[p:human] 观察者：“观察者碰撞发言”');
+    expect(report).toContain('[p:human] 观察者｜观察者介入｜观察者碰撞发言');
+    expect(report).not.toContain('[p:human] 林澜');
+    expect(report).not.toContain('[p:human] 苏萤');
+  });
+
+  test('summarizes only same-day messages without reusing a matching legacy summary', () => {
+    const now = Date.parse('2026-07-15T16:30:00Z');
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [{
+          conversationId: 'c:midnight',
+          participantNames: ['林澜', '苏萤'],
+          summary: '昨日跨午夜旧摘要不应出现',
+          updatedAt: now,
+          messages: [],
+        }],
+        residentActivity: [],
+        dailyMessages: [{
+          messageId: 'm:today', conversationId: 'c:midnight', authorId: 'lin-lan', authorName: '林澜',
+          text: '今日零点后的确认记录', createdAt: Date.parse('2026-07-15T16:10:00Z'),
+          observerIntervention: false,
+        }],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+    const conversationSection = report.slice(
+      report.indexOf('## 当日对话'),
+      report.indexOf('## 赛事与公共事件'),
+    );
+
+    expect(conversationSection).not.toContain('昨日跨午夜旧摘要不应出现');
+    expect(conversationSection).toContain('参与者共交换 1 条消息');
+    expect(conversationSection).toContain('今日零点后的确认记录');
+  });
+
   test('marks resident settings separately and records daily partners and representative quotes', () => {
     const now = Date.parse('2026-07-16T04:00:00Z');
     const report = buildDailyReport(
@@ -661,6 +759,35 @@ describe('event broadcast view model', () => {
     expect(publicSection).toContain('- 当日无记录');
     expect(publicSection).not.toContain('普通消息日志');
     expect(report).toContain('记录范围：当日无记录');
+  });
+
+  test('labels an event without same-day logs as historical state', () => {
+    const now = Date.parse('2026-07-16T04:00:00Z');
+    const report = buildDailyReport(
+      {
+        event: {
+          id: 'event:historical', name: '昨日赛事', status: 'completed', phase: 'awards',
+          phaseEndsAt: now - 24 * 60 * 60 * 1000, winnerId: 'lin-lan', prize: '纪念贝壳',
+        },
+        participants: [{
+          residentId: 'lin-lan', displayName: '林澜', score: 1, shells: 1,
+          active: false, role: 'winner',
+        }],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [],
+        dailyLifeEvents: [],
+      },
+      'zh-CN',
+      now,
+    );
+    const publicSection = report.slice(
+      report.indexOf('## 赛事与公共事件'),
+      report.indexOf('## 生活记录附录'),
+    );
+
+    expect(publicSection).toContain('赛事状态（非当日事件记录）');
   });
 
   test('renders the complete same-day record range in Shanghai time', () => {
