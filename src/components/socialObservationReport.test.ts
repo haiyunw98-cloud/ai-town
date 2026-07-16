@@ -930,8 +930,69 @@ describe('social observation fact layer', () => {
       null,
     );
 
-    expect(escaped).toBe(`${family}…`);
-    expect(beforeMarker).not.toMatch(/[\u200d\ufe0e\ufe0f\p{M}]$/u);
-    expect(variationEscaped).toBe('A…');
+    expect(escaped).toBe(`${family}${combining}…`);
+    expect(beforeMarker).toBe(`${family}${combining}`);
+    expect(variationEscaped).toBe(`A✈️${combining}…`);
+  });
+
+  test('counts raw unique facts even when their rendered prefixes collide after truncation', () => {
+    const conversationPrefix = '相同会话前缀'.repeat(30);
+    const participantPrefix = '相同居民前缀'.repeat(20);
+    const publicKindPrefix = '相同公告类型'.repeat(20);
+    const publicTextPrefix = '相同公共记录'.repeat(30);
+    const conversations = Array.from({ length: 500 }, (_, index) => ({
+      conversationId: `${conversationPrefix}-${index}`,
+      participants: Array.from({ length: 10 }, (__, participant) =>
+        `${participantPrefix}-${participant}`),
+      messageCount: 1,
+      messages: [],
+    }));
+    const publicFacts = Array.from({ length: 500 }, (_, index) => ({
+      at: '11:00:00',
+      kind: `${publicKindPrefix}-${index}`,
+      text: `${publicTextPrefix}-${index}`,
+    }));
+    const report = buildSocialObservationReport(
+      {
+        ...factsFixture,
+        conversations,
+        residentFacts: [],
+        institutionUses: [],
+        activityFacts: [],
+        publicFacts,
+      },
+      { source: 'fallback', narrative: '' },
+    );
+
+    expect(report.length).toBeLessThanOrEqual(12_000);
+    expect(report.match(/^## .+$/gm)).toHaveLength(10);
+    expectAccurateOmission(report, '居民互动网络与关系动向', 500);
+    expectAccurateOmission(report, '公共生活、规范、分歧与协调', 500);
+    expectAccurateOmission(report, '后续值得持续记录的线索', 1000);
+    expect(reportSection(report, '居民互动网络与关系动向'))
+      .toContain('另有 4 位参与者未展开');
+  });
+
+  test('retains complete combining, variation-selector, and ZWJ graphemes at truncation', () => {
+    const combining = 'e\u0301';
+    const plane = '✈️';
+    const family = '👨‍👩‍👧‍👦';
+    const cases = [
+      escapeReportMarkdown(combining.repeat(4), 3, '…', 200),
+      escapeReportMarkdown(combining.repeat(4), 3, '…', 200, null),
+      escapeReportMarkdown(plane.repeat(4), 3, '…', 200),
+      escapeReportMarkdown(plane.repeat(4), 3, '…', 200, null),
+      escapeReportMarkdown(family.repeat(4), 3, '…', 200),
+      escapeReportMarkdown(family.repeat(4), 3, '…', 200, null),
+    ];
+
+    expect(cases).toEqual([
+      `${combining.repeat(3)}…`,
+      `${combining.repeat(3)}…`,
+      `${plane.repeat(3)}…`,
+      `${plane.repeat(3)}…`,
+      `${family.repeat(3)}…`,
+      `${family.repeat(3)}…`,
+    ]);
   });
 });
