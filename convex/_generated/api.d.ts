@@ -43,6 +43,7 @@ import type * as init from "../init.js";
 import type * as lives from "../lives.js";
 import type * as messages from "../messages.js";
 import type * as music from "../music.js";
+import type * as socialObservations from "../socialObservations.js";
 import type * as testing from "../testing.js";
 import type * as util_FastIntegerCompression from "../util/FastIntegerCompression.js";
 import type * as util_assertNever from "../util/assertNever.js";
@@ -103,6 +104,7 @@ declare const fullApi: ApiFromModules<{
   lives: typeof lives;
   messages: typeof messages;
   music: typeof music;
+  socialObservations: typeof socialObservations;
   testing: typeof testing;
   "util/FastIntegerCompression": typeof util_FastIntegerCompression;
   "util/assertNever": typeof util_assertNever;

@@ -906,6 +906,14 @@ p[contenteditable='true']:empty::before {
   gap: 2px;
 }
 
+.daily-report-export > .daily-report-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .daily-report-export strong {
   color: #ffedbd;
   font-size: 12px;
@@ -929,9 +937,30 @@ p[contenteditable='true']:empty::before {
   box-shadow: inset 0 0 0 1px rgba(105, 51, 24, 0.2);
 }
 
-.daily-report-export button:hover {
+.daily-report-export button:hover:not([disabled]) {
   filter: brightness(1.08);
   transform: translateY(-1px);
+}
+
+.daily-report-actions button[disabled] {
+  cursor: wait;
+  filter: saturate(0.6);
+  opacity: 0.75;
+}
+
+@media (max-width: 760px) {
+  .daily-report-export {
+    align-items: flex-start;
+    padding: 9px 10px;
+  }
+
+  .daily-report-export > .daily-report-actions {
+    flex: 1 1 100%;
+  }
+
+  .daily-report-actions button {
+    flex: 1 1 128px;
+  }
 }
 
 .event-poster-compact {
