@@ -32,7 +32,22 @@ export type PreparedReport = {
 
 type Download = (body: string, filename: string) => void;
 type GenerateSocialObservation = (args: { digest: string }) => Promise<unknown>;
-type PendingLock = { current: boolean };
+
+export type SocialReportExportOptions = {
+  snapshot: BroadcastSnapshot;
+  locale: Locale;
+  exportNow: number;
+  generate: GenerateSocialObservation;
+  download?: Download;
+};
+
+export type SocialReportExportStore = {
+  getSnapshot: () => boolean;
+  subscribe: (listener: () => void) => () => void;
+  run: (options: SocialReportExportOptions) => Promise<boolean>;
+};
+
+const socialReportExportStores = new Map<string, SocialReportExportStore>();
 
 function browserDownloadEnvironment(): MarkdownDownloadEnvironment {
   return {
@@ -79,33 +94,77 @@ export function exportFactualReport(options: {
   return prepared;
 }
 
-export async function exportSocialReport(
-  lock: PendingLock,
-  options: {
-    snapshot: BroadcastSnapshot;
-    locale: Locale;
-    exportNow: number;
-    generate: GenerateSocialObservation;
-    download?: Download;
-    setPending?: (pending: boolean) => void;
-  },
-) {
-  if (lock.current) return false;
-  lock.current = true;
-  try {
-    options.setPending?.(true);
-    const facts = buildSocialObservationFacts(options.snapshot, options.locale, options.exportNow);
-    const result = await resolveSocialNarrative(() =>
-      options.generate({ digest: buildSocialObservationDigest(facts) }),
-    );
-    const prepared = {
-      body: buildSocialObservationReport(facts, result),
-      filename: `灯塔镇社会观察日志-${shanghaiDayKey(options.exportNow)}.md`,
-    };
-    (options.download ?? downloadMarkdown)(prepared.body, prepared.filename);
-    return true;
-  } finally {
-    lock.current = false;
-    options.setPending?.(false);
-  }
+async function performSocialReportExport(options: SocialReportExportOptions) {
+  const facts = buildSocialObservationFacts(options.snapshot, options.locale, options.exportNow);
+  const result = await resolveSocialNarrative(() =>
+    options.generate({ digest: buildSocialObservationDigest(facts) }),
+  );
+  const prepared = {
+    body: buildSocialObservationReport(facts, result),
+    filename: `灯塔镇社会观察日志-${shanghaiDayKey(options.exportNow)}.md`,
+  };
+  (options.download ?? downloadMarkdown)(prepared.body, prepared.filename);
+}
+
+export function createSocialReportExportStore(onIdle?: () => void): SocialReportExportStore {
+  let pending = false;
+  let running = false;
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of [...listeners]) listener();
+  };
+  const finishIfIdle = () => {
+    if (running || listeners.size > 0) return;
+    queueMicrotask(() => {
+      if (!running && listeners.size === 0) onIdle?.();
+    });
+  };
+  const store: SocialReportExportStore = {
+    getSnapshot: () => pending,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+        finishIfIdle();
+      };
+    },
+    run: (options) => {
+      if (running) return Promise.resolve(false);
+      running = true;
+      pending = true;
+      notify();
+      return performSocialReportExport(options)
+        .then(() => true)
+        .finally(() => {
+          running = false;
+          pending = false;
+          notify();
+          finishIfIdle();
+        });
+    },
+  };
+  return store;
+}
+
+export function getSocialReportExportStore(worldId: string) {
+  const existing = socialReportExportStores.get(worldId);
+  if (existing) return existing;
+  const store = createSocialReportExportStore(() => {
+    if (socialReportExportStores.get(worldId) === store) {
+      socialReportExportStores.delete(worldId);
+    }
+  });
+  socialReportExportStores.set(worldId, store);
+  return store;
+}
+
+export function buildReportActionsView(pending: boolean) {
+  return {
+    factualLabel: '导出事实流水账',
+    factualDisabled: false,
+    socialLabel: pending ? '正在整理社会观察' : '生成社会观察日志',
+    socialDisabled: pending,
+    socialBusy: pending,
+    liveStatus: pending ? '正在整理社会观察' : '',
+  };
 }

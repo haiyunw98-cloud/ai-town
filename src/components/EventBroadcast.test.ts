@@ -836,17 +836,16 @@ describe('event broadcast view model', () => {
     const source = readFileSync(new URL('./EventBroadcast.tsx', import.meta.url), 'utf8');
     const styles = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 
-    expect(source).toContain('导出事实流水账');
-    expect(source).toContain('生成社会观察日志');
-    expect(source).toContain('正在整理社会观察');
     expect(source).toContain('人物、关系、地点、活动与原始对话');
     expect(source).toContain('useAction(api.socialObservations.generate)');
+    expect(source).toContain('useSyncExternalStore(');
     expect(source).toContain('exportFactualReport({ snapshot, locale, exportNow: Date.now() })');
-    expect(source).toContain('exportSocialReport(socialReportPendingRef');
-    expect(source).toContain('disabled={socialReportPending}');
-    expect(source).toContain('<button onClick={exportFacts}>导出事实流水账</button>');
-    expect(source.match(/disabled=\{socialReportPending\}/g)).toHaveLength(1);
-    expect(source.match(/aria-busy=\{socialReportPending\}/g)).toHaveLength(1);
+    expect(source).toContain('socialReportStore.run({');
+    expect(source).toContain('<button onClick={exportFacts}>{reportActions.factualLabel}</button>');
+    expect(source.match(/disabled=\{reportActions\.socialDisabled\}/g)).toHaveLength(1);
+    expect(source.match(/aria-busy=\{reportActions\.socialBusy\}/g)).toHaveLength(1);
+    expect(source).toContain('aria-live="polite"');
+    expect(source).toContain('{reportActions.liveStatus}');
     expect(styles).toContain('.daily-report-actions');
     expect(styles).toContain('.daily-report-actions button[disabled]');
   });

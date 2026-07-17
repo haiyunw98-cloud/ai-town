@@ -1,9 +1,9 @@
 import { jest } from '@jest/globals';
 import { buildDailyReport, type BroadcastSnapshot } from './eventBroadcastView';
 import {
+  createSocialReportExportStore,
   downloadMarkdown,
   exportFactualReport,
-  exportSocialReport,
   type MarkdownDownloadEnvironment,
 } from './reportExportController';
 
@@ -45,10 +45,13 @@ describe('town report export controller', () => {
     const download = jest.fn();
 
     await expect(
-      exportSocialReport(
-        { current: false },
-        { snapshot, locale: 'zh-CN', exportNow, generate, download },
-      ),
+      createSocialReportExportStore().run({
+        snapshot,
+        locale: 'zh-CN',
+        exportNow,
+        generate,
+        download,
+      }),
     ).resolves.toBe(true);
 
     expect(generate).toHaveBeenCalledTimes(1);
@@ -67,10 +70,13 @@ describe('town report export controller', () => {
     const download = jest.fn();
 
     await expect(
-      exportSocialReport(
-        { current: false },
-        { snapshot, locale: 'zh-CN', exportNow, generate, download },
-      ),
+      createSocialReportExportStore().run({
+        snapshot,
+        locale: 'zh-CN',
+        exportNow,
+        generate,
+        download,
+      }),
     ).resolves.toBe(true);
 
     expect(download).toHaveBeenCalledWith(
@@ -139,19 +145,19 @@ describe('town report export controller', () => {
         }),
     );
     const download = jest.fn();
-    const setPending = jest.fn();
-    const lock = { current: false };
+    const store = createSocialReportExportStore();
+    const pendingSnapshots: boolean[] = [];
+    const unsubscribe = store.subscribe(() => pendingSnapshots.push(store.getSnapshot()));
     const options = {
       snapshot,
       locale: 'zh-CN' as const,
       exportNow,
       generate,
       download,
-      setPending,
     };
 
-    const first = exportSocialReport(lock, options);
-    const duplicate = exportSocialReport(lock, options);
+    const first = store.run(options);
+    const duplicate = store.run(options);
 
     await expect(duplicate).resolves.toBe(false);
     expect(generate).toHaveBeenCalledTimes(1);
@@ -159,7 +165,8 @@ describe('town report export controller', () => {
     resolveGeneration({ source: 'fallback', narrative: '' });
     await expect(first).resolves.toBe(true);
     expect(download).toHaveBeenCalledTimes(1);
-    expect(setPending.mock.calls).toEqual([[true], [false]]);
-    expect(lock.current).toBe(false);
+    expect(pendingSnapshots).toEqual([true, false]);
+    expect(store.getSnapshot()).toBe(false);
+    unsubscribe();
   });
 });

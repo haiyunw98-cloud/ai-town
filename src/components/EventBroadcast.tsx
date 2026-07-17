@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useAction, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -10,8 +10,9 @@ import {
   type BroadcastSnapshot,
 } from './eventBroadcastView';
 import {
+  buildReportActionsView,
   exportFactualReport,
-  exportSocialReport,
+  getSocialReportExportStore,
 } from './reportExportController';
 import type { GameId } from '../../convex/aiTown/ids';
 
@@ -28,8 +29,13 @@ export default function EventBroadcast({
     | undefined;
   const generateSocialObservation = useAction(api.socialObservations.generate);
   const [now, setNow] = useState(Date.now());
-  const [socialReportPending, setSocialReportPending] = useState(false);
-  const socialReportPendingRef = useRef(false);
+  const socialReportStore = getSocialReportExportStore(worldId);
+  const socialReportPending = useSyncExternalStore(
+    socialReportStore.subscribe,
+    socialReportStore.getSnapshot,
+    socialReportStore.getSnapshot,
+  );
+  const reportActions = buildReportActionsView(socialReportPending);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
@@ -44,12 +50,11 @@ export default function EventBroadcast({
   const exportFacts = () => {
     exportFactualReport({ snapshot, locale, exportNow: Date.now() });
   };
-  const exportSocialObservation = () => exportSocialReport(socialReportPendingRef, {
+  const exportSocialObservation = () => socialReportStore.run({
     snapshot,
     locale,
     exportNow: Date.now(),
     generate: generateSocialObservation,
-    setPending: setSocialReportPending,
   });
   return (
     <section className="event-broadcast" aria-label={view.title}>
@@ -59,14 +64,17 @@ export default function EventBroadcast({
           <small>人物、关系、地点、活动与原始对话</small>
         </div>
         <div className="daily-report-actions">
-          <button onClick={exportFacts}>导出事实流水账</button>
+          <button onClick={exportFacts}>{reportActions.factualLabel}</button>
           <button
             onClick={() => void exportSocialObservation()}
-            disabled={socialReportPending}
-            aria-busy={socialReportPending}
+            disabled={reportActions.socialDisabled}
+            aria-busy={reportActions.socialBusy}
           >
-            {socialReportPending ? '正在整理社会观察' : '生成社会观察日志'}
+            {reportActions.socialLabel}
           </button>
+          <span className="report-status-live" aria-live="polite" aria-atomic="true">
+            {reportActions.liveStatus}
+          </span>
         </div>
       </div>
       {view.mode === 'event' && snapshot.event && (
