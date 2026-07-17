@@ -111,7 +111,7 @@ export default function EventBroadcast({
         <span className="event-kicker">观察者速报 · 自动归纳</span>
         <h3>{story.headline}</h3>
         {story.bullets.length === 0 ? (
-          <p className="event-empty">居民正在生活，新的故事线形成后会出现在这里。</p>
+          <p className="event-empty">暂无新的日常记录</p>
         ) : (
           <ul>
             {story.bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}

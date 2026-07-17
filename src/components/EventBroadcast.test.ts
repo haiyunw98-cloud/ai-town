@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { jest } from '@jest/globals';
-import { summarizeConversation } from '../../convex/events';
+import { groupConversationMessages, summarizeConversation } from '../../convex/events';
 import {
   buildDailyReport,
   buildBroadcastView,
@@ -52,6 +52,7 @@ describe('event broadcast view model', () => {
     expect(eventsModule).toHaveProperty('isObserverIntervention');
     expect(eventsModule).toHaveProperty('collectHumanPlayerIds');
     expect(eventsModule).toHaveProperty('summarizeConversation');
+    expect(eventsModule).toHaveProperty('groupConversationMessages');
     const isObserverIntervention = eventsModule.isObserverIntervention as (
       humanPlayerIds: ReadonlySet<string>,
       authorId: string,
@@ -120,6 +121,49 @@ describe('event broadcast view model', () => {
     expect(story.bullets[0]).toContain('白露');
   });
 
+  test('hides empty legacy-only summaries from the fast-story bullets', () => {
+    const story = buildTownStory([{
+      conversationId: 'c:legacy',
+      participantNames: ['顾潮'],
+      summary: '暂无新的日常记录',
+      updatedAt: 12_000,
+      messages: [],
+    }]);
+
+    expect(story).toEqual({ headline: '今日灯塔镇', bullets: [] });
+  });
+
+  test('groups only the current Shanghai day for the live fast summary', () => {
+    const now = Date.parse('2026-07-15T16:30:00Z');
+    const conversations = groupConversationMessages(
+      [
+        {
+          conversationId: 'c:shared', author: 'p:1', text: '昨日普通午饭记录。',
+          _creationTime: Date.parse('2026-07-15T15:59:59Z'),
+        },
+        {
+          conversationId: 'c:shared', author: 'p:2', text: '今日药庐配药记录。',
+          _creationTime: Date.parse('2026-07-15T16:00:00Z'),
+        },
+        {
+          conversationId: 'c:yesterday', author: 'p:1', text: '昨日邻里合作记录。',
+          _creationTime: Date.parse('2026-07-15T15:00:00Z'),
+        },
+      ],
+      new Map([['p:1', '顾潮'], ['p:2', '白露']]),
+      [],
+      now,
+    );
+
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0].conversationId).toBe('c:shared');
+    expect(conversations[0].summary).toContain('今日药庐配药记录');
+    expect(conversations[0].summary).not.toContain('昨日普通午饭记录');
+    expect(conversations[0].messages.map((message) => message.text)).toEqual([
+      '今日药庐配药记录。',
+    ]);
+  });
+
   test('does not resurrect legacy mystery framing in the live observer summary', () => {
     const summary = summarizeConversation(['顾潮', '白露'], [
       '旧记录提到灯火装置与河道线索。',
@@ -153,6 +197,78 @@ describe('event broadcast view model', () => {
     expect(summary).toMatch(/账目|邻里|合作/u);
     expect(summary).not.toMatch(/交换信息|最新线索|线索交汇/u);
   });
+
+  test.each([
+    ['今天调查账目并完成送货。', /调查账目.*送货/u],
+    ['今天检查河道水位并完成送货。', /河道水位.*送货/u],
+    ['今天在旧水码头修理乌篷船，邻里送来点心。', /旧水码头.*乌篷船.*邻里.*点心/u],
+  ])('preserves ordinary current work and community fact %s', (message, expected) => {
+    const summary = summarizeConversation(['苏萤'], [message]);
+
+    expect(summary).toMatch(expected);
+    expect(summary).toContain('劳动');
+  });
+
+  test('filters the archived million-gold variant with a measure word', () => {
+    expect(summarizeConversation(['顾潮'], ['顾潮领取一百万枚金贝，往届寻宝赛结束。']))
+      .toBe('暂无新的日常记录');
+  });
+
+  test('removes an ASCII stage direction without losing the following daily fact', () => {
+    const summary = summarizeConversation(
+      ['白露'],
+      ['(灯塔异常闪光) 今天药庐配了三份药。'],
+    );
+
+    expect(summary).toContain('今天药庐配了三份药');
+    expect(summary).not.toMatch(/灯塔|异常闪光/u);
+  });
+
+  test('keeps a daily suffix after a legacy prefix without a punctuation boundary', () => {
+    const summary = summarizeConversation(
+      ['苏萤'],
+      ['旧记录说灯火装置但今天完成送货。'],
+    );
+
+    expect(summary).toContain('今天完成送货');
+    expect(summary).not.toMatch(/旧记录|灯火装置/u);
+  });
+
+  test('sanitizes nested mixed-width and unmatched stage-direction delimiters', () => {
+    const summary = summarizeConversation(
+      ['白露'],
+      ['）(低声（灯塔异常闪光）) 今天药庐配药。'],
+    );
+
+    expect(summary).toContain('今天药庐配药');
+    expect(summary).not.toMatch(/[()（）]|低声|异常闪光/u);
+  });
+
+  test('splits an ASCII sentence while preserving abbreviations and decimals', () => {
+    const summary = summarizeConversation(
+      ['唐果'],
+      ['旧记录说灯火装置. Dr. Chen今天核对3.5元账目。'],
+    );
+
+    expect(summary).toContain('Dr. Chen今天核对3.5元账目');
+    expect(summary).not.toMatch(/旧记录|灯火装置/u);
+  });
+
+  test.each(['👨‍👩‍👧‍👦', '🇨🇳'])(
+    'truncates observer facts at 80 grapheme clusters without splitting %s',
+    (cluster) => {
+      const summary = summarizeConversation(['苏萤'], [`送货${cluster.repeat(90)}`]);
+      const fact = summary.slice(summary.indexOf('：') + 1, -1);
+      const graphemes = Array.from(
+        new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(fact),
+        ({ segment }) => segment,
+      );
+
+      expect(graphemes).toHaveLength(80);
+      expect(graphemes.slice(2).every((value) => value === cluster)).toBe(true);
+      expect(summary.endsWith('…')).toBe(true);
+    },
+  );
 
   test('uses only the six agreed daily-life taxonomy labels', () => {
     const summary = summarizeConversation(['白露', '唐果'], [
@@ -930,9 +1046,17 @@ describe('event broadcast view model', () => {
 
     expect(source).toContain('.take(500)');
     expect(source).toContain('const legacyMessages = messages.slice(0, 80);');
-    expect(source).toContain('groupConversationMessages(legacyMessages, names');
+    expect(source).toContain('groupConversationMessages(messages, names');
+    expect(source).not.toContain('groupConversationMessages(legacyMessages, names');
     expect(source).toContain('logs: legacyMessages.map((message, index) => ({');
     expect(source).toContain('const dailyMessages = messages.map((message) => ({');
+  });
+
+  test('renders the exact daily empty state in the production fast-summary component', () => {
+    const source = readFileSync(new URL('./EventBroadcast.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('<p className="event-empty">暂无新的日常记录</p>');
+    expect(source).not.toContain('新的故事线形成后会出现在这里');
   });
 
   test('offers separate factual and social report exports with a local fallback flow', () => {

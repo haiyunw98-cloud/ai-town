@@ -344,7 +344,7 @@ function removeStageDirections(value: string): string {
   return result.join('');
 }
 
-function sanitizeReply(value: string): string {
+export function sanitizeConversationText(value: string): string {
   return removeStageDirections(value).replace(/\s+/gu, ' ').trim();
 }
 
@@ -456,6 +456,29 @@ function isSentencePeriod(characters: string[], index: number): boolean {
   return true;
 }
 
+export function splitConversationClauses(value: string): string[] {
+  const characters = Array.from(value);
+  const clauses: string[] = [];
+  let clause = '';
+  const finishClause = () => {
+    const trimmed = clause.trim();
+    if (trimmed) clauses.push(trimmed);
+    clause = '';
+  };
+
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index];
+    const isPeriodBoundary = character === '.' && isSentencePeriod(characters, index);
+    if (/[。！？!?；;，,\n]/u.test(character) || isPeriodBoundary) {
+      finishClause();
+      continue;
+    }
+    clause += character;
+  }
+  finishClause();
+  return clauses;
+}
+
 const MATCHING_OUTER_QUOTES: Record<string, string> = {
   '“': '”',
   '‘': '’',
@@ -517,7 +540,7 @@ export function validateResidentReply(raw: string, context: ReplyContext): Reply
     };
   }
 
-  const sanitized = sanitizeReply(raw);
+  const sanitized = sanitizeConversationText(raw);
   if (!sanitized || !hasMeaningfulContent(sanitized)) {
     return {
       accepted: false,

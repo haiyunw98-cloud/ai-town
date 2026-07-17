@@ -535,7 +535,9 @@ export function buildDailyReport(
 export function buildTownStory(conversations: BroadcastSnapshot['conversations']) {
   return {
     headline: '今日灯塔镇',
-    bullets: conversations.slice(0, 4).map(
+    bullets: conversations
+      .filter((conversation) => conversation.summary !== '暂无新的日常记录')
+      .slice(0, 4).map(
       (conversation) => `${conversation.participantNames.join(' × ')}｜${conversation.summary}`,
     ),
   };
