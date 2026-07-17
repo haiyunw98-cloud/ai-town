@@ -1,6 +1,6 @@
 # AI Town 🏠💻💌
 
-> **Lighthouse Town fork:** This branch includes a complete Simplified Chinese localization, a bilingual UI, original Jiangnan fantasy world art, five new residents, and configurable LLM providers. See [中文使用说明](./README.zh-CN.md).
+> **Lighthouse Town fork:** This branch includes a complete Simplified Chinese localization, a bilingual UI, original inland-Jiangnan world art, five new residents, and a local-only resident conversation path. See [中文使用说明](./README.zh-CN.md).
 
 [Live Demo](https://www.convex.dev/ai-town)
 
@@ -26,7 +26,7 @@ above) are written in Python.
 - 💻 [Stack](#stack)
 - 🧠 [Installation](#installation) (cloud, local, Docker, self-host, Fly.io, ...)
 - 💻️ [Windows Pre-requisites](#windows-installation)
-- 🤖 [Configure your LLM of choice](#connect-an-llm) (Ollama, OpenAI, Together.ai, ...)
+- 🤖 [Connect an LLM](#connect-an-llm) (Lighthouse Town residents use local Ollama; the upstream provider reference is retained below)
 - 👤 [Customize - YOUR OWN simulated world](#customize-your-own-simulation)
 - 👩‍💻 [Deploying to production](#deploy-the-app-to-production)
 - 🐛 [Troubleshooting](#troubleshooting)
@@ -35,10 +35,11 @@ above) are written in Python.
 
 - Game engine, database, and vector search: [Convex](https://convex.dev/)
 - Auth (Optional): [Clerk](https://clerk.com/)
-- Default chat model is `llama3` and embeddings with `mxbai-embed-large`.
-- Local inference: [Ollama](https://github.com/jmorganca/ollama)
-- Configurable for other cloud LLMs: [Together.ai](https://together.ai/) or anything that speaks the
-  [OpenAI API](https://platform.openai.com/). PRs welcome to add more cloud provider support.
+- Lighthouse Town resident conversations and observer prose use local [Ollama](https://github.com/ollama/ollama) with `gemma4:12b`; embeddings use `mxbai-embed-large`.
+- The repository retains general provider plumbing for upstream starter-kit use, but the current
+  Lighthouse Town resident path does not call OpenAI, Together.ai, DeepSeek, or another paid fallback.
+  A free cloud model may be added later only as an explicitly configured option; it is not an
+  automatic or current resident fallback.
 - Background Music Generation: [Replicate](https://replicate.com/) using
   [MusicGen](https://huggingface.co/spaces/facebook/MusicGen)
 
@@ -124,6 +125,19 @@ See [package.json](./package.json) for details.
 
 如确需其他端口，可在两个命令前设置相同的 `LIGHTHOUSE_TOWN_PORT` 值。
 
+#### 居民日常对话规则
+
+灯塔镇的当前运行设定是**江南内陆水乡，镇上没有海**。镇中心高塔只是历史公共地标，不承担航海、航标、观潮或海防功能。居民自主对话只从日常生活话题中选择，不主动发起高塔谜团、异常调查或海洋叙事。
+
+- 话题选择按每位居民的上海当日记录滚动校正：生计 `60%`、关系 `25%`、公共生活 `15%`。从空计数开始的 100 次确定性基准严格为 `60 / 25 / 15`，并避免连续重复最近的细分话题。
+- 简体中文提示范围为开场 `15–45` 字、普通回复 `20–60` 字、告别 `10–35` 字；发送前的最终硬上限分别是开场 `45`、续谈 `60`、离开 `35` 个 Unicode 字符。每次居民生成请求设置 `max_tokens: 120`，每轮只推进一个意思，不使用括号舞台说明。
+- 发送边界会移除舞台说明，拒绝空内容和旧谜团叙事，并将超长内容截到上述硬上限。若本地模型不可用或输出未通过规则，居民仍会发送与当日话题相关的确定性规则回退文本，不会改用付费模型。
+- 观察者若向居民询问大海、潮汐或高塔航行用途，最终回复会先校正为“镇上没有海，这座塔只是地标。”，再用一句短问句回到镇上日常。
+
+居民对话、对话记忆摘要与反思的当前路径只允许本地 Ollama，并显式请求 `gemma4:12b`。即使通用 LLM 环境变量配置了付费提供商，这条居民路径也会拒绝它；未来若增加免费云模型，需要新的显式配置与实现。
+
+“小镇观察”的自动对话摘要只读取**上海时区当日**消息，并按“劳动、商业、饮食、照护、友情与关系、公共生活”六类可见事实归纳。若一组对话过滤后没有新的日常事实，显示“暂无新的日常记录”；若速报没有可展示条目，也使用同一空状态。旧消息和已结束的公共事件仍作为历史记录保留，但海洋、谜团、异常与历史赛事内容不会进入居民自主对话记忆，也不会进入当日实时摘要。
+
 #### 双日报
 
 独立站点 `http://localhost:4174/ai-town` 的“小镇观察”中提供两个按需导出入口：
@@ -206,20 +220,22 @@ Note: If you want to run the backend in the cloud, you can either use a cloud-ba
 OpenAI or Together.ai or you can proxy the traffic from the cloud to your local Ollama. See
 [below](#using-local-inference-from-a-cloud-deployment) for instructions.
 
-### Ollama (default)
+### Ollama (Lighthouse Town resident default)
 
-By default, the app tries to use Ollama to run it entirely locally.
+The current Lighthouse Town resident conversation path requires Ollama and does not fall back to a
+paid provider.
 
 1. Download and install [Ollama](https://ollama.com/).
 2. Open the app or run `ollama serve` in a terminal. `ollama serve` will warn you if the app is
    already running.
-3. Run `ollama pull llama3` to have it download `llama3`.
-4. Test it out with `ollama run llama3`.
+3. Run `ollama pull gemma4:12b` to download the resident chat model.
+4. Test it with `ollama run gemma4:12b`.
 
 Ollama model options can be found [here](https://ollama.ai/library).
 
-If you want to customize which model to use, adjust convex/util/llm.ts or set
-`npx convex env set OLLAMA_MODEL # model`. If you want to edit the embedding model:
+`OLLAMA_MODEL` still configures generic Ollama calls elsewhere in the starter kit, but it does not
+replace the explicit `gemma4:12b` model used by the current resident conversation and observer
+paths. If you want to edit the embedding model:
 
 1. Change the `OLLAMA_EMBEDDING_DIMENSION` in `convex/util/llm.ts` and ensure:
    `export const EMBEDDING_DIMENSION = OLLAMA_EMBEDDING_DIMENSION;`
