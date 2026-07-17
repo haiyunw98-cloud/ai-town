@@ -107,6 +107,23 @@ npm run dev:backend
 
 See [package.json](./package.json) for details.
 
+### 灯塔镇独立站点
+
+灯塔镇的常驻预览使用专用端口 `4174`，不与其他项目常用的 Vite 开发端口 `5173`
+冲突。启动或恢复前后端服务：
+
+```sh
+./scripts/install-lighthouse-site.sh
+```
+
+访问 `http://localhost:4174/ai-town`。可用以下命令检查前端与本地 Convex 后端：
+
+```sh
+./scripts/check-lighthouse-site.sh
+```
+
+如确需其他端口，可在两个命令前设置相同的 `LIGHTHOUSE_TOWN_PORT` 值。
+
 ### Using Docker Compose with self-hosted Convex
 
 You can also run the Convex backend with the self-hosted Docker container. Here we'll set it up to
