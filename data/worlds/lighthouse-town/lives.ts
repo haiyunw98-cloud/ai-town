@@ -139,7 +139,7 @@ export const residentLifeProfiles: ResidentLifeProfile[] = [
       { targetId: 'lin-lan', kind: 'friendship', score: 91, label: '挚友', summary: '林澜报修门窗，苏萤负责维护，是最默契的文保搭档。' },
       { targetId: 'gu-chao', kind: 'crush', score: 81, label: '互有心动', summary: '总把约会说成比试，双方都还没正式挑明。' },
       { targetId: 'gu-chao', kind: 'business', score: 84, label: '灯具联合制作', summary: '一个做结构一个调光色，争执很多，成品也最好。' },
-      { targetId: 'xuan-wei', kind: 'business', score: 62, label: '罗盘委托', summary: '替卦馆修铜罗盘，坚持先排除机械故障。' },
+      { targetId: 'xuan-wei', kind: 'business', score: 62, label: '挂钟委托', summary: '替卦馆维修旧挂钟，并按约定工期交付。' },
     ],
     recentHighlights: ['修好了茶馆反复漏水的水泵', '与顾潮共同完成一盏省油店灯'],
   },

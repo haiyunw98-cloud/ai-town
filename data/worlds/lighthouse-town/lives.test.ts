@@ -1,6 +1,7 @@
 import { getLifeProfileByName, residentLifeProfiles } from './lives';
 
-const forbiddenRuntimeTopics = /海潮|潮汐|航标|海风|海浪|夜航|无海航路|异常闪光|灯塔谜|机关谜|线索交汇/u;
+const forbiddenGlobalStory = /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮/u;
+const forbiddenAutonomousStory = /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮|航标|夜航/u;
 
 describe('Lighthouse Town resident life profiles', () => {
   test('defines a complete adult dossier for every resident', () => {
@@ -41,13 +42,31 @@ describe('Lighthouse Town resident life profiles', () => {
     expect(kinds).toEqual(new Set(['friendship', 'crush', 'dating', 'business']));
   });
 
+  test('uses matching labels for reciprocal business relationships', () => {
+    for (const profile of residentLifeProfiles) {
+      for (const relationship of profile.relationships) {
+        if (relationship.kind !== 'business') continue;
+        const target = residentLifeProfiles.find((candidate) => candidate.id === relationship.targetId);
+        const reciprocal = target?.relationships.find((candidate) =>
+          candidate.targetId === profile.id && candidate.kind === 'business',
+        );
+        if (reciprocal) expect(reciprocal.label).toBe(relationship.label);
+      }
+    }
+  });
+
   test('looks profiles up by the resident display name', () => {
     expect(getLifeProfileByName('玄微先生')?.id).toBe('xuan-wei');
     expect(getLifeProfileByName('不存在')).toBeUndefined();
   });
 
   test('keeps resident dossiers focused on distinct daily livelihoods and relationships', () => {
-    expect(JSON.stringify(residentLifeProfiles)).not.toMatch(forbiddenRuntimeTopics);
+    expect(JSON.stringify(residentLifeProfiles)).not.toMatch(forbiddenGlobalStory);
+    const autonomousLife = residentLifeProfiles.map((profile) => ({
+      currentGoal: profile.currentGoal,
+      recentHighlights: profile.recentHighlights,
+    }));
+    expect(JSON.stringify(autonomousLife)).not.toMatch(forbiddenAutonomousStory);
     expect(new Set(residentLifeProfiles.map((profile) => profile.currentGoal)).size).toBe(9);
   });
 });

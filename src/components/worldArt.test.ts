@@ -72,7 +72,7 @@ describe('world art selection', () => {
 
   test('presents landmarks as inland public places without ocean or mystery framing', () => {
     expect(JSON.stringify(townLandmarks)).not.toMatch(
-      /海潮|潮汐|航标|海风|海浪|夜航|无海航路|异常闪光|灯塔谜|机关谜|线索交汇/u,
+      /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮/u,
     );
   });
 });

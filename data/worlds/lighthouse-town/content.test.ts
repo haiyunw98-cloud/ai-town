@@ -5,7 +5,10 @@ import { buildWorldPrompt, lighthouseTown } from './manifest';
 import { townLandmarks } from './map';
 import { readFileSync } from 'node:fs';
 
-const forbiddenRuntimeTopics = /海潮|潮汐|航标|海风|海浪|夜航|无海航路|异常闪光|灯塔谜|机关谜|线索交汇/u;
+const forbiddenGlobalStory = /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮/u;
+const forbiddenAutonomousStory = /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮|航标|夜航/u;
+const forbiddenEnglishAutonomousStory =
+  /fog tide|lost route|sea-less route|night navigation|sea navigation|ocean navigation|lighthouse myster(?:y|ies)/iu;
 
 describe('Lighthouse Town content', () => {
   test('defines the approved world identity in both languages', () => {
@@ -76,7 +79,18 @@ describe('Lighthouse Town content', () => {
     }
   });
 
-  test('grounds all autonomous runtime context in ordinary inland Jiangnan life', () => {
+  test('keeps English clue archives out of English runtime identities', () => {
+    const runtimeResidents = localizedDescriptions('en');
+
+    expect(lighthouseCharacters.every((character) => character.clue.en.length > 0)).toBe(true);
+    expect(lighthouseCharacters.some((character) => character.clue.en.includes('sea-less route'))).toBe(true);
+    expect(JSON.stringify(runtimeResidents)).not.toMatch(forbiddenEnglishAutonomousStory);
+    for (const [index, character] of lighthouseCharacters.entries()) {
+      expect(runtimeResidents[index].identity).not.toContain(character.clue.en);
+    }
+  });
+
+  test('grounds all runtime context in ordinary inland Jiangnan life', () => {
     const runtimeContext = JSON.stringify({
       residents: localizedDescriptions('zh-CN'),
       activities: residentActivities,
@@ -87,7 +101,22 @@ describe('Lighthouse Town content', () => {
 
     expect(runtimeContext).toContain('江南内陆');
     expect(runtimeContext).toContain('镇上没有海');
-    expect(runtimeContext).not.toMatch(forbiddenRuntimeTopics);
+    expect(runtimeContext).not.toMatch(forbiddenGlobalStory);
+  });
+
+  test('keeps autonomous resident fields free of navigation and mystery prompts', () => {
+    const autonomousContext = JSON.stringify({
+      residents: localizedDescriptions('zh-CN'),
+      activities: Object.values(residentActivities).flatMap((activities) =>
+        activities.map((activity) => activity.description),
+      ),
+      lives: residentLifeProfiles.map((profile) => ({
+        currentGoal: profile.currentGoal,
+        recentHighlights: profile.recentHighlights,
+      })),
+    });
+
+    expect(autonomousContext).not.toMatch(forbiddenAutonomousStory);
   });
 
   test('builds an explicit language and setting prompt', () => {
@@ -97,6 +126,10 @@ describe('Lighthouse Town content', () => {
     expect(buildWorldPrompt('en')).toContain('You live in Lighthouse Town');
     expect(buildWorldPrompt('zh-CN')).toContain('这座塔只是地标');
     expect(buildWorldPrompt('en')).toContain('the town has no sea');
+    expect(buildWorldPrompt('zh-CN')).toMatch(/镇中心高塔.*不.*航标/u);
+    expect(buildWorldPrompt('en')).toMatch(
+      /central tower.*not used for navigation or as a beacon/iu,
+    );
   });
 
   test('wires localized residents and world prompts into the simulation', () => {
