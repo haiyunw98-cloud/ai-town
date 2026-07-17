@@ -15,6 +15,7 @@ const agentOperations = agentOperationsModule as unknown as {
       send: (text: string) => Promise<void>;
       recordRejection: (reason: Reason) => Promise<void>;
       reportGenerationUnavailable?: () => void;
+      reportMetricUnavailable?: (reason: Reason) => void;
     },
   ) => Promise<void>;
   rememberConversationAndRelease?: (dependencies: {
@@ -125,6 +126,48 @@ describe('final resident send boundary', () => {
     expect(recorded).toEqual(['empty']);
     expect(reports).toEqual(['provider-unavailable']);
     expect(JSON.stringify({ sent, recorded, reports })).not.toContain(secret);
+  });
+
+  test('sends once before best-effort telemetry and resolves when telemetry fails', async () => {
+    expect(agentOperations.generateValidatedResidentMessage).toBeDefined();
+    if (!agentOperations.generateValidatedResidentMessage) return;
+    const secret = 'raw rejected output and metric error';
+    const calls: string[] = [];
+    const sent: string[] = [];
+    const reports: Reason[] = [];
+
+    await expect(
+      agentOperations.generateValidatedResidentMessage(
+        { kind: 'continue' },
+        {
+          generate: async () => {
+            calls.push('generate');
+            return `海潮带来异常闪光。${secret}`;
+          },
+          loadPolicyContext: async () => {
+            calls.push('context');
+            return { topic: 'work', observerAskedAboutSea: false };
+          },
+          send: async (text) => {
+            calls.push('send');
+            sent.push(text);
+          },
+          recordRejection: async () => {
+            calls.push('metric');
+            throw new Error(secret);
+          },
+          reportMetricUnavailable: (reason) => {
+            calls.push('report');
+            reports.push(reason);
+          },
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(calls).toEqual(['generate', 'context', 'send', 'metric', 'report']);
+    expect(sent).toEqual(['不说那些传闻了，我们聊聊工作吧。']);
+    expect(reports).toEqual(['legacy-story']);
+    expect(JSON.stringify({ sent, reports })).not.toContain(secret);
   });
 
   test('always releases remember operation after success and failure', async () => {
@@ -253,6 +296,14 @@ describe('daily autonomous memory guard', () => {
     'zh-CN': '我记得我们聊了些日常近况。',
     en: 'I remember we talked about everyday life.',
   } as const;
+  const archivedVariants = [
+    '我获得了百万金贝大奖。',
+    '我参加了一百万金贝寻宝比赛。',
+    '我是往届寻宝竞赛冠军。',
+    'I won the million-shell treasure contest.',
+    'I received the million golden shells prize.',
+    'I was the previous treasure hunt champion.',
+  ] as const;
 
   test.each([
     ['zh-CN', '（微笑） 我们 约好 明天去买菜。 ', '我们 约好 明天去买菜。'],
@@ -318,6 +369,28 @@ describe('daily autonomous memory guard', () => {
     expect(memory.reflectionRelatedMemoryIds(prepared.memories, [0, 1, -1])).toEqual(['ordinary']);
     expect(memories).toEqual([ordinary, legacy, archived]);
   });
+
+  test.each(archivedVariants)(
+    'sanitizes and excludes archived event variant from reflection input: %s',
+    (description) => {
+      expect(memory.sanitizeMemorySummary).toBeDefined();
+      expect(memory.prepareReflectionInput).toBeDefined();
+      if (!memory.sanitizeMemorySummary || !memory.prepareReflectionInput) return;
+      const locale = /[\u3400-\u9fff]/u.test(description) ? 'zh-CN' : 'en';
+      expect(memory.sanitizeMemorySummary(description, locale)).toBe(fallback[locale]);
+      const archived = {
+        _id: 'archive',
+        _creationTime: 10,
+        importance: 900,
+        description,
+      };
+      expect(memory.prepareReflectionInput([archived], 0)).toEqual({
+        memories: [],
+        sumOfImportanceScore: 0,
+        statements: [],
+      });
+    },
+  );
 
   test('uses the locale-aware constrained summary instruction and contains no raw model logging', () => {
     const source = readFileSync('convex/agent/memory.ts', 'utf8');

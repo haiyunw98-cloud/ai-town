@@ -209,8 +209,10 @@ export function containsLegacyStory(value: string): boolean {
 }
 
 const ARCHIVED_EVENT_PATTERNS = [
-  /灯塔镇百万金贝寻宝赛/u,
-  /百万金贝寻宝赛/u,
+  /(?:百万金贝|一百万金贝)/u,
+  /寻宝(?:赛|比赛|竞赛)/u,
+  /\bmillion[\s-]+(?:gold(?:en)?[\s-]+)?shells?\b/iu,
+  /\btreasure[\s-]+(?:hunt|contest)\b/iu,
   /\b(?:lighthouse[\s-]+town[\s-]+)?million[\s-]+gold(?:en)?[\s-]+shell(?:s)?[\s-]+treasure[\s-]+hunt(?:[\s-]+(?:race|competition))?\b/iu,
 ] as const;
 

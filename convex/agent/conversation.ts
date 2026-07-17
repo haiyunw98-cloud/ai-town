@@ -1,7 +1,7 @@
 import { v } from 'convex/values';
 import { Id } from '../_generated/dataModel';
 import { ActionCtx, internalMutation, internalQuery } from '../_generated/server';
-import { LLMMessage, chatCompletion } from '../util/llm';
+import { LLMMessage, localChatCompletionOnce } from '../util/llm';
 import * as memory from './memory';
 import { api, internal } from '../_generated/api';
 import * as embeddingsCache from './embeddingsCache';
@@ -222,7 +222,8 @@ export async function startConversationMessage(
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   prompt.push(lastPrompt);
 
-  const { content } = await chatCompletion({
+  const { content } = await localChatCompletionOnce({
+    model: 'gemma4:12b',
     messages: [
       {
         role: 'system',
@@ -305,7 +306,8 @@ export async function continueConversationMessage(
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   llmMessages.push({ role: 'user', content: lastPrompt });
 
-  const { content } = await chatCompletion({
+  const { content } = await localChatCompletionOnce({
+    model: 'gemma4:12b',
     messages: llmMessages,
     max_tokens: CONVERSATION_MAX_TOKENS,
     stop: stopWords(otherPlayer.name, player.name),
@@ -373,7 +375,8 @@ export async function leaveConversationMessage(
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   llmMessages.push({ role: 'user', content: lastPrompt });
 
-  const { content } = await chatCompletion({
+  const { content } = await localChatCompletionOnce({
+    model: 'gemma4:12b',
     messages: llmMessages,
     max_tokens: CONVERSATION_MAX_TOKENS,
     stop: stopWords(otherPlayer.name, player.name),

@@ -5,6 +5,7 @@ import { TOPIC_DETAILS } from './conversationPolicy';
 import type { TopicCategory, TopicDetail } from './conversationPolicy';
 
 const conversationSource = readFileSync('convex/agent/conversation.ts', 'utf8');
+const memorySource = readFileSync('convex/agent/memory.ts', 'utf8');
 const schemaSource = readFileSync('convex/schema.ts', 'utf8');
 
 function sourceFor(name: string, nextName?: string): string {
@@ -54,6 +55,15 @@ describe('Shanghai day key', () => {
 });
 
 describe('daily-life prompt contract', () => {
+  test('uses one local-only Gemma 12b completion for resident dialogue and memory text', () => {
+    expect(conversationSource).toContain('localChatCompletionOnce');
+    expect(conversationSource).not.toMatch(/\bchatCompletion\s*\(/u);
+    expect(memorySource).toContain('localChatCompletionOnce');
+    expect(memorySource).not.toMatch(/\bchatCompletion\s*\(/u);
+    expect(conversationSource.match(/model:\s*['"]gemma4:12b['"]/gu)).toHaveLength(3);
+    expect(memorySource.match(/model:\s*['"]gemma4:12b['"]/gu)).toHaveLength(3);
+  });
+
   test('exports the exact shared simplified-Chinese short-turn rules', () => {
     const rules = (
       conversationPolicy as unknown as {

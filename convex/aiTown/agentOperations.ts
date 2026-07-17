@@ -37,6 +37,7 @@ export async function generateValidatedResidentMessage(
     send: (validatedText: string) => Promise<unknown>;
     recordRejection: (reason: ReplyRejectionReason) => Promise<unknown>;
     reportGenerationUnavailable?: () => void;
+    reportMetricUnavailable?: (reason: ReplyRejectionReason) => void;
   },
 ): Promise<void> {
   let raw = '';
@@ -47,10 +48,14 @@ export async function generateValidatedResidentMessage(
   }
   const policyContext = await dependencies.loadPolicyContext();
   const validation = validateResidentReply(raw, { kind: args.kind, ...policyContext });
-  if (!validation.accepted) {
-    await dependencies.recordRejection(validation.reason);
-  }
   await dependencies.send(validation.text);
+  if (!validation.accepted) {
+    try {
+      await dependencies.recordRejection(validation.reason);
+    } catch {
+      dependencies.reportMetricUnavailable?.(validation.reason);
+    }
+  }
 }
 
 export async function rememberConversationAndRelease(dependencies: {
@@ -256,6 +261,8 @@ export const agentGenerateMessage = internalAction({
             operationId: args.operationId,
           }),
         reportGenerationUnavailable: () => console.warn('resident-message-provider-unavailable'),
+        reportMetricUnavailable: (reason) =>
+          console.warn(`conversation-policy-metric-unavailable:${reason}`),
       },
     );
   },

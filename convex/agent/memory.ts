@@ -2,7 +2,7 @@ import { v } from 'convex/values';
 import { ActionCtx, DatabaseReader, internalMutation, internalQuery } from '../_generated/server';
 import { Doc, Id } from '../_generated/dataModel';
 import { internal } from '../_generated/api';
-import { LLMMessage, chatCompletion, fetchEmbedding } from '../util/llm';
+import { LLMMessage, fetchEmbedding, localChatCompletionOnce } from '../util/llm';
 import { asyncMap } from '../util/asyncMap';
 import { GameId, agentId, conversationId, playerId } from '../aiTown/ids';
 import { SerializedPlayer } from '../aiTown/player';
@@ -127,7 +127,8 @@ export async function rememberConversation(
   llmMessages.push({ role: 'user', content: 'Summary:' });
   let summaryRaw = '';
   try {
-    const completion = await chatCompletion({
+    const completion = await localChatCompletionOnce({
+      model: 'gemma4:12b',
       messages: llmMessages,
       max_tokens: 160,
     });
@@ -318,7 +319,8 @@ export const loadMessages = internalQuery({
 });
 
 async function calculateImportance(description: string) {
-  const { content: importanceRaw } = await chatCompletion({
+  const { content: importanceRaw } = await localChatCompletionOnce({
+    model: 'gemma4:12b',
     messages: [
       {
         role: 'user',
@@ -432,7 +434,8 @@ async function reflectOnMemories(
     'Example: [{insight: "...", statementIds: [1,2]}, {insight: "...", statementIds: [1]}, ...]',
   );
 
-  const { content: reflection } = await chatCompletion({
+  const { content: reflection } = await localChatCompletionOnce({
+    model: 'gemma4:12b',
     messages: [
       {
         role: 'user',

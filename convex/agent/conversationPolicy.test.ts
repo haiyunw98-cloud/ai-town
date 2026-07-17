@@ -98,6 +98,27 @@ describe('selectConversationTopic', () => {
 });
 
 describe('legacy story isolation', () => {
+  test.each([
+    '百万金贝大奖',
+    '一百万金贝寻宝比赛',
+    '往届寻宝竞赛冠军',
+    'million-shell treasure contest',
+    'million golden shells prize',
+    'previous treasure hunt champion',
+  ])('filters archived public event variant %s from autonomous memories', (variant) => {
+    const containsArchivedEventMemory = (
+      conversationPolicy as unknown as {
+        containsArchivedEventMemory?: (value: string) => boolean;
+      }
+    ).containsArchivedEventMemory;
+    const archived = { description: `居民记得 ${variant}。` };
+
+    expect(containsArchivedEventMemory).toBeDefined();
+    if (!containsArchivedEventMemory) return;
+    expect(containsArchivedEventMemory(archived.description)).toBe(true);
+    expect(filterLegacyMemories([archived])).toEqual([]);
+  });
+
   const legacyTerms = [
     '海面',
     '海潮',
