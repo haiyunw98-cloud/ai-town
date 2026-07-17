@@ -1,20 +1,22 @@
 export type TopicCategory = 'livelihood' | 'relationship' | 'public-life';
 
-export type ConversationTopic = {
-  category: TopicCategory;
-  detail: string;
-};
-
 const TOPIC_TARGETS: Record<TopicCategory, number> = {
   livelihood: 0.6,
   relationship: 0.25,
   'public-life': 0.15,
 };
 
-const TOPIC_DETAILS: Record<TopicCategory, readonly string[]> = {
+export const TOPIC_DETAILS = {
   livelihood: ['work', 'order', 'income', 'shopping', 'meal', 'clothing', 'home', 'rest', 'health'],
   relationship: ['friendship', 'care', 'date', 'misunderstanding', 'cooperation', 'neighbor-help'],
   'public-life': ['market', 'class', 'festival', 'institution', 'local-news', 'safety'],
+} as const satisfies Record<TopicCategory, readonly string[]>;
+
+export type TopicDetail = (typeof TOPIC_DETAILS)[TopicCategory][number];
+
+export type ConversationTopic = {
+  category: TopicCategory;
+  detail: TopicDetail;
 };
 
 const TOPIC_CATEGORIES = Object.keys(TOPIC_TARGETS) as TopicCategory[];
@@ -30,7 +32,7 @@ function deterministicHash(value: string): number {
 
 export function selectConversationTopic(
   seed: string,
-  recent: string[],
+  recent: readonly string[],
   counts: Record<TopicCategory, number>,
 ): ConversationTopic {
   const nextTotal = TOPIC_CATEGORIES.reduce((total, category) => total + counts[category], 0) + 1;
@@ -46,7 +48,7 @@ export function selectConversationTopic(
     tiedCategories[deterministicHash(`${seed}:category:${nextTotal}`) % tiedCategories.length];
 
   const recentDetails = new Set(recent.slice(-3));
-  const allDetails = TOPIC_DETAILS[category];
+  const allDetails: readonly TopicDetail[] = TOPIC_DETAILS[category];
   const availableDetails = allDetails.filter((detail) => !recentDetails.has(detail));
   const candidates = availableDetails.length > 0 ? availableDetails : allDetails;
   const detail = candidates[deterministicHash(`${seed}:detail:${category}`) % candidates.length];
@@ -70,13 +72,14 @@ const LEGACY_CHINESE_TERMS = [
   '机关谜',
   '线索交汇',
   '雾潮',
+  '灯塔导航',
 ] as const;
 
 const LEGACY_ENGLISH_PATTERNS = [
   /\bocean(?:ic)?[\s/-]+(?:tides?|beacons?|navigation|navigational|waves?|breeze|surface)\b/u,
   /\bsea[\s/-]+(?:beacons?|navigation|navigational|voyage|route|waves?|breeze)\b/u,
   /\bnavigation[\s/-]+at[\s/-]+sea\b/u,
-  /\blighthouse[\s/-]+myster(?:y|ies)\b/u,
+  /\blighthouse[\s/-]+(?:myster(?:y|ies)|navigation|navigational)\b/u,
   /\banomal(?:y|ies|ous)\b/u,
   /\blost[\s/-]+(?:sea[\s/-]+)?route\b/u,
   /\bnight[\s/-]+sailing\b/u,
@@ -97,17 +100,17 @@ export function filterLegacyMemories<T extends { description: string }>(
   return memories.filter((memory) => !containsLegacyStory(memory.description));
 }
 
-type ReplyContext = {
+export type ReplyContext = {
   kind: 'start' | 'continue' | 'leave';
-  topic: string;
+  topic: TopicDetail;
   observerAskedAboutSea: boolean;
 };
 
-type ReplyValidation = {
-  accepted: boolean;
-  text: string;
-  reason?: 'world-correction' | 'empty' | 'legacy-story' | 'too-long';
-};
+export type ReplyRejectionReason = 'world-correction' | 'empty' | 'legacy-story' | 'too-long';
+
+export type ReplyValidation =
+  | { accepted: true; text: string; reason?: never }
+  | { accepted: false; text: string; reason: ReplyRejectionReason };
 
 const REPLY_LIMITS: Record<ReplyContext['kind'], number> = {
   start: 45,
@@ -115,46 +118,211 @@ const REPLY_LIMITS: Record<ReplyContext['kind'], number> = {
   leave: 35,
 };
 
-const EMPTY_FALLBACKS: Record<ReplyContext['kind'], string> = {
-  start: '今天过得怎么样？想聊聊镇上的日常吗？',
-  continue: '先聊聊今天镇上的日常吧，你最近忙什么？',
-  leave: '我先去忙手头的事，回头再聊。',
+const TOPIC_LABELS: Record<TopicDetail, string> = {
+  work: '手头工作',
+  order: '订单进展',
+  income: '收入安排',
+  shopping: '采买计划',
+  meal: '今日饭菜',
+  clothing: '衣物添置',
+  home: '居家琐事',
+  rest: '休息安排',
+  health: '身体近况',
+  friendship: '朋友近况',
+  care: '彼此照应',
+  date: '约会安排',
+  misunderstanding: '误会化解',
+  cooperation: '合作进展',
+  'neighbor-help': '邻里帮忙',
+  market: '集市见闻',
+  class: '课堂学习',
+  festival: '节庆准备',
+  institution: '镇上机构',
+  'local-news': '镇上消息',
+  safety: '日常安全',
 };
 
-const LEGACY_FALLBACKS: Record<ReplyContext['kind'], string> = {
-  start: '先聊聊今天的工作和饭菜吧，你最近怎么样？',
-  continue: '我们聊聊今天的工作和邻里日常吧。',
-  leave: '我先去忙手头的事，回头再聊。',
-};
+function topicFallback(
+  topic: TopicDetail,
+  kind: ReplyContext['kind'],
+  reason: 'empty' | 'legacy-story',
+): string {
+  const label = TOPIC_LABELS[topic];
+  if (reason === 'empty') {
+    if (kind === 'start') return `今天想聊聊${label}，你最近怎么样？`;
+    if (kind === 'continue') return `说说${label}吧，你最近有什么新鲜事？`;
+    return `关于${label}，我们改天再聊。`;
+  }
+  if (kind === 'start') return `先不说传闻了，聊聊${label}吧。`;
+  if (kind === 'continue') return `不说那些传闻了，我们聊聊${label}吧。`;
+  return `先不聊传闻，${label}改天再说。`;
+}
+
+const OPEN_PARENTHESIS = new Set(['(', '（']);
+const CLOSE_PARENTHESIS = new Set([')', '）']);
+const FRAGMENT_PUNCTUATION = /[。！？.!?，,：:；;、]/u;
+const QUOTE_CHARACTER = /["'“”‘’]/u;
+const SENTENCE_END = /[。！？.!?]/u;
+const SUBSTANTIVE_CHARACTER = /[\p{Letter}\p{Number}\p{Symbol}]/u;
+
+function removeStageDirections(value: string): string {
+  const result: string[] = [];
+  let depth = 0;
+  let hadSubstantiveBeforeDirection = false;
+  let hasSubstantiveInSentence = false;
+  let discardDirectionFragment = false;
+
+  for (const character of value) {
+    if (OPEN_PARENTHESIS.has(character)) {
+      if (depth === 0) hadSubstantiveBeforeDirection = hasSubstantiveInSentence;
+      depth += 1;
+      continue;
+    }
+    if (CLOSE_PARENTHESIS.has(character)) {
+      if (depth > 0) {
+        depth -= 1;
+        if (depth === 0 && !hadSubstantiveBeforeDirection) discardDirectionFragment = true;
+      }
+      continue;
+    }
+    if (depth > 0) continue;
+
+    if (discardDirectionFragment) {
+      if (/\s/u.test(character) || FRAGMENT_PUNCTUATION.test(character)) continue;
+      if (QUOTE_CHARACTER.test(character)) {
+        result.push(character);
+        continue;
+      }
+      discardDirectionFragment = false;
+    }
+
+    result.push(character);
+    if (SENTENCE_END.test(character)) {
+      hasSubstantiveInSentence = false;
+    } else if (SUBSTANTIVE_CHARACTER.test(character)) {
+      hasSubstantiveInSentence = true;
+    }
+  }
+  return result.join('');
+}
 
 function sanitizeReply(value: string): string {
-  return value
-    .replace(/\([^()]*\)|（[^（）]*）/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim()
-    .replace(/^[\p{P}\s]+/u, '')
-    .trim();
+  return removeStageDirections(value).replace(/\s+/gu, ' ').trim();
 }
 
 function unicodeLength(value: string): number {
   return Array.from(value).length;
 }
 
+type GraphemeSegmenter = { segment(value: string): Iterable<{ segment: string }> };
+
+type GraphemeSegmenterConstructor = new (
+  locale?: string | string[],
+  options?: { granularity: 'grapheme' },
+) => GraphemeSegmenter;
+
+const GraphemeSegmenter = (
+  Intl as unknown as {
+    Segmenter?: GraphemeSegmenterConstructor;
+  }
+).Segmenter;
+const replyGraphemeSegmenter = GraphemeSegmenter
+  ? new GraphemeSegmenter('zh-CN', { granularity: 'grapheme' })
+  : null;
+
+function extendsFallbackGrapheme(value: string): boolean {
+  const codePoint = value.codePointAt(0) ?? 0;
+  return (
+    /\p{Mark}/u.test(value) ||
+    codePoint === 0xfe0e ||
+    codePoint === 0xfe0f ||
+    (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff)
+  );
+}
+
+function fallbackGraphemes(value: string): string[] {
+  const clusters: string[] = [];
+  let joinNext = false;
+  for (const codePoint of value) {
+    if (clusters.length === 0) {
+      clusters.push(codePoint);
+      continue;
+    }
+    const lastIndex = clusters.length - 1;
+    if (codePoint === '\u200d') {
+      clusters[lastIndex] += codePoint;
+      joinNext = true;
+    } else if (joinNext || extendsFallbackGrapheme(codePoint)) {
+      clusters[lastIndex] += codePoint;
+      joinNext = false;
+    } else {
+      clusters.push(codePoint);
+    }
+  }
+  return clusters;
+}
+
+function replyGraphemes(value: string): string[] {
+  if (!replyGraphemeSegmenter) return fallbackGraphemes(value);
+  return Array.from(replyGraphemeSegmenter.segment(value), ({ segment }) => segment);
+}
+
+const SHORT_ABBREVIATIONS = new Set([
+  'dr',
+  'mr',
+  'mrs',
+  'ms',
+  'prof',
+  'sr',
+  'jr',
+  'st',
+  'no',
+  'vs',
+  'etc',
+]);
+
+function isSentencePeriod(characters: string[], index: number): boolean {
+  const previous = characters[index - 1] ?? '';
+  const next = characters[index + 1] ?? '';
+  if (/\d/u.test(previous) && /\d/u.test(next)) return false;
+  if (/[A-Za-z]/u.test(previous) && /[A-Za-z]/u.test(next)) return false;
+
+  const remainder = characters.slice(index + 1).join('');
+  if (!/\S/u.test(remainder)) return true;
+  const prefix = characters.slice(0, index).join('');
+  const word = prefix.match(/([A-Za-z]+)$/u)?.[1].toLocaleLowerCase('en-US');
+  if (word && SHORT_ABBREVIATIONS.has(word)) return false;
+  if (/(?:\b[A-Za-z]\.)+[A-Za-z]$/u.test(prefix)) return false;
+  return true;
+}
+
 function firstCompleteSentence(value: string): string | undefined {
-  return value.match(/^.*?[。！？.!?]/u)?.[0].trim();
+  const characters = Array.from(value);
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index];
+    if (!SENTENCE_END.test(character)) continue;
+    if (character === '.' && !isSentencePeriod(characters, index)) continue;
+
+    let end = index + 1;
+    while (end < characters.length && /["'”’]/u.test(characters[end])) end += 1;
+    return characters.slice(0, end).join('').trim();
+  }
+  return undefined;
 }
 
 function trimNaturally(value: string, limit: number): string {
-  let characters = Array.from(value.trim()).slice(0, limit);
-  let shortened = characters.join('').replace(/[\s,，:：;；、]+$/u, '');
+  const contentLimit = Math.max(0, limit - 1);
+  let used = 0;
+  let shortened = '';
+  for (const grapheme of replyGraphemes(value.trim())) {
+    const graphemeLength = unicodeLength(grapheme);
+    if (used + graphemeLength > contentLimit) break;
+    shortened += grapheme;
+    used += graphemeLength;
+  }
+  shortened = shortened.replace(/[\s,，:：;；、]+$/u, '');
   if (/[。！？.!?]$/u.test(shortened)) {
     return shortened;
-  }
-
-  while (unicodeLength(shortened) >= limit) {
-    characters = Array.from(shortened);
-    characters.pop();
-    shortened = characters.join('').replace(/[\s,，:：;；、]+$/u, '');
   }
   return shortened ? `${shortened}。` : '改天再聊。';
 }
@@ -170,12 +338,16 @@ export function validateResidentReply(raw: string, context: ReplyContext): Reply
 
   const sanitized = sanitizeReply(raw);
   if (!sanitized) {
-    return { accepted: false, text: EMPTY_FALLBACKS[context.kind], reason: 'empty' };
+    return {
+      accepted: false,
+      text: topicFallback(context.topic, context.kind, 'empty'),
+      reason: 'empty',
+    };
   }
   if (containsLegacyStory(sanitized)) {
     return {
       accepted: false,
-      text: LEGACY_FALLBACKS[context.kind],
+      text: topicFallback(context.topic, context.kind, 'legacy-story'),
       reason: 'legacy-story',
     };
   }

@@ -2,11 +2,14 @@ import {
   containsLegacyStory,
   filterLegacyMemories,
   selectConversationTopic,
-  TopicCategory,
+  TOPIC_DETAILS,
   validateResidentReply,
 } from './conversationPolicy';
+import type { ReplyContext, TopicCategory, TopicDetail } from './conversationPolicy';
 
 const length = (value: string) => Array.from(value).length;
+
+const topicDetails = Object.values(TOPIC_DETAILS).flat() as TopicDetail[];
 
 describe('selectConversationTopic', () => {
   test('allocates the exact rolling 60/25/15 category budget over 100 choices', () => {
@@ -48,11 +51,48 @@ describe('selectConversationTopic', () => {
       relationship: 5,
       'public-life': 3,
     };
-    const recent = ['work', 'friendship', 'market'];
+    const recent: readonly string[] = Object.freeze(['work', 'friendship', 'market']);
 
     expect(selectConversationTopic('2026-07-17:resident-4', recent, counts)).toEqual(
       selectConversationTopic('2026-07-17:resident-4', recent, counts),
     );
+  });
+
+  test('keeps every zero-based prefix within one choice of its target allocation', () => {
+    const targets: Record<TopicCategory, number> = {
+      livelihood: 0.6,
+      relationship: 0.25,
+      'public-life': 0.15,
+    };
+    const counts: Record<TopicCategory, number> = {
+      livelihood: 0,
+      relationship: 0,
+      'public-life': 0,
+    };
+
+    for (let index = 0; index < 200; index += 1) {
+      const topic = selectConversationTopic(`prefix-${index}`, [], counts);
+      counts[topic.category] += 1;
+      const total = index + 1;
+      for (const category of Object.keys(counts) as TopicCategory[]) {
+        expect(Math.abs(counts[category] - targets[category] * total)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  test.each([
+    { livelihood: 17, relationship: 2, 'public-life': 1 },
+    { livelihood: 1, relationship: 17, 'public-life': 2 },
+    { livelihood: 2, relationship: 1, 'public-life': 17 },
+  ])('recovers the target allocation from arbitrary valid counts %#', (startingCounts) => {
+    const counts: Record<TopicCategory, number> = { ...startingCounts };
+
+    for (let index = 0; index < 300; index += 1) {
+      const topic = selectConversationTopic(`recovery-${index}`, [], counts);
+      counts[topic.category] += 1;
+    }
+
+    expect(counts).toEqual({ livelihood: 192, relationship: 80, 'public-life': 48 });
   });
 });
 
@@ -73,8 +113,10 @@ describe('legacy story isolation', () => {
     '机关谜',
     '线索交汇',
     '雾潮',
+    '灯塔导航',
     'sea beacon',
     'sea navigation',
+    'lighthouse navigation',
   ];
 
   test.each(legacyTerms)('identifies legacy content containing %s', (term) => {
@@ -123,6 +165,24 @@ describe('legacy story isolation', () => {
     expect(memories).toEqual([first, legacy, third]);
     expect(filtered).not.toBe(memories);
   });
+
+  test.each(['灯塔导航', 'lighthouse navigation'])(
+    'rejects %s through predicate, memory filter, and reply validation',
+    (term) => {
+      const legacy = { description: `居民提起了${term}。` };
+      const ordinary = { description: '居民在运河边摆渡。' };
+
+      expect(containsLegacyStory(legacy.description)).toBe(true);
+      expect(filterLegacyMemories([ordinary, legacy])).toEqual([ordinary]);
+      expect(
+        validateResidentReply(legacy.description, {
+          kind: 'continue',
+          topic: 'local-news',
+          observerAskedAboutSea: false,
+        }),
+      ).toMatchObject({ accepted: false, reason: 'legacy-story' });
+    },
+  );
 });
 
 describe('validateResidentReply', () => {
@@ -168,8 +228,38 @@ describe('validateResidentReply', () => {
     expect(length(result.text)).toBeLessThanOrEqual(60);
   });
 
+  test('removes nested mixed-width directions and unmatched parenthesis residue', () => {
+    const result = validateResidentReply('“（低声(叹气)）今天茶庄）新到了一批龙井，要尝尝吗？”', {
+      kind: 'continue',
+      topic: 'shopping',
+      observerAskedAboutSea: false,
+    });
+
+    expect(result).toEqual({
+      accepted: true,
+      text: '“今天茶庄新到了一批龙井，要尝尝吗？”',
+    });
+  });
+
+  test.each([
+    '“今天茶庄新到了一批龙井，要不要一起尝尝？”',
+    '"Today the tea shop received fresh tea. Want to try it?"',
+  ])('preserves a reply enclosed by matching quotes: %s', (raw) => {
+    expect(
+      validateResidentReply(raw, {
+        kind: 'continue',
+        topic: 'shopping',
+        observerAskedAboutSea: false,
+      }).text,
+    ).toBe(raw);
+  });
+
   test('returns a deterministic ordinary fallback for an empty reply', () => {
-    const context = { kind: 'start' as const, topic: 'meal', observerAskedAboutSea: false };
+    const context = {
+      kind: 'start',
+      topic: 'meal',
+      observerAskedAboutSea: false,
+    } satisfies ReplyContext;
 
     const first = validateResidentReply('（沉默）   ', context);
     const second = validateResidentReply('（沉默）   ', context);
@@ -184,10 +274,10 @@ describe('validateResidentReply', () => {
 
   test('replaces a legacy story with a deterministic ordinary-life fallback', () => {
     const context = {
-      kind: 'continue' as const,
+      kind: 'continue',
       topic: 'neighbor-help',
       observerAskedAboutSea: false,
-    };
+    } satisfies ReplyContext;
 
     const first = validateResidentReply('我昨晚在海面发现异常闪光，像是灯塔谜的线索。', context);
     const second = validateResidentReply('我昨晚在海面发现异常闪光，像是灯塔谜的线索。', context);
@@ -197,6 +287,52 @@ describe('validateResidentReply', () => {
     expect(first.reason).toBe('legacy-story');
     expect(containsLegacyStory(first.text)).toBe(false);
     expect(length(first.text)).toBeLessThanOrEqual(60);
+  });
+
+  test('uses distinct deterministic safe fallbacks for date, health, and market topics', () => {
+    const topics = ['date', 'health', 'market'] as const;
+    const emptyReplies = topics.map(
+      (topic) =>
+        validateResidentReply('', {
+          kind: 'continue',
+          topic,
+          observerAskedAboutSea: false,
+        }).text,
+    );
+    const legacyReplies = topics.map(
+      (topic) =>
+        validateResidentReply('海潮带来了异常闪光。', {
+          kind: 'continue',
+          topic,
+          observerAskedAboutSea: false,
+        }).text,
+    );
+
+    expect(new Set(emptyReplies).size).toBe(topics.length);
+    expect(new Set(legacyReplies).size).toBe(topics.length);
+  });
+
+  test('keeps every topic fallback ordinary and within every reply-kind bound', () => {
+    const limits = { start: 45, continue: 60, leave: 35 } as const;
+
+    for (const topic of topicDetails) {
+      for (const kind of Object.keys(limits) as Array<keyof typeof limits>) {
+        for (const [raw, reason] of [
+          ['', 'empty'],
+          ['海潮带来了异常闪光。', 'legacy-story'],
+        ] as const) {
+          const result = validateResidentReply(raw, {
+            kind,
+            topic,
+            observerAskedAboutSea: false,
+          });
+          expect(result).toMatchObject({ accepted: false, reason });
+          expect(result.text).not.toBe('');
+          expect(containsLegacyStory(result.text)).toBe(false);
+          expect(length(result.text)).toBeLessThanOrEqual(limits[kind]);
+        }
+      }
+    }
   });
 
   test.each([
@@ -229,6 +365,60 @@ describe('validateResidentReply', () => {
       reason: 'too-long',
     });
   });
+
+  test('does not mistake a decimal point for a sentence boundary', () => {
+    const result = validateResidentReply(
+      `今天收入是3.5元，账本已经核对好了。${'接下来还要整理订单和货架，'.repeat(5)}`,
+      { kind: 'start', topic: 'income', observerAskedAboutSea: false },
+    );
+
+    expect(result).toEqual({
+      accepted: false,
+      text: '今天收入是3.5元，账本已经核对好了。',
+      reason: 'too-long',
+    });
+  });
+
+  test.each([
+    [
+      `Dr. Chen checked today's order list. ${'The rest of the stock still needs counting, '.repeat(4)}`,
+      "Dr. Chen checked today's order list.",
+    ],
+    [
+      `The U.S. market opens today. ${'The rest of the stock still needs counting, '.repeat(4)}`,
+      'The U.S. market opens today.',
+    ],
+  ])('does not mistake a common short abbreviation for a sentence boundary', (raw, expected) => {
+    const result = validateResidentReply(raw, {
+      kind: 'start',
+      topic: 'order',
+      observerAskedAboutSea: false,
+    });
+
+    expect(result).toEqual({
+      accepted: false,
+      text: expected,
+      reason: 'too-long',
+    });
+  });
+
+  test.each(['👨‍👩‍👧‍👦', 'e\u0301', '✈️'])(
+    'truncates without splitting the %s grapheme cluster',
+    (cluster) => {
+      const result = validateResidentReply(`今${cluster.repeat(80)}稍后再聊`, {
+        kind: 'leave',
+        topic: 'rest',
+        observerAskedAboutSea: false,
+      });
+      const retainedClusters = result.text.slice(1, -1);
+
+      expect(result).toMatchObject({ accepted: false, reason: 'too-long' });
+      expect(length(result.text)).toBeLessThanOrEqual(35);
+      expect(retainedClusters).not.toBe('');
+      expect(retainedClusters.replaceAll(cluster, '')).toBe('');
+      expect(result.text.endsWith('。')).toBe(true);
+    },
+  );
 
   test('does not leave a comma, colon, or semicolon at a trimmed boundary', () => {
     const result = validateResidentReply(
