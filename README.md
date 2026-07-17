@@ -131,7 +131,7 @@ See [package.json](./package.json) for details.
 
 - 话题选择按每位居民的上海当日记录滚动校正：生计 `60%`、关系 `25%`、公共生活 `15%`。从空计数开始的 100 次确定性基准严格为 `60 / 25 / 15`，并避免连续重复最近的细分话题。
 - 简体中文提示范围为开场 `15–45` 字、普通回复 `20–60` 字、告别 `10–35` 字；发送前的最终硬上限分别是开场 `45`、续谈 `60`、离开 `35` 个 Unicode 字符。每次居民生成请求设置 `max_tokens: 120`，每轮只推进一个意思，不使用括号舞台说明。
-- 发送边界会移除舞台说明，拒绝空内容和旧谜团叙事，并将超长内容截到上述硬上限。若本地模型不可用或输出未通过规则，居民仍会发送与当日话题相关的确定性规则回退文本，不会改用付费模型。
+- 发送边界会移除舞台说明；超长但其他方面有效的模型输出会优先保留第一个完整句子，否则在安全的 Unicode 边界自然截短到上述硬上限。只有空内容、旧谜团叙事或本地模型不可用时，居民才会发送与当日话题相关的确定性规则回退文本，不会改用付费模型。
 - 观察者若向居民询问大海、潮汐或高塔航行用途，最终回复会先校正为“镇上没有海，这座塔只是地标。”，再用一句短问句回到镇上日常。
 
 居民对话、对话记忆摘要与反思的当前路径只允许本地 Ollama，并显式请求 `gemma4:12b`。即使通用 LLM 环境变量配置了付费提供商，这条居民路径也会拒绝它；未来若增加免费云模型，需要新的显式配置与实现。
@@ -205,7 +205,7 @@ If you'll be using Ollama for local inference, you'll need to configure Docker t
 npx convex env set OLLAMA_HOST http://host.docker.internal:11434
 ```
 
-To test the connection (after you [have it running](#ollama-default)):
+To test the connection (after you [have it running](#ollama-lighthouse-town-resident-default)):
 
 ```sh
 docker compose exec backend /bin/bash curl http://host.docker.internal:11434
@@ -237,20 +237,22 @@ Ollama model options can be found [here](https://ollama.ai/library).
 replace the explicit `gemma4:12b` model used by the current resident conversation and observer
 paths. If you want to edit the embedding model:
 
-1. Change the `OLLAMA_EMBEDDING_DIMENSION` in `convex/util/llm.ts` and ensure:
-   `export const EMBEDDING_DIMENSION = OLLAMA_EMBEDDING_DIMENSION;`
-2. Set `npx convex env set OLLAMA_EMBEDDING_MODEL # model`.
+1. Set the schema-time constant in `convex/util/embeddingDimension.ts` to the model's actual
+   dimension. Convex requires this to remain a static number while compiling the vector index.
+2. Set `OLLAMA_EMBEDDING_MODEL` and `OLLAMA_EMBEDDING_DIMENSION` in the Convex environment to the
+   same model and dimension, then rebuild and reinitialize data as described below.
 
 Note: You might want to set `NUM_MEMORIES_TO_SEARCH` to `1` in constants.ts, to reduce the size of
 conversation prompts, if you see slowness.
 
 ### OpenAI
 
-To use OpenAI, you need to:
+The current Lighthouse Town resident path rejects OpenAI. For upstream/general provider paths that
+use OpenAI, set the schema-time value in `convex/util/embeddingDimension.ts` to the embedding
+model's actual dimension, for example:
 
 ```ts
-// In convex/util/llm.ts change the following line:
-export const EMBEDDING_DIMENSION = OPENAI_EMBEDDING_DIMENSION;
+export const EMBEDDING_DIMENSION = 1536;
 ```
 
 Set the `OPENAI_API_KEY` environment variable. Visit https://platform.openai.com/account/api-keys if
@@ -264,11 +266,12 @@ Optional: choose models with `OPENAI_CHAT_MODEL` and `OPENAI_EMBEDDING_MODEL`.
 
 ### Together.ai
 
-To use Together.ai, you need to:
+The current Lighthouse Town resident path rejects Together.ai. For upstream/general provider paths
+that use Together.ai, set the static schema dimension in `convex/util/embeddingDimension.ts`, for
+example:
 
 ```ts
-// In convex/util/llm.ts change the following line:
-export const EMBEDDING_DIMENSION = TOGETHER_EMBEDDING_DIMENSION;
+export const EMBEDDING_DIMENSION = 768;
 ```
 
 Set the `TOGETHER_API_KEY` environment variable. Visit https://api.together.xyz/settings/api-keys if
@@ -285,8 +288,8 @@ dimension must match `EMBEDDING_DIMENSION`.
 
 You can use any OpenAI-compatible API, such as Anthropic, Groq, or Azure.
 
-- Change the `EMBEDDING_DIMENSION` in `convex/util/llm.ts` to match the dimension of your embedding
-  model.
+- Change the static `EMBEDDING_DIMENSION` in `convex/util/embeddingDimension.ts` to match the
+  dimension of your embedding model.
 - Edit `getLLMConfig` in `llm.ts` or set environment variables:
 
 ```sh
