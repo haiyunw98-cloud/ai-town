@@ -8,7 +8,7 @@
 
 **Tech Stack:** Convex cron/mutations/actions, TypeScript state machines, existing AI Town movement engine, React + PixiJS, local Ollama Gemma, Jest, generated WebP map art.
 
-**Prerequisite:** Execute `2026-07-17-dual-town-reports.md` first. Task 10 extends the report modules created by that plan.
+**Prerequisite:** Execute `2026-07-17-dual-town-reports.md` and `2026-07-17-basic-economy-social-work.md` first. Daily prizes use the shared economy ledger and Task 10 extends the report modules created by the dual-report plan.
 
 ---
 
@@ -21,6 +21,7 @@
 - Create `convex/events/dailyStateMachine.ts` and `.test.ts`: idempotent two-hour phase progression, scoring, spectating and archive result.
 - Modify `convex/schema.ts`: optional daily-event fields and world/day index, preserving old records.
 - Modify `convex/events.ts`: exactly-once daily creation, catch-up, pause handling, progression, movement, logging and history snapshot.
+- Modify `convex/townEconomy.ts`: idempotent 10/20/50 金贝 participation, finalist and champion rewards plus host-institution service income.
 - Modify `convex/crons.ts`: rename the generic activity advance job while keeping the 30-second cadence.
 - Modify `convex/aiTown/agentInputs.ts`: controlled ferry transfer input.
 - Modify `data/worlds/lighthouse-town/map.ts`: expanded main-town plus Trial Island map and checkpoints.
@@ -58,7 +59,7 @@ test('uses the exact Shanghai 12:00–14:00 window', () => {
 });
 
 test('does not repeat a template used in the previous six days', () => {
-  const previous = ['safe-survival', 'town-treasure', 'island-resources', 'market-business', 'lighthouse-mystery', 'cooking-craft'];
+  const previous = ['safe-survival', 'town-relay', 'island-resources', 'market-business', 'community-service', 'cooking-craft'];
   expect(selectDailyTemplate('2026-07-17', previous)).toBe('relay-build');
 });
 ```
@@ -73,8 +74,8 @@ Expected: FAIL because the schedule module is absent.
 
 ```ts
 export const DAILY_TEMPLATE_IDS = [
-  'safe-survival', 'town-treasure', 'island-resources', 'market-business',
-  'lighthouse-mystery', 'cooking-craft', 'relay-build',
+  'safe-survival', 'town-relay', 'island-resources', 'market-business',
+  'community-service', 'cooking-craft', 'relay-build',
 ] as const;
 export type DailyTemplateId = typeof DAILY_TEMPLATE_IDS[number];
 
@@ -218,13 +219,13 @@ const configurations: Array<{
   id: DailyTemplateId; name: string; venue: VenueMode;
   labels: string[]; checkpoints: string[]; props: string[];
 }> = [
-  { id: 'safe-survival', name: '灯塔安全生存挑战', venue: 'trial-island', labels: ['码头集合与登船', '木头人安全赛道', '发光踏板桥', '庭院休整与交换', '团队拔河', '灯塔终点冲刺', '颁奖与返程'], checkpoints: ['old-dock', 'island-track', 'island-bridge', 'island-courtyard', 'island-team-field', 'island-final', 'island-awards'], props: ['ferry', 'stop-light', 'light-tiles', 'water-table', 'rope', 'finish-line', 'podium'] },
-  { id: 'town-treasure', name: '全镇线索寻宝', venue: 'main-town', labels: ['广场公告', '书院寻卷', '集市寻物', '茶庄交换', '工坊拼装', '灯塔解谜', '广场颁奖'], checkpoints: ['plaza', 'academy', 'morning-market', 'tea-house', 'workshop', 'plaza', 'plaza'], props: ['notice', 'scroll', 'chest', 'tokens', 'parts', 'key', 'podium'] },
+  { id: 'safe-survival', name: '试炼岛安全协作挑战', venue: 'trial-island', labels: ['码头集合与登船', '木头人安全赛道', '发光踏板桥', '庭院休整与交换', '团队拔河', '终点冲刺', '颁奖与返程'], checkpoints: ['old-dock', 'island-track', 'island-bridge', 'island-courtyard', 'island-team-field', 'island-final', 'island-awards'], props: ['ferry', 'stop-light', 'light-tiles', 'water-table', 'rope', 'finish-line', 'podium'] },
+  { id: 'town-relay', name: '全镇任务接力', venue: 'main-town', labels: ['广场公告', '书院整理', '集市配送', '茶庄协作', '工坊组装', '街巷服务', '广场颁奖'], checkpoints: ['plaza', 'academy', 'morning-market', 'tea-house', 'workshop', 'town-office', 'plaza'], props: ['notice', 'books', 'delivery-crates', 'service-tokens', 'parts', 'service-stall', 'podium'] },
   { id: 'island-resources', name: '荒岛资源协作', venue: 'trial-island', labels: ['码头集合与登船', '工具搜集', '食物分配', '营地休整', '团队建造', '资源护送', '颁奖与返程'], checkpoints: ['old-dock', 'island-resource-zone', 'island-courtyard', 'island-courtyard', 'island-team-field', 'island-final', 'island-awards'], props: ['ferry', 'toolbox', 'food-crates', 'water-table', 'building-parts', 'supply-cart', 'podium'] },
   { id: 'market-business', name: '小镇经营赛', venue: 'main-town', labels: ['镇公所登记', '集市采购', '工坊生产', '茶庄休整', '食肆服务', '集市结算', '广场颁奖'], checkpoints: ['town-office', 'morning-market', 'workshop', 'tea-house', 'restaurant', 'morning-market', 'plaza'], props: ['contracts', 'market-stalls', 'materials', 'tea-table', 'serving-trays', 'ledger', 'podium'] },
-  { id: 'lighthouse-mystery', name: '灯塔谜案推理赛', venue: 'main-town', labels: ['镇公所案情公告', '书院查证', '卦馆问询', '茶庄整理', '码头复核', '灯塔陈述', '广场归档'], checkpoints: ['town-office', 'academy', 'divination-hall', 'tea-house', 'old-dock', 'plaza', 'plaza'], props: ['case-board', 'scroll', 'clue-cards', 'notes', 'water-map', 'evidence-board', 'archive-box'] },
+  { id: 'community-service', name: '邻里公共服务赛', venue: 'main-town', labels: ['镇公所任务公告', '书院整理图书', '药庐分类物资', '茶庄休整', '码头协助装卸', '街巷便民服务', '广场总结'], checkpoints: ['town-office', 'academy', 'herb-clinic', 'tea-house', 'old-dock', 'morning-market', 'plaza'], props: ['notice-board', 'books', 'supply-crates', 'tea-table', 'cargo-crates', 'service-stall', 'summary-board'] },
   { id: 'cooking-craft', name: '厨艺与手作赛', venue: 'main-town', labels: ['集市集合', '食材采购', '工坊制作', '茶庄试味', '食肆决赛', '公共评审', '广场颁奖'], checkpoints: ['morning-market', 'morning-market', 'workshop', 'tea-house', 'restaurant', 'restaurant', 'plaza'], props: ['baskets', 'ingredients', 'workbenches', 'tasting-table', 'cooking-stations', 'score-cards', 'podium'] },
-  { id: 'relay-build', name: '团队接力与建造赛', venue: 'trial-island', labels: ['码头集合与登船', '赛道接力', '踏板运送', '庭院休整', '团队组装', '点灯冲刺', '颁奖与返程'], checkpoints: ['old-dock', 'island-track', 'island-bridge', 'island-courtyard', 'island-team-field', 'island-final', 'island-awards'], props: ['ferry', 'batons', 'light-tiles', 'water-table', 'building-parts', 'lantern', 'podium'] },
+  { id: 'relay-build', name: '团队接力与建造赛', venue: 'trial-island', labels: ['码头集合与登船', '赛道接力', '踏板运送', '庭院休整', '团队组装', '彩旗冲刺', '颁奖与返程'], checkpoints: ['old-dock', 'island-track', 'island-bridge', 'island-courtyard', 'island-team-field', 'island-final', 'island-awards'], props: ['ferry', 'batons', 'light-tiles', 'water-table', 'building-parts', 'finish-flags', 'podium'] },
 ];
 
 export const dailyEventTemplates: DailyEventTemplate[] = configurations.map((config) => ({
@@ -284,9 +285,9 @@ const ollamaConfig: LLMConfig = {
 test('accepts only a short name and announcement from Ollama', async () => {
   const result = await requestDailyTheme(templateFixture, '2026-07-17', {
     getConfig: () => ollamaConfig,
-    complete: async () => ({ content: '{"name":"雾桥协作赛","announcement":"安全完成每一关，淘汰者进入观众席。"}' }),
+    complete: async () => ({ content: '{"name":"荷香协作赛","announcement":"安全完成每一关，淘汰者进入观众席。"}' }),
   });
-  expect(result).toEqual({ name: '雾桥协作赛', announcement: '安全完成每一关，淘汰者进入观众席。', source: 'model' });
+  expect(result).toEqual({ name: '荷香协作赛', announcement: '安全完成每一关，淘汰者进入观众席。', source: 'model' });
 });
 
 test('falls back for paid providers, invalid JSON or unsafe wording', async () => {
@@ -601,6 +602,15 @@ test('selects create, advance, paused archive and missed actions at exact bounda
   expect(dailyEventAction(end, 'running', { status: 'running', stageIndex: 4 })).toEqual({ kind: 'archive', stageIndex: 6 });
   expect(dailyEventAction(end, 'running', null)).toEqual({ kind: 'record-missed' });
 });
+
+test('settles participation finalist champion and host rewards exactly once', async () => {
+  await settleDailyEventRewards(ctx, eventRewardFixture);
+  await settleDailyEventRewards(ctx, eventRewardFixture);
+  expect(await rewardAmount(ctx, 'p:participant')).toBe(10);
+  expect(await rewardAmount(ctx, 'p:finalist')).toBe(30);
+  expect(await rewardAmount(ctx, 'p:champion')).toBe(80);
+  expect(await ledgerRowsForEvent(ctx, eventRewardFixture.eventId)).toHaveLength(4);
+});
 ```
 
 - [ ] **Step 2: Run and verify RED**
@@ -652,6 +662,8 @@ In `advanceActiveEvents`, read `worldStatus.status` before acting. Query the `wo
 Because Convex mutations cannot make the Ollama HTTP request, the creation mutation first saves the deterministic fallback theme and schedules `generateDailyTheme`. That internal action rechecks that the world is running, calls `requestDailyTheme`, then invokes an idempotent `saveDailyTheme` mutation. The save mutation patches only the same day's stage-0 event and inserts at most one announcement log, so a slow model response cannot rewrite a later stage or an archived event.
 
 Generalize the existing `decisionCandidate → generateNextDecision → saveDecision` pipeline: first return `null` unless `worldStatus.status === 'running'`; resolve choices from `dailyEventTemplates[event.templateId].stages[event.stageIndex]`, request only one resident decision at a time from local Gemma, persist `teamId`, `choiceId`, `quote` and `decisionPhase`, and immediately schedule the next undecided resident. The unique event-log key remains `quote:${phase}:${residentId}`. At stage advancement, pass the saved choices to `advanceDailyEventToStage`; a missing or failed choice uses its deterministic fallback. Write `lifeEvents` for participation, explicit exchanges, spectator transitions and return to ordinary life. Completion clears activity-specific player descriptions before normal life scheduling resumes.
+
+At awards/archive call `internal.townEconomy.settleDailyEventRewards` with stored participant status and host institutions. It writes `event:<eventId>:<residentId>:participation`, `:finalist`, `:champion` and `event:<eventId>:host:<institutionId>` idempotency keys. Participation pays 10 金贝, finalist status adds 20, champion status adds 50, and each recorded host service transfers its configured amount to the institution. The old million-gold event never enters this settlement path.
 
 Rename the cron label to `advance daily town activity` but keep `{ seconds: 30 }`.
 
@@ -707,7 +719,7 @@ Expected: FAIL because the world is still 40 tiles wide and has no island checkp
 
 - [ ] **Step 3: Expand the map to 84×30**
 
-Keep all existing town coordinates 0–39 unchanged. Introduce `TOWN_WIDTH = 40` and change every existing town-generation loop to stop at `TOWN_WIDTH`, not the new global `mapwidth`, so the east-west town paths do not accidentally cross the sea. Retain the old collision boundary at column 39, fill columns 40–47 with blocked water, then build a bounded island in columns 48–82 with walkable paths and obstacle boundaries. Export exact checkpoints:
+Keep all existing town coordinates 0–39 unchanged. Introduce `TOWN_WIDTH = 40` and change every existing town-generation loop to stop at `TOWN_WIDTH`, not the new global `mapwidth`, so the east-west town paths do not accidentally cross the separating water. Retain the old collision boundary at column 39, fill columns 40–47 with blocked inland water, then build a bounded island in columns 48–82 with walkable paths and obstacle boundaries. Export exact checkpoints:
 
 ```ts
 export const trialIslandCheckpoints = {
@@ -727,6 +739,7 @@ const dailyTownCheckpoints: Record<string, { x: number; y: number }> = {
   'old-dock': eventCheckpoints.dock,
   plaza: eventCheckpoints.plaza,
   academy: townLandmarkById('academy').destination,
+  'herb-clinic': townLandmarkById('herb-clinic').destination,
   'morning-market': townLandmarkById('morning-market').destination,
   'tea-house': townLandmarkById('tea-house').destination,
   workshop: townLandmarkById('workshop').destination,
@@ -942,8 +955,8 @@ git commit -m "feat: navigate town and trial island cameras"
 test('separates a live daily activity from completed daily and legacy history', () => {
   const noon = Date.parse('2026-07-17T04:30:00Z');
   const afterTwo = Date.parse('2026-07-17T06:01:00Z');
-  const dailyRunning = { id: 'daily:17', name: '雾桥协作赛', status: 'running', phase: 'round-one', phaseEndsAt: noon + 300_000, prize: '灯塔荣誉徽章', venueMode: 'trial-island' as const, dailyKey: '2026-07-17' };
-  const dailyCompleted = { id: 'daily:16', name: '小镇经营赛', status: 'completed', dailyKey: '2026-07-16', winnerName: '唐果', prize: '金色招牌', logs: [] };
+  const dailyRunning = { id: 'daily:17', name: '荷香协作赛', status: 'running', phase: 'round-one', phaseEndsAt: noon + 300_000, prize: '参赛10／决赛加20／冠军加50金贝', venueMode: 'trial-island' as const, dailyKey: '2026-07-17' };
+  const dailyCompleted = { id: 'daily:16', name: '小镇经营赛', status: 'completed', dailyKey: '2026-07-16', winnerName: '唐果', prize: '冠军共80金贝', logs: [] };
   const legacyCompleted = { id: 'legacy', name: '百万金贝寻宝赛', status: 'completed', dailyKey: undefined, winnerName: '白露', prize: '百万金贝', logs: [] };
   const base = { ...running, eventHistory: [dailyCompleted, legacyCompleted] };
   const liveView = buildBroadcastView({ ...base, event: dailyRunning }, 'zh-CN', noon);
@@ -959,6 +972,7 @@ test('separates a live daily activity from completed daily and legacy history', 
   expect(source).toContain('snapshot.event && <ActiveDailyEvent');
   expect(source).toContain('<EventHistory events={snapshot.eventHistory}');
   expect(source).not.toContain('eventHistory[0].status === \'running\'');
+  expect(base.eventHistory.filter((event) => event.id === 'legacy')).toHaveLength(1);
 });
 ```
 
@@ -1012,7 +1026,7 @@ test('records the full daily activity process and observes only explicit interac
     conversations: [],
     residentActivity: [],
     dailyMessages: [{ messageId: 'm:observer', conversationId: 'c:event', authorId: 'p:human', authorName: 'Me', text: '你们准备怎么分工？', createdAt: at(45), observerIntervention: true }],
-    dailyLifeEvents: [{ residentId: 'p:lin', displayName: '林澜', kind: 'life', text: '活动结束后回到灯塔继续值守', createdAt: at(121) }],
+    dailyLifeEvents: [{ residentId: 'p:lin', displayName: '林澜', kind: 'life', text: '活动结束后回到镇公所整理日常记录', createdAt: at(121) }],
     eventHistory: [{ id: 'legacy', name: '百万金贝寻宝赛', status: 'completed', dailyKey: '2026-07-16', winnerName: '白露', prize: '百万金贝', logs: [] }],
   };
   const factual = buildDailyReport(snapshot, 'zh-CN', afterTwo);
@@ -1021,7 +1035,10 @@ test('records the full daily activity process and observes only explicit interac
   expect(factual.indexOf(texts[5])).toBeLessThan(factual.indexOf(texts[6]));
 
   const facts = buildSocialObservationFacts(snapshot, 'zh-CN', afterTwo);
-  const social = buildSocialObservationReport(facts, { source: 'fallback', narrative: '' });
+  const social = buildSocialObservationReport(facts, {
+    source: 'fallback', fallbackReason: '模型不可用',
+    findings: facts.ruleFindings, limitations: facts.limitations, followUps: facts.followUps,
+  });
   expect(social).toContain('## 活动重点观察');
   expect(social).toContain('转入观众席');
   expect(social).toContain('观察者介入阶段');
