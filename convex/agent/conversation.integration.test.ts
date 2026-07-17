@@ -277,9 +277,27 @@ describe('observer sea-question detection', () => {
   );
 
   test.each([
+    '镇上有海吗？',
+    '这里没有海吗？',
+    '你见过海吗？',
+    '海在哪里？',
+    '镇上有海吗',
+    '这座塔用于导航吗',
+  ])('detects a contextual bare-sea or unpunctuated tower question: %s', (text) => {
+    expect(detect).toBeDefined();
+    if (!detect) return;
+    expect(detect({ id: 'observer', human: 'observer-user' }, [{ author: 'observer', text }])).toBe(
+      true,
+    );
+  });
+
+  test.each([
     '海鲜市场几点开？',
+    '今天吃海鲜吗？',
     '这张海报是谁画的？',
+    '这张海报多少钱？',
     '海棠花什么时候开？',
+    '海棠开了吗？',
     '手机导航怎么设置？',
     'GPS导航准吗？',
     '地图导航好用吗？',
@@ -377,28 +395,45 @@ describe('topic get-or-create contract', () => {
   }) {
     const indexes: string[] = [];
     const inserts: TopicRecord[] = [];
+    const records = [
+      ...(options.existing ? [options.existing] : []),
+      ...(options.shared ?? []),
+      ...(options.currentDay ?? []),
+      ...(options.recent ?? []),
+    ];
     const db = {
       query: (_table: string) => {
-        let index = '';
+        const equalities: Record<string, string> = {};
         const builder: Record<string, unknown> = {};
-        const chain = {
-          eq: () => chain,
+        const chain: { eq: (field: string, value: string) => typeof chain } = {
+          eq: (field, value) => {
+            equalities[field] = value;
+            return chain;
+          },
         };
         builder.withIndex = (name: string, apply: (q: typeof chain) => unknown) => {
-          index = name;
           indexes.push(name);
           apply(chain);
           return builder;
         };
-        builder.unique = async () => options.existing ?? null;
+        const matches = (record: TopicRecord) =>
+          Object.entries(equalities).every(
+            ([field, value]) => record[field as keyof TopicRecord] === value,
+          );
+        builder.unique = async () => records.find(matches) ?? null;
         builder.order = () => builder;
-        builder.take = async (limit: number) => (options.recent ?? []).slice(0, limit);
+        builder.take = async (limit: number) =>
+          records
+            .filter(matches)
+            .sort((a, b) => b.selectedAt - a.selectedAt)
+            .slice(0, limit);
         builder.collect = async () =>
-          index === 'residentDay' ? (options.currentDay ?? []) : (options.shared ?? []);
+          records.filter(matches).sort((a, b) => a.selectedAt - b.selectedAt);
         return builder;
       },
       insert: async (_table: string, record: TopicRecord) => {
         inserts.push(record);
+        records.push(record);
         return 'topic-id';
       },
     };
@@ -425,16 +460,16 @@ describe('topic get-or-create contract', () => {
     };
     const fake = fakeTopicContext({ existing });
 
-    await expect(
-      registeredMutation._handler(fake.ctx, {
-        worldId: 'world',
-        playerId: 'speaker',
-        conversationId: 'conversation',
-        now: 20,
-      }),
-    ).resolves.toBe(existing);
+    const args = {
+      worldId: 'world',
+      playerId: 'speaker',
+      conversationId: 'conversation',
+      now: 20,
+    };
+    await expect(registeredMutation._handler(fake.ctx, args)).resolves.toBe(existing);
+    await expect(registeredMutation._handler(fake.ctx, args)).resolves.toBe(existing);
     expect(fake.inserts).toHaveLength(0);
-    expect(fake.indexes).toEqual(['conversation']);
+    expect(fake.indexes).toEqual(['conversation', 'conversation']);
   });
 
   test('registered mutation reuses a shared conversation topic and inserts exactly once', async () => {
@@ -449,16 +484,25 @@ describe('topic get-or-create contract', () => {
     };
     const fake = fakeTopicContext({ shared: [shared] });
 
-    const result = await registeredMutation._handler(fake.ctx, {
+    const args = {
       worldId: 'world',
       playerId: 'new-speaker',
       conversationId: 'conversation',
       now: Date.parse('2026-07-17T16:00:00.000Z'),
-    });
+    };
+    const result = await registeredMutation._handler(fake.ctx, args);
+    const repeated = await registeredMutation._handler(fake.ctx, args);
 
     expect(result).toMatchObject({ category: 'public-life', detail: 'market' });
+    expect(repeated).toBe(result);
     expect(fake.inserts).toHaveLength(1);
     expect(fake.inserts[0]).toMatchObject({ category: 'public-life', detail: 'market' });
-    expect(fake.indexes).toEqual(['conversation', 'residentDay', 'residentTime', 'conversation']);
+    expect(fake.indexes).toEqual([
+      'conversation',
+      'residentDay',
+      'residentTime',
+      'conversation',
+      'conversation',
+    ]);
   });
 });
