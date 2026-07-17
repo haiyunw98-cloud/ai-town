@@ -8,6 +8,7 @@ import {
 import { townLandmarks } from './map';
 
 const residentNames = ['林澜', '沈砚', '唐果', '墨七', '苏萤', '白露', '顾潮', '阿满', '玄微先生'];
+const forbiddenRuntimeTopics = /海潮|潮汐|航标|海风|海浪|夜航|无海航路|异常闪光|灯塔谜|机关谜|线索交汇/u;
 
 describe('Lighthouse Town resident activities', () => {
   test('gives every resident personalized Chinese activities across daily life', () => {
@@ -41,6 +42,10 @@ describe('Lighthouse Town resident activities', () => {
     expect(tangGuoActivity).not.toEqual(moQiActivity);
     expect(tangGuoActivity.description).toContain('茶馆');
     expect(moQiActivity.description).toContain('摆渡');
+  });
+
+  test('keeps every autonomous activity focused on inland daily life', () => {
+    expect(JSON.stringify(residentActivities)).not.toMatch(forbiddenRuntimeTopics);
   });
 
   test('passes the player description name through the agent activity operation', () => {

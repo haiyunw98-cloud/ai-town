@@ -41,10 +41,10 @@ describe('world art selection', () => {
     expect(game).toContain('selectedLandmark.services.map');
     for (const name of [
       '听雨茶庄',
-      '望潮食肆',
+      '河鲜食肆',
       '镇公所',
       '灯塔书院',
-      '听潮卦馆',
+      '时和卦馆',
       '苏氏机关坊',
       '白露药庐',
       '旧水码头',
@@ -68,5 +68,11 @@ describe('world art selection', () => {
       expect(landmark.destination.y).toBeGreaterThan(0);
       expect(landmark.destination.y).toBeLessThan(mapheight - 1);
     }
+  });
+
+  test('presents landmarks as inland public places without ocean or mystery framing', () => {
+    expect(JSON.stringify(townLandmarks)).not.toMatch(
+      /海潮|潮汐|航标|海风|海浪|夜航|无海航路|异常闪光|灯塔谜|机关谜|线索交汇/u,
+    );
   });
 });

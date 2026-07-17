@@ -15,7 +15,7 @@ type ResidentActivityTemplate = Omit<ResidentActivity, 'landmarkId'>;
 export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
   林澜: [
     {
-      description: '正在灯塔顶层校对雾潮与航标记录',
+      description: '正在历史高塔核对参观登记与维修清单',
       emoji: '📜',
       duration: 90_000,
       category: 'work',
@@ -33,7 +33,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'care',
     },
     {
-      description: '去临桥茶馆问唐果夜归客人看见了什么',
+      description: '去临桥茶馆和唐果商量周末游客茶点',
       emoji: '🍵',
       duration: 80_000,
       category: 'social',
@@ -161,7 +161,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'care',
     },
     {
-      description: '拿着新画的结构图去找林澜核对灯塔记录',
+      description: '拿着新画的窗扣图去找林澜确认尺寸',
       emoji: '📐',
       duration: 85_000,
       category: 'social',
@@ -175,7 +175,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
   ],
   白露: [
     {
-      description: '在百草铺称药配方并记录雾潮前的气味',
+      description: '在百草铺称药配方并盘点夏季常用药材',
       emoji: '🌿',
       duration: 100_000,
       category: 'work',
@@ -193,7 +193,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'care',
     },
     {
-      description: '为夜航归来的墨七检查旧伤并换药',
+      description: '为收工后的墨七检查旧伤并换药',
       emoji: '🩹',
       duration: 80_000,
       category: 'social',
@@ -207,7 +207,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
   ],
   顾潮: [
     {
-      description: '在长明灯笼坊糊制灯塔节的新花灯',
+      description: '在长明灯笼坊糊制夏灯会的新花灯',
       emoji: '🏮',
       duration: 105_000,
       category: 'work',
@@ -257,7 +257,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'care',
     },
     {
-      description: '缠着墨七请教夜航技巧并主动复述要点',
+      description: '缠着墨七请教雨天靠岸技巧并主动复述要点',
       emoji: '🛥️',
       duration: 80_000,
       category: 'social',
@@ -271,7 +271,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
   ],
   玄微先生: [
     {
-      description: '在听潮卦馆为客人排节气日程并说明边界',
+      description: '在时和卦馆为客人排节气日程并说明边界',
       emoji: '☷️',
       duration: 95_000,
       category: 'work',
@@ -289,13 +289,13 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'care',
     },
     {
-      description: '找沈砚辩论征兆能否成为证据并记下分歧',
+      description: '找沈砚讨论民俗说法如何准确表达并记下建议',
       emoji: '🗣️',
       duration: 85_000,
       category: 'social',
     },
     {
-      description: '听着远处潮声独自推演一局铜钱卦',
+      description: '听着院内雨声独自推演一局铜钱卦',
       emoji: '🪙',
       duration: 75_000,
       category: 'leisure',

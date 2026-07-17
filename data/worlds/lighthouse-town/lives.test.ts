@@ -1,5 +1,7 @@
 import { getLifeProfileByName, residentLifeProfiles } from './lives';
 
+const forbiddenRuntimeTopics = /海潮|潮汐|航标|海风|海浪|夜航|无海航路|异常闪光|灯塔谜|机关谜|线索交汇/u;
+
 describe('Lighthouse Town resident life profiles', () => {
   test('defines a complete adult dossier for every resident', () => {
     expect(residentLifeProfiles).toHaveLength(9);
@@ -20,6 +22,7 @@ describe('Lighthouse Town resident life profiles', () => {
         expect(value).toBeLessThanOrEqual(100);
       }
     }
+    expect(getLifeProfileByName('林澜')?.occupation).toBe('灯塔守望人');
   });
 
   test('keeps relationship targets valid and includes social, romantic, and commercial life', () => {
@@ -41,5 +44,10 @@ describe('Lighthouse Town resident life profiles', () => {
   test('looks profiles up by the resident display name', () => {
     expect(getLifeProfileByName('玄微先生')?.id).toBe('xuan-wei');
     expect(getLifeProfileByName('不存在')).toBeUndefined();
+  });
+
+  test('keeps resident dossiers focused on distinct daily livelihoods and relationships', () => {
+    expect(JSON.stringify(residentLifeProfiles)).not.toMatch(forbiddenRuntimeTopics);
+    expect(new Set(residentLifeProfiles.map((profile) => profile.currentGoal)).size).toBe(9);
   });
 });

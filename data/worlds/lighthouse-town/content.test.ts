@@ -1,6 +1,11 @@
 import { lighthouseCharacters, localizedDescriptions } from './characters';
+import { residentActivities } from './activities';
+import { residentLifeProfiles } from './lives';
 import { buildWorldPrompt, lighthouseTown } from './manifest';
+import { townLandmarks } from './map';
 import { readFileSync } from 'node:fs';
+
+const forbiddenRuntimeTopics = /海潮|潮汐|航标|海风|海浪|夜航|无海航路|异常闪光|灯塔谜|机关谜|线索交汇/u;
 
 describe('Lighthouse Town content', () => {
   test('defines the approved world identity in both languages', () => {
@@ -60,11 +65,38 @@ describe('Lighthouse Town content', () => {
     expect(localizedDescriptions('en')[0].name).toBe('Lin Lan');
   });
 
+  test('keeps archived clues out of runtime resident identities', () => {
+    const runtimeResidents = localizedDescriptions('zh-CN');
+
+    expect(lighthouseCharacters.every((character) => character.clue['zh-CN'].length > 0)).toBe(true);
+    expect(lighthouseCharacters.some((character) => character.clue['zh-CN'].includes('无海航路'))).toBe(true);
+    expect(JSON.stringify(runtimeResidents)).not.toContain('无海航路');
+    for (const [index, character] of lighthouseCharacters.entries()) {
+      expect(runtimeResidents[index].identity).not.toContain(character.clue['zh-CN']);
+    }
+  });
+
+  test('grounds all autonomous runtime context in ordinary inland Jiangnan life', () => {
+    const runtimeContext = JSON.stringify({
+      residents: localizedDescriptions('zh-CN'),
+      activities: residentActivities,
+      lives: residentLifeProfiles,
+      landmarks: townLandmarks,
+      worldPrompt: buildWorldPrompt('zh-CN'),
+    });
+
+    expect(runtimeContext).toContain('江南内陆');
+    expect(runtimeContext).toContain('镇上没有海');
+    expect(runtimeContext).not.toMatch(forbiddenRuntimeTopics);
+  });
+
   test('builds an explicit language and setting prompt', () => {
     expect(buildWorldPrompt('zh-CN')).toContain('只使用自然的简体中文');
     expect(buildWorldPrompt('zh-CN')).toContain('你生活在灯塔镇');
     expect(buildWorldPrompt('en')).toContain('Respond in natural English');
     expect(buildWorldPrompt('en')).toContain('You live in Lighthouse Town');
+    expect(buildWorldPrompt('zh-CN')).toContain('这座塔只是地标');
+    expect(buildWorldPrompt('en')).toContain('the town has no sea');
   });
 
   test('wires localized residents and world prompts into the simulation', () => {

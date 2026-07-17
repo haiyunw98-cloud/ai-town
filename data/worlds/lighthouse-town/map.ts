@@ -191,7 +191,7 @@ export const townLandmarks = [
   {
     id: 'herb-clinic', name: '白露药庐', icon: '药', x: 15.5, y: 4.45,
     destination: { x: 15, y: 7 }, openHours: '卯时至戌时',
-    description: '白露坐诊和配药的药庐，也照看夜航者的旧伤与日常小病。',
+    description: '白露坐诊和配药的药庐，也照看船工旧伤与居民日常小病。',
     services: ['问诊配药', '旧伤换药', '药草采买'],
   },
   {
@@ -201,7 +201,7 @@ export const townLandmarks = [
     services: ['水路摆渡', '货物装卸', '船只停泊'],
   },
   {
-    id: 'divination-hall', name: '听潮卦馆', icon: '卦', x: 35.5, y: 4.45,
+    id: 'divination-hall', name: '时和卦馆', icon: '卦', x: 35.5, y: 4.45,
     destination: { x: 35, y: 7 }, openHours: '巳时至亥时',
     description: '玄微先生经营的卦馆，用节气、观察与问答帮助居民梳理难题。',
     services: ['节气择日', '民俗咨询', '铺面布局'],
@@ -227,11 +227,11 @@ export const townLandmarks = [
   {
     id: 'workshop', name: '苏氏机关坊', icon: '工', x: 35.5, y: 17.35,
     destination: { x: 35, y: 20 }, openHours: '辰时至戌时',
-    description: '苏萤修理船灯、罗盘和小型机关的工坊，顾潮也常来试验新灯。',
-    services: ['船灯修理', '机关订制', '工具借用'],
+    description: '苏萤修理水车、农具和家用灯具的工坊，顾潮也常来制作店灯。',
+    services: ['水车修理', '农具订制', '工具借用'],
   },
   {
-    id: 'restaurant', name: '望潮食肆', icon: '食', x: 7.2, y: 25.1,
+    id: 'restaurant', name: '河鲜食肆', icon: '食', x: 7.2, y: 25.1,
     destination: { x: 8, y: 24 }, openHours: '巳时至亥时',
     description: '供应鱼汤面、清粥和时令小菜的食肆，码头收工后最为热闹。',
     services: ['热汤主食', '堂食外带', '工坊送餐'],
