@@ -73,7 +73,7 @@ const LEGACY_CHINESE_TERMS = [
 ] as const;
 
 const LEGACY_ENGLISH_PATTERNS = [
-  /\bocean(?:ic)?[\s/-]+(?:tides?|waves?|breeze|surface)\b/u,
+  /\bocean(?:ic)?[\s/-]+(?:tides?|beacons?|navigation|navigational|waves?|breeze|surface)\b/u,
   /\bsea[\s/-]+(?:beacons?|navigation|navigational|voyage|route|waves?|breeze)\b/u,
   /\bnavigation[\s/-]+at[\s/-]+sea\b/u,
   /\blighthouse[\s/-]+myster(?:y|ies)\b/u,
@@ -131,6 +131,8 @@ function sanitizeReply(value: string): string {
   return value
     .replace(/\([^()]*\)|（[^（）]*）/gu, ' ')
     .replace(/\s+/gu, ' ')
+    .trim()
+    .replace(/^[\p{P}\s]+/u, '')
     .trim();
 }
 

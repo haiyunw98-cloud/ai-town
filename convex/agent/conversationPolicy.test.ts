@@ -73,21 +73,39 @@ describe('legacy story isolation', () => {
     '机关谜',
     '线索交汇',
     '雾潮',
-    'ocean tide',
     'sea beacon',
     'sea navigation',
-    'lighthouse mystery',
-    'anomaly',
   ];
 
   test.each(legacyTerms)('identifies legacy content containing %s', (term) => {
     expect(containsLegacyStory(`居民又提起了${term}的传闻。`)).toBe(true);
   });
 
+  test.each(['ocean tide', 'ocean beacon', 'ocean navigation', 'lighthouse mystery', 'anomaly'])(
+    'rejects the exact English legacy phrase %s',
+    (phrase) => {
+      expect(containsLegacyStory(`A resident repeated the ${phrase} story.`)).toBe(true);
+      expect(
+        validateResidentReply(`A resident repeated the ${phrase} story.`, {
+          kind: 'continue',
+          topic: 'local-news',
+          observerAskedAboutSea: false,
+        }),
+      ).toMatchObject({ accepted: false, reason: 'legacy-story' });
+    },
+  );
+
   test.each(['运河', '河道', '码头', '乌篷船', '摆渡'])(
     'allows ordinary inland content containing %s',
     (term) => {
       expect(containsLegacyStory(`居民在${term}边忙了一上午。`)).toBe(false);
+    },
+  );
+
+  test.each(['river', 'canal', 'dock', 'ferry'])(
+    'allows ordinary inland English content containing %s',
+    (term) => {
+      expect(containsLegacyStory(`Residents finished their work beside the ${term}.`)).toBe(false);
     },
   );
 
@@ -130,6 +148,24 @@ describe('validateResidentReply', () => {
     });
 
     expect(result).toEqual({ accepted: true, text: '今天 生意不错。 你呢？' });
+  });
+
+  test.each([
+    '（叹气）。今天茶庄新到了一批龙井，要不要一起尝尝？',
+    '(叹气). 今天茶庄新到了一批龙井，要不要一起尝尝？',
+  ])('discards punctuation-only fragments left by stage directions: %s', (raw) => {
+    const result = validateResidentReply(raw, {
+      kind: 'continue',
+      topic: 'shopping',
+      observerAskedAboutSea: false,
+    });
+
+    expect(result).toEqual({
+      accepted: true,
+      text: '今天茶庄新到了一批龙井，要不要一起尝尝？',
+    });
+    expect(result.text).not.toMatch(/^\p{P}/u);
+    expect(length(result.text)).toBeLessThanOrEqual(60);
   });
 
   test('returns a deterministic ordinary fallback for an empty reply', () => {
