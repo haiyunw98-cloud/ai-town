@@ -566,11 +566,39 @@ export function buildBroadcastView(snapshot: BroadcastSnapshot, locale: Locale, 
   if (!snapshot.event) {
     return {
       mode: 'chronicle' as const,
+      presentation: 'chronicle' as const,
       title: locale === 'zh-CN' ? '灯塔镇镇志' : 'Town Chronicle',
-      phaseLabel: '',
-      countdown: '--:--',
-      activeCount: 0,
+      live: null,
+      history: null,
       winnerName: undefined,
+    };
+  }
+  const winnerName = snapshot.participants.find(
+    (participant) => participant.residentId === snapshot.event?.winnerId,
+  )?.displayName;
+  if (snapshot.event.status === 'completed') {
+    const champion = winnerName ?? (locale === 'zh-CN' ? '未记录' : 'Not recorded');
+    return {
+      mode: 'event' as const,
+      presentation: 'history' as const,
+      title: locale === 'zh-CN' ? '往届赛事记录' : 'Past Event Record',
+      live: null,
+      history: {
+        eventName: snapshot.event.name,
+        champion,
+        prize: snapshot.event.prize,
+        result: winnerName
+          ? (locale === 'zh-CN'
+            ? `赛事已结束，${winnerName}获得冠军。`
+            : `The event has ended. ${winnerName} was the champion.`)
+          : (locale === 'zh-CN' ? '赛事已结束，冠军未记录。' : 'The event has ended. No champion was recorded.'),
+        logs: [...snapshot.logs].sort((left, right) =>
+          left.sequence - right.sequence
+            || left.createdAt - right.createdAt
+            || left.eventKey.localeCompare(right.eventKey),
+        ),
+      },
+      winnerName,
     };
   }
   const seconds = Math.max(0, Math.ceil((snapshot.event.phaseEndsAt - now) / 1000));
@@ -578,12 +606,14 @@ export function buildBroadcastView(snapshot: BroadcastSnapshot, locale: Locale, 
   const remainder = seconds % 60;
   return {
     mode: 'event' as const,
+    presentation: 'live' as const,
     title: snapshot.event.name,
-    phaseLabel: phaseLabels[locale][snapshot.event.phase] ?? snapshot.event.phase,
-    countdown: `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`,
-    activeCount: snapshot.participants.filter((participant) => participant.active).length,
-    winnerName: snapshot.participants.find(
-      (participant) => participant.residentId === snapshot.event?.winnerId,
-    )?.displayName,
+    live: {
+      phaseLabel: phaseLabels[locale][snapshot.event.phase] ?? snapshot.event.phase,
+      countdown: `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`,
+      activeCount: snapshot.participants.filter((participant) => participant.active).length,
+    },
+    history: null,
+    winnerName,
   };
 }

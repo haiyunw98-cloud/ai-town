@@ -1009,41 +1009,99 @@ p[contenteditable='true']:empty::before {
   letter-spacing: 0.12em;
 }
 
-.event-recap {
-  padding: 10px 12px;
+.event-history-card {
+  padding: 12px;
   border: 1px solid rgba(230, 184, 92, 0.34);
   border-radius: 10px;
   background: linear-gradient(90deg, rgba(184, 74, 58, 0.18), rgba(11, 45, 49, 0.68));
 }
 
-.event-recap summary {
+.event-history-card > header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  cursor: pointer;
-  list-style: none;
 }
 
-.event-recap summary::-webkit-details-marker {
-  display: none;
-}
-
-.event-recap span {
+.event-history-card > header span {
   color: rgba(244, 236, 216, 0.58);
   font-size: 10px;
 }
 
-.event-recap strong {
+.event-history-card > header h2 {
+  margin: 0;
   color: #f3cc79;
-  font-size: 12px;
+  font-size: 15px;
 }
 
-.event-recap p {
-  margin: 9px 0 0;
-  color: rgba(244, 236, 216, 0.7);
+.event-history-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 10px 0;
+}
+
+.event-history-facts > div {
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: rgba(4, 25, 31, 0.4);
+}
+
+.event-history-facts dt {
+  color: rgba(244, 236, 216, 0.54);
+  font-size: 9px;
+}
+
+.event-history-facts dd {
+  margin: 3px 0 0;
+  color: #f7e7bc;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.event-history-log h3 {
+  margin: 0 0 4px;
+  color: rgba(244, 236, 216, 0.72);
+  font-size: 11px;
+}
+
+.event-history-log ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-history-log li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(244, 236, 216, 0.08);
+}
+
+.event-history-log time {
+  color: var(--lighthouse-gold);
+  font-size: 9px;
+}
+
+.event-history-log p {
+  margin: 0;
+  color: rgba(244, 236, 216, 0.72);
   font-size: 10px;
   line-height: 1.45;
+}
+
+@media (max-width: 520px) {
+  .event-history-card > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .event-history-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .town-story {

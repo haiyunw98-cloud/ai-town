@@ -46,7 +46,6 @@ export default function EventBroadcast({
   }
   const view = buildBroadcastView(snapshot, locale, now);
   const story = buildTownStory(snapshot.conversations);
-  const eventCompleted = snapshot.event?.status === 'completed';
   const exportFacts = () => {
     exportFactualReport({ snapshot, locale, exportNow: Date.now() });
   };
@@ -77,47 +76,64 @@ export default function EventBroadcast({
           </span>
         </div>
       </div>
-      {view.mode === 'event' && snapshot.event && (
+      {view.presentation === 'live' && snapshot.event && (
         <>
-          {!eventCompleted && (
-            <>
-              <div className="event-poster event-poster-compact">
-                <img
-                  src="/ai-town/assets/worlds/lighthouse-town/event-poster-v1.png"
-                  alt=""
-                />
-                <div className="event-poster-copy">
-                  <span>{t('event.specialBroadcast')}</span>
-                  <strong>{snapshot.event.name}</strong>
-                </div>
-                <div className="event-live-dot">LIVE</div>
-              </div>
-              <div className="event-heading lantern-glow">
-                <div>
-                  <span className="event-kicker">{t('event.live')}</span>
-                  <h2>{view.title}</h2>
-                </div>
-                <div className="event-clock" aria-label={t('event.countdown')}>
-                  <span>{view.phaseLabel}</span>
-                  <strong>{view.countdown}</strong>
-                </div>
-              </div>
-              <p className="event-prize"><span>◆</span> {snapshot.event.prize}</p>
-            </>
-          )}
-          {eventCompleted && (
-            <details className="event-recap">
-              <summary>
-                <span>上届活动回顾</span>
-                <strong>{view.winnerName ? `${view.winnerName} 获胜` : snapshot.event.name}</strong>
-              </summary>
-              <p>{snapshot.event.prize}</p>
-            </details>
-          )}
-          {view.winnerName && !eventCompleted && (
+          <div className="event-poster event-poster-compact">
+            <img
+              src="/ai-town/assets/worlds/lighthouse-town/event-poster-v1.png"
+              alt=""
+            />
+            <div className="event-poster-copy">
+              <span>{t('event.specialBroadcast')}</span>
+              <strong>{snapshot.event.name}</strong>
+            </div>
+            <div className="event-live-dot">LIVE</div>
+          </div>
+          <div className="event-heading lantern-glow">
+            <div>
+              <span className="event-kicker">{t('event.live')}</span>
+              <h2>{view.title}</h2>
+            </div>
+            <div className="event-clock" aria-label={t('event.countdown')}>
+              <span>{view.live.phaseLabel}</span>
+              <strong>{view.live.countdown}</strong>
+            </div>
+          </div>
+          <p className="event-prize"><span>◆</span> {snapshot.event.prize}</p>
+          {view.winnerName && (
             <div className="event-winner">{t('event.winner', { name: view.winnerName })}</div>
           )}
         </>
+      )}
+
+      {view.presentation === 'history' && (
+        <section className="event-history-card" aria-labelledby="past-event-heading">
+          <header>
+            <span>{locale === 'zh-CN' ? '历史公共事件' : 'Historical public event'}</span>
+            <h2 id="past-event-heading">{view.title}</h2>
+          </header>
+          <dl className="event-history-facts">
+            <div><dt>{locale === 'zh-CN' ? '活动' : 'Event'}</dt><dd>{view.history.eventName}</dd></div>
+            <div><dt>{locale === 'zh-CN' ? '冠军' : 'Champion'}</dt><dd>{view.history.champion}</dd></div>
+            <div><dt>{locale === 'zh-CN' ? '奖品' : 'Prize'}</dt><dd>{view.history.prize}</dd></div>
+            <div><dt>{locale === 'zh-CN' ? '最终结果' : 'Final result'}</dt><dd>{view.history.result}</dd></div>
+          </dl>
+          <div className="event-history-log">
+            <h3>{locale === 'zh-CN' ? '历史过程记录' : 'Event record'}</h3>
+            {view.history.logs.length === 0 ? (
+              <p className="event-empty">{t('event.noEntries')}</p>
+            ) : (
+              <ol>
+                {view.history.logs.map((entry) => (
+                  <li key={`${entry.eventKey}:${entry.sequence}:${entry.createdAt}`}>
+                    <time>{formatTime(entry.createdAt, locale)}</time>
+                    <p>{entry.text}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </section>
       )}
 
       <div className="town-story">
@@ -154,12 +170,12 @@ export default function EventBroadcast({
         </div>
       </div>
 
-      {view.mode === 'event' && snapshot.event && (
-        <details className="event-scoreboard" open={!eventCompleted}>
+      {view.presentation === 'live' && snapshot.event && (
+        <details className="event-scoreboard" open>
           <summary>
             <div className="event-section-title">
               <h3>{t('event.rankings')}</h3>
-              <span>{t('event.remaining', { count: view.activeCount })}</span>
+              <span>{t('event.remaining', { count: view.live.activeCount })}</span>
             </div>
           </summary>
             {snapshot.participants.map((participant, index) => (
@@ -206,19 +222,21 @@ export default function EventBroadcast({
         ))}
       </div>
 
-      <div className="event-chronicle">
-        <div className="event-section-title">
-          <h3>{view.mode === 'event' ? t('event.chronicle') : view.title}</h3>
-          <span>{t('event.localRecords')}</span>
+      {view.presentation !== 'history' && (
+        <div className="event-chronicle">
+          <div className="event-section-title">
+            <h3>{view.mode === 'event' ? t('event.chronicle') : view.title}</h3>
+            <span>{t('event.localRecords')}</span>
+          </div>
+          {snapshot.logs.length === 0 && <p className="event-empty">{t('event.noEntries')}</p>}
+          {snapshot.logs.map((entry) => (
+            <article className="event-log-entry" key={`${entry.eventKey}:${entry.sequence}:${entry.createdAt}`}>
+              <time>{formatTime(entry.createdAt, locale)}</time>
+              <p>{entry.text}</p>
+            </article>
+          ))}
         </div>
-        {snapshot.logs.length === 0 && <p className="event-empty">{t('event.noEntries')}</p>}
-        {snapshot.logs.map((entry) => (
-          <article className="event-log-entry" key={entry.eventKey}>
-            <time>{formatTime(entry.createdAt, locale)}</time>
-            <p>{entry.text}</p>
-          </article>
-        ))}
-      </div>
+      )}
     </section>
   );
 }

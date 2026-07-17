@@ -29,6 +29,11 @@ describe('i18n', () => {
     expect(formatMessage('zh-CN', 'test.englishOnly')).toBe('English fallback');
   });
 
+  test('names the permanent observer tab without advertising a live event', () => {
+    expect(formatMessage('zh-CN', 'event.broadcast')).toBe('小镇观察');
+    expect(formatMessage('en', 'event.broadcast')).toBe('Town Observer');
+  });
+
   test('player-facing components do not contain known English JSX literals', () => {
     const files = [
       '../App.tsx',
