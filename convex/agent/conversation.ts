@@ -56,9 +56,7 @@ export function observerAskedAboutSea(
   const contextualBareSea = CONTEXTUAL_CHINESE_BARE_SEA.test(latest.text);
   return (
     latest.author === otherPlayer.id &&
-    (FINAL_QUESTION.test(latest.text) ||
-      CHINESE_QUESTION_ENDING.test(latest.text) ||
-      contextualBareSea) &&
+    (FINAL_QUESTION.test(latest.text) || CHINESE_QUESTION_ENDING.test(latest.text)) &&
     (EXPLICIT_CHINESE_MARINE.test(latest.text) ||
       contextualBareSea ||
       CHINESE_TOWER_NAVIGATION.test(latest.text) ||
