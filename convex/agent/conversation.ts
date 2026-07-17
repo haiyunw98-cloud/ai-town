@@ -40,7 +40,7 @@ const FINAL_QUESTION = /[?？]["'”’」』）)]*\s*$/u;
 const CHINESE_QUESTION_ENDING = /(?:吗|么|呢|哪里|哪儿|何处)["'”’」』）)]*\s*$/u;
 const EXPLICIT_CHINESE_MARINE = /海洋|海上|大海|海边|海岸|海潮|潮汐|观潮|航标/u;
 const CONTEXTUAL_CHINESE_BARE_SEA =
-  /(?:(?:有|没有|见过|看过)海(?!鲜|报|棠)|海(?:在)?(?:哪里|哪儿|何处))/u;
+  /(?:(?:有|没有|见过|看过|听过|看到|看见)(?:大)?海(?:吗|么|呢)?|海(?:吗|么|呢|在哪里|在哪儿|在何处))(?:[?？]["'”’」』）)]*\s*|["'”’」』）)]*\s*)$/u;
 const CHINESE_TOWER_NAVIGATION =
   /(?:(?:灯塔|这座塔|高塔)[\s\S]{0,12}(?:导航|航行)|(?:导航|航行)[\s\S]{0,12}(?:灯塔|这座塔|高塔))/u;
 const EXPLICIT_ENGLISH_MARINE = /\b(?:sea|ocean|tides?|coasts?|seaside)\b/iu;
@@ -53,11 +53,14 @@ export function observerAskedAboutSea(
 ): boolean {
   if (!otherPlayer.human || messages.length === 0) return false;
   const latest = messages[messages.length - 1];
+  const contextualBareSea = CONTEXTUAL_CHINESE_BARE_SEA.test(latest.text);
   return (
     latest.author === otherPlayer.id &&
-    (FINAL_QUESTION.test(latest.text) || CHINESE_QUESTION_ENDING.test(latest.text)) &&
+    (FINAL_QUESTION.test(latest.text) ||
+      CHINESE_QUESTION_ENDING.test(latest.text) ||
+      contextualBareSea) &&
     (EXPLICIT_CHINESE_MARINE.test(latest.text) ||
-      CONTEXTUAL_CHINESE_BARE_SEA.test(latest.text) ||
+      contextualBareSea ||
       CHINESE_TOWER_NAVIGATION.test(latest.text) ||
       EXPLICIT_ENGLISH_MARINE.test(latest.text) ||
       ENGLISH_TOWER_NAVIGATION.test(latest.text))
