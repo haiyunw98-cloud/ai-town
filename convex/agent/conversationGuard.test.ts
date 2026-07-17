@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import * as agentOperationsModule from '../aiTown/agentOperations';
 import * as memoryModule from './memory';
 import * as conversationModule from './conversation';
+import * as llmModule from '../util/llm';
 import { MAX_CONVERSATION_MESSAGES } from '../constants';
 
 type Reason = 'world-correction' | 'empty' | 'legacy-story' | 'too-long';
@@ -28,6 +29,10 @@ const agentOperations = agentOperationsModule as unknown as {
 };
 
 const memory = memoryModule as unknown as {
+  runLocalMemoryExternalWork?: <T>(dependencies: {
+    assertLocalProvider: () => unknown;
+    work: () => Promise<T>;
+  }) => Promise<T>;
   sanitizeMemorySummary?: (raw: string, locale: 'zh-CN' | 'en') => string;
   prepareReflectionInput?: <
     T extends {
@@ -44,6 +49,20 @@ const memory = memoryModule as unknown as {
     memories: readonly T[],
     statementIds: readonly number[],
   ) => string[];
+};
+
+const llm = llmModule as unknown as {
+  assertLocalOllamaProvider?: (dependencies: {
+    getConfig: () => {
+      provider: 'openai';
+      url: string;
+      chatModel: string;
+      embeddingModel: string;
+      embeddingDimension: number;
+      stopWords: string[];
+      apiKey: string;
+    };
+  }) => unknown;
 };
 
 describe('final resident send boundary', () => {
@@ -191,6 +210,53 @@ describe('final resident send boundary', () => {
       }),
     ).rejects.toThrow('memory failed');
     expect(calls).toEqual(['remember', 'release']);
+  });
+
+  test('nonlocal memory preflight performs zero completion and embedding work and still releases', async () => {
+    expect(agentOperations.rememberConversationAndRelease).toBeDefined();
+    expect(memory.runLocalMemoryExternalWork).toBeDefined();
+    expect(llm.assertLocalOllamaProvider).toBeDefined();
+    if (
+      !agentOperations.rememberConversationAndRelease ||
+      !memory.runLocalMemoryExternalWork ||
+      !llm.assertLocalOllamaProvider
+    ) {
+      return;
+    }
+    let completionCalls = 0;
+    let embeddingCalls = 0;
+    let releaseCalls = 0;
+
+    await expect(
+      agentOperations.rememberConversationAndRelease({
+        remember: () =>
+          memory.runLocalMemoryExternalWork!({
+            assertLocalProvider: () =>
+              llm.assertLocalOllamaProvider!({
+                getConfig: () => ({
+                  provider: 'openai',
+                  url: 'https://paid.invalid',
+                  chatModel: 'paid-model',
+                  embeddingModel: 'paid-embedding',
+                  embeddingDimension: 8,
+                  stopWords: [],
+                  apiKey: 'secret',
+                }),
+              }),
+            work: async () => {
+              completionCalls += 1;
+              embeddingCalls += 1;
+            },
+          }),
+        release: async () => {
+          releaseCalls += 1;
+        },
+      }),
+    ).rejects.toThrow('local-provider-unavailable');
+
+    expect(completionCalls).toBe(0);
+    expect(embeddingCalls).toBe(0);
+    expect(releaseCalls).toBe(1);
   });
 });
 

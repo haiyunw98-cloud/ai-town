@@ -1,7 +1,7 @@
 import { v } from 'convex/values';
 import { Id } from '../_generated/dataModel';
 import { ActionCtx, internalMutation, internalQuery } from '../_generated/server';
-import { LLMMessage, localChatCompletionOnce } from '../util/llm';
+import { assertLocalOllamaProvider, LLMMessage, localChatCompletionOnce } from '../util/llm';
 import * as memory from './memory';
 import { api, internal } from '../_generated/api';
 import * as embeddingsCache from './embeddingsCache';
@@ -167,6 +167,14 @@ export const getConversationPolicyContext = internalQuery({
   },
 });
 
+export async function loadResidentMemoryContext<T>(dependencies: {
+  assertLocalProvider: () => unknown;
+  fetchEmbedding: () => Promise<T>;
+}): Promise<T> {
+  dependencies.assertLocalProvider();
+  return dependencies.fetchEmbedding();
+}
+
 export async function startConversationMessage(
   ctx: ActionCtx,
   worldId: Id<'worlds'>,
@@ -190,10 +198,11 @@ export async function startConversationMessage(
     conversationId,
     now: Date.now(),
   });
-  const embedding = await embeddingsCache.fetch(
-    ctx,
-    `${player.name} is talking to ${otherPlayer.name}`,
-  );
+  const embedding = await loadResidentMemoryContext({
+    assertLocalProvider: assertLocalOllamaProvider,
+    fetchEmbedding: () =>
+      embeddingsCache.fetch(ctx, `${player.name} is talking to ${otherPlayer.name}`),
+  });
 
   const searchedMemories = await memory.searchMemories(
     ctx,
@@ -268,10 +277,11 @@ export async function continueConversationMessage(
     now,
   });
   const started = new Date(conversation.created);
-  const embedding = await embeddingsCache.fetch(
-    ctx,
-    `What do you think about ${otherPlayer.name}?`,
-  );
+  const embedding = await loadResidentMemoryContext({
+    assertLocalProvider: assertLocalOllamaProvider,
+    fetchEmbedding: () =>
+      embeddingsCache.fetch(ctx, `What do you think about ${otherPlayer.name}?`),
+  });
   const searchedMemories = await memory.searchMemories(
     ctx,
     player.id as GameId<'players'>,
@@ -338,10 +348,14 @@ export async function leaveConversationMessage(
     conversationId,
     now: Date.now(),
   });
-  const embedding = await embeddingsCache.fetch(
-    ctx,
-    `What should ${player.name} remember while leaving ${otherPlayer.name}?`,
-  );
+  const embedding = await loadResidentMemoryContext({
+    assertLocalProvider: assertLocalOllamaProvider,
+    fetchEmbedding: () =>
+      embeddingsCache.fetch(
+        ctx,
+        `What should ${player.name} remember while leaving ${otherPlayer.name}?`,
+      ),
+  });
   const searchedMemories = await memory.searchMemories(
     ctx,
     player.id as GameId<'players'>,

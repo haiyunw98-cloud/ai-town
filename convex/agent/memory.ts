@@ -2,7 +2,12 @@ import { v } from 'convex/values';
 import { ActionCtx, DatabaseReader, internalMutation, internalQuery } from '../_generated/server';
 import { Doc, Id } from '../_generated/dataModel';
 import { internal } from '../_generated/api';
-import { LLMMessage, fetchEmbedding, localChatCompletionOnce } from '../util/llm';
+import {
+  assertLocalOllamaProvider,
+  LLMMessage,
+  fetchEmbedding,
+  localChatCompletionOnce,
+} from '../util/llm';
 import { asyncMap } from '../util/asyncMap';
 import { GameId, agentId, conversationId, playerId } from '../aiTown/ids';
 import { SerializedPlayer } from '../aiTown/player';
@@ -82,6 +87,14 @@ export function reflectionRelatedMemoryIds<T extends { _id: unknown }>(
   });
 }
 
+export async function runLocalMemoryExternalWork<T>(dependencies: {
+  assertLocalProvider: () => unknown;
+  work: () => Promise<T>;
+}): Promise<T> {
+  dependencies.assertLocalProvider();
+  return dependencies.work();
+}
+
 export async function rememberConversation(
   ctx: ActionCtx,
   worldId: Id<'worlds'>,
@@ -125,39 +138,44 @@ export async function rememberConversation(
     });
   }
   llmMessages.push({ role: 'user', content: 'Summary:' });
-  let summaryRaw = '';
-  try {
-    const completion = await localChatCompletionOnce({
-      model: 'gemma4:12b',
-      messages: llmMessages,
-      max_tokens: 160,
-    });
-    summaryRaw = completion.content;
-  } catch {
-    console.warn('memory-summary-provider-unavailable');
-  }
-  const summary = sanitizeMemorySummary(summaryRaw, locale);
-  const description = `Conversation with ${otherPlayer.name} at ${new Date(
-    data.conversation._creationTime,
-  ).toLocaleString()}: ${summary}`;
-  const importance = await calculateImportance(description);
-  const { embedding } = await fetchEmbedding(description);
-  authors.delete(player.id as GameId<'players'>);
-  await ctx.runMutation(selfInternal.insertMemory, {
-    agentId,
-    playerId: player.id,
-    description,
-    importance,
-    lastAccess: messages[messages.length - 1]._creationTime,
-    data: {
-      type: 'conversation',
-      conversationId,
-      playerIds: [...authors],
+  return runLocalMemoryExternalWork({
+    assertLocalProvider: assertLocalOllamaProvider,
+    work: async () => {
+      let summaryRaw = '';
+      try {
+        const completion = await localChatCompletionOnce({
+          model: 'gemma4:12b',
+          messages: llmMessages,
+          max_tokens: 160,
+        });
+        summaryRaw = completion.content;
+      } catch {
+        console.warn('memory-summary-provider-unavailable');
+      }
+      const summary = sanitizeMemorySummary(summaryRaw, locale);
+      const description = `Conversation with ${otherPlayer.name} at ${new Date(
+        data.conversation._creationTime,
+      ).toLocaleString()}: ${summary}`;
+      const importance = await calculateImportance(description);
+      const { embedding } = await fetchEmbedding(description);
+      authors.delete(player.id as GameId<'players'>);
+      await ctx.runMutation(selfInternal.insertMemory, {
+        agentId,
+        playerId: player.id,
+        description,
+        importance,
+        lastAccess: messages[messages.length - 1]._creationTime,
+        data: {
+          type: 'conversation',
+          conversationId,
+          playerIds: [...authors],
+        },
+        embedding,
+      });
+      await reflectOnMemories(ctx, worldId, playerId);
+      return description;
     },
-    embedding,
   });
-  await reflectOnMemories(ctx, worldId, playerId);
-  return description;
 }
 
 export const loadConversation = internalQuery({
@@ -403,6 +421,7 @@ async function reflectOnMemories(
   worldId: Id<'worlds'>,
   playerId: GameId<'players'>,
 ) {
+  assertLocalOllamaProvider();
   const result = await ctx.runQuery(internal.agent.memory.getReflectionMemories, {
     worldId,
     playerId,

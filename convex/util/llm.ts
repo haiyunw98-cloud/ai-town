@@ -17,6 +17,16 @@ const authHeaders = (config: LLMConfig): Record<string, string> =>
 const isNumberArray = (value: unknown): value is number[] =>
   Array.isArray(value) && value.every((item: unknown) => typeof item === 'number');
 
+export function assertLocalOllamaProvider(
+  dependencies: { getConfig?: () => LLMConfig } = {},
+): LLMConfig {
+  const config = (dependencies.getConfig ?? getLLMConfig)();
+  if (config.provider !== 'ollama') {
+    throw new Error('local-provider-unavailable');
+  }
+  return config;
+}
+
 export async function localChatCompletionOnce(
   body: Omit<CreateChatCompletionRequest, 'stream'> & { stream?: false | null },
   dependencies: {
@@ -24,10 +34,7 @@ export async function localChatCompletionOnce(
     fetch?: typeof globalThis.fetch;
   } = {},
 ): Promise<{ content: string; retries: 0; ms: number }> {
-  const config = (dependencies.getConfig ?? getLLMConfig)();
-  if (config.provider !== 'ollama') {
-    throw new Error('local-provider-unavailable');
-  }
+  const config = assertLocalOllamaProvider({ getConfig: dependencies.getConfig });
 
   const startedAt = Date.now();
   const fetchOnce = dependencies.fetch ?? globalThis.fetch;
@@ -43,11 +50,15 @@ export async function localChatCompletionOnce(
     }),
   });
   if (!result.ok) {
-    const error = sanitizeProviderError(await result.text());
-    throw new Error(`local-chat-completion-failed:${result.status}:${error}`);
+    throw new Error(`local-chat-completion-failed:${result.status}`);
   }
 
-  const json = (await result.json()) as CreateChatCompletionResponse;
+  let json: CreateChatCompletionResponse;
+  try {
+    json = (await result.json()) as CreateChatCompletionResponse;
+  } catch {
+    throw new Error('local-chat-completion-invalid-response');
+  }
   const content = json.choices?.[0]?.message?.content;
   if (typeof content !== 'string') {
     throw new Error('local-chat-completion-invalid-response');

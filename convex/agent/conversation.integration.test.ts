@@ -55,6 +55,46 @@ describe('Shanghai day key', () => {
 });
 
 describe('daily-life prompt contract', () => {
+  test('preflight helper rejects before resident embedding work', async () => {
+    const loadResidentMemoryContext = (
+      conversation as unknown as {
+        loadResidentMemoryContext?: <T>(dependencies: {
+          assertLocalProvider: () => unknown;
+          fetchEmbedding: () => Promise<T>;
+        }) => Promise<T>;
+      }
+    ).loadResidentMemoryContext;
+    expect(loadResidentMemoryContext).toBeDefined();
+    if (!loadResidentMemoryContext) return;
+    let embeddingCalls = 0;
+
+    await expect(
+      loadResidentMemoryContext({
+        assertLocalProvider: () => {
+          throw new Error('local-provider-unavailable');
+        },
+        fetchEmbedding: async () => {
+          embeddingCalls += 1;
+          return [1, 2, 3];
+        },
+      }),
+    ).rejects.toThrow('local-provider-unavailable');
+    expect(embeddingCalls).toBe(0);
+  });
+
+  test.each([
+    ['startConversationMessage', 'continueConversationMessage'],
+    ['continueConversationMessage', 'leaveConversationMessage'],
+    ['leaveConversationMessage', undefined],
+  ])('%s wires local preflight before its embedding call', (name, nextName) => {
+    const source = sourceFor(name, nextName);
+    const guardAt = source.indexOf('loadResidentMemoryContext');
+    const embeddingAt = source.indexOf('embeddingsCache.fetch');
+
+    expect(guardAt).toBeGreaterThanOrEqual(0);
+    expect(embeddingAt).toBeGreaterThan(guardAt);
+  });
+
   test('uses one local-only Gemma 12b completion for resident dialogue and memory text', () => {
     expect(conversationSource).toContain('localChatCompletionOnce');
     expect(conversationSource).not.toMatch(/\bchatCompletion\s*\(/u);
@@ -62,6 +102,12 @@ describe('daily-life prompt contract', () => {
     expect(memorySource).not.toMatch(/\bchatCompletion\s*\(/u);
     expect(conversationSource.match(/model:\s*['"]gemma4:12b['"]/gu)).toHaveLength(3);
     expect(memorySource.match(/model:\s*['"]gemma4:12b['"]/gu)).toHaveLength(3);
+    expect(memorySource).toMatch(
+      /rememberConversation[\s\S]*runLocalMemoryExternalWork[\s\S]*localChatCompletionOnce/u,
+    );
+    expect(memorySource).toMatch(
+      /reflectOnMemories[\s\S]*assertLocalOllamaProvider[\s\S]*localChatCompletionOnce/u,
+    );
   });
 
   test('exports the exact shared simplified-Chinese short-turn rules', () => {

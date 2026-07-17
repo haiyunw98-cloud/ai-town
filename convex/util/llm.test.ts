@@ -14,6 +14,7 @@ const ollamaConfig: LLMConfig = {
 };
 
 const llm = llmModule as unknown as {
+  assertLocalOllamaProvider?: (dependencies?: { getConfig: () => LLMConfig }) => LLMConfig;
   localChatCompletionOnce?: (
     body: {
       model: string;
@@ -31,6 +32,20 @@ describe('localChatCompletionOnce', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
+
+  test.each(['openai', 'together', 'custom'] as const)(
+    'shared preflight rejects %s with a stable content-free error',
+    (provider) => {
+      expect(llm.assertLocalOllamaProvider).toBeDefined();
+      if (!llm.assertLocalOllamaProvider) return;
+
+      expect(() =>
+        llm.assertLocalOllamaProvider?.({
+          getConfig: () => ({ ...ollamaConfig, provider }),
+        }),
+      ).toThrow(new Error('local-provider-unavailable'));
+    },
+  );
 
   test('returns one valid Ollama completion with the explicit model', async () => {
     expect(llm.localChatCompletionOnce).toBeDefined();
@@ -110,13 +125,37 @@ describe('localChatCompletionOnce', () => {
     }
 
     expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toContain('[REDACTED]');
-    expect((failure as Error).message).not.toContain('sk-secret-token');
+    expect((failure as Error).message).toBe('local-chat-completion-failed:500');
+    expect((failure as Error).message).not.toContain(secret);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const logged = logSpies
       .flatMap((spy) => spy.mock.calls)
       .flat()
       .join(' ');
     expect(logged).not.toContain(secret);
+  });
+
+  test.each([
+    ['invalid JSON', 'INVALID_JSON_SENTINEL', 'text/plain'],
+    ['missing content', JSON.stringify({ choices: [{ message: {} }] }), 'application/json'],
+  ])('returns a content-free error for %s', async (_name, responseBody, contentType) => {
+    expect(llm.localChatCompletionOnce).toBeDefined();
+    if (!llm.localChatCompletionOnce) return;
+    const fetchMock = jest.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response(responseBody, { status: 200, headers: { 'Content-Type': contentType } }),
+      ),
+    );
+
+    await expect(
+      llm.localChatCompletionOnce(
+        {
+          model: 'gemma4:12b',
+          messages: [{ role: 'user', content: 'test invalid response' }],
+          stream: false,
+        },
+        { getConfig: () => ollamaConfig, fetch: fetchMock },
+      ),
+    ).rejects.toThrow(new Error('local-chat-completion-invalid-response'));
   });
 });
