@@ -1,6 +1,6 @@
 import { v } from 'convex/values';
 import { Id } from '../_generated/dataModel';
-import { ActionCtx, internalQuery } from '../_generated/server';
+import { ActionCtx, internalMutation, internalQuery } from '../_generated/server';
 import { LLMMessage, chatCompletion } from '../util/llm';
 import * as memory from './memory';
 import { api, internal } from '../_generated/api';
@@ -9,8 +9,121 @@ import { GameId, conversationId, playerId } from '../aiTown/ids';
 import { NUM_MEMORIES_TO_SEARCH } from '../constants';
 import { buildWorldPrompt } from '../../data/worlds/lighthouse-town/manifest';
 import { getWorldLocale } from '../util/worldLocale';
+import {
+  filterLegacyMemories,
+  selectConversationTopic,
+  TopicCategory,
+} from './conversationPolicy';
 
 const selfInternal = internal.agent.conversation;
+
+const shanghaiDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+export function shanghaiDayKey(selectedAt: number): string {
+  const parts = shanghaiDateFormatter.formatToParts(new Date(selectedAt));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+export function conversationPromptRules(topic: { detail: string }): string[] {
+  return [
+    `本轮日常话题：${topic.detail}。`,
+    '用自然的简体中文交谈，每轮只推进一个意思。',
+    '普通回复控制在 20–60 个中文字符；开场 15–45 字；告别 10–35 字。',
+    '不要使用括号舞台说明，不要长篇描写动作、环境或内心。',
+    '不要发起异变、谜团、调查、灯塔机关或海洋话题。',
+  ];
+}
+
+type PriorMessage = { author: string; text: string };
+
+const EXPLICIT_SEA_TOPIC = /海洋|航标|观潮|潮汐|(?<!上)海|\b(?:sea|ocean|beacon)\b/iu;
+const QUESTION_FORM = /[?？]|(?:吗|呢|么|怎么|为何|为什么|是否|是不是|有没有|哪里|哪儿|什么|谁|几|多少)(?:[。！!]?)$/iu;
+
+export function observerAskedAboutSea(
+  otherPlayer: { id: string; human?: string },
+  messages: readonly PriorMessage[],
+): boolean {
+  if (!otherPlayer.human || messages.length === 0) return false;
+  const latest = messages[messages.length - 1];
+  return (
+    latest.author === otherPlayer.id &&
+    EXPLICIT_SEA_TOPIC.test(latest.text) &&
+    QUESTION_FORM.test(latest.text.trim())
+  );
+}
+
+export const getOrCreateConversationTopic = internalMutation({
+  args: {
+    worldId: v.id('worlds'),
+    playerId,
+    conversationId,
+    now: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('conversationTopics')
+      .withIndex('conversation', (q) =>
+        q
+          .eq('worldId', args.worldId)
+          .eq('conversationId', args.conversationId)
+          .eq('playerId', args.playerId),
+      )
+      .unique();
+    if (existing) return existing;
+
+    const dayKey = shanghaiDayKey(args.now);
+    const residentTopics = await ctx.db
+      .query('conversationTopics')
+      .withIndex('residentDay', (q) =>
+        q.eq('worldId', args.worldId).eq('playerId', args.playerId).eq('dayKey', dayKey),
+      )
+      .order('asc')
+      .collect();
+    const counts: Record<TopicCategory, number> = {
+      livelihood: 0,
+      relationship: 0,
+      'public-life': 0,
+    };
+    for (const topic of residentTopics) counts[topic.category] += 1;
+    const recent = residentTopics.slice(-3).map((topic) => topic.detail);
+    const selected = selectConversationTopic(
+      `${dayKey}:${args.worldId}:${args.playerId}:${args.conversationId}`,
+      recent,
+      counts,
+    );
+
+    const sharedTopics = await ctx.db
+      .query('conversationTopics')
+      .withIndex('conversation', (q) =>
+        q.eq('worldId', args.worldId).eq('conversationId', args.conversationId),
+      )
+      .collect();
+    const shared = sharedTopics.reduce<(typeof sharedTopics)[number] | undefined>(
+      (first, topic) => (!first || topic.selectedAt < first.selectedAt ? topic : first),
+      undefined,
+    );
+    const topic = shared
+      ? { category: shared.category, detail: shared.detail }
+      : { category: selected.category, detail: selected.detail };
+    const record = {
+      worldId: args.worldId,
+      playerId: args.playerId,
+      conversationId: args.conversationId,
+      ...topic,
+      dayKey,
+      selectedAt: args.now,
+    };
+    await ctx.db.insert('conversationTopics', record);
+    return record;
+  },
+});
 
 export async function startConversationMessage(
   ctx: ActionCtx,
@@ -28,17 +141,24 @@ export async function startConversationMessage(
       conversationId,
     },
   );
+  const topic = await ctx.runMutation(selfInternal.getOrCreateConversationTopic, {
+    worldId,
+    playerId,
+    conversationId,
+    now: Date.now(),
+  });
   const embedding = await embeddingsCache.fetch(
     ctx,
     `${player.name} is talking to ${otherPlayer.name}`,
   );
 
-  const memories = await memory.searchMemories(
+  const searchedMemories = await memory.searchMemories(
     ctx,
     player.id as GameId<'players'>,
     embedding,
     Number(process.env.NUM_MEMORIES_TO_SEARCH) || NUM_MEMORIES_TO_SEARCH,
   );
+  const memories = filterLegacyMemories(searchedMemories);
 
   const memoryWithOtherPlayer = memories.find(
     (m) => m.data.type === 'conversation' && m.data.playerIds.includes(otherPlayerId),
@@ -48,6 +168,7 @@ export async function startConversationMessage(
     `You are ${player.name}, and you just started a conversation with ${otherPlayer.name}.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
+  prompt.push(...conversationPromptRules(topic));
   prompt.push(...previousConversationPrompt(otherPlayer, lastConversation));
   prompt.push(...relatedMemoriesPrompt(memories));
   if (memoryWithOtherPlayer) {
@@ -65,7 +186,7 @@ export async function startConversationMessage(
         content: prompt.join('\n'),
       },
     ],
-    max_tokens: 300,
+    max_tokens: 120,
     stop: stopWords(otherPlayer.name, player.name),
   });
   return trimContentPrefx(content, lastPrompt);
@@ -95,43 +216,56 @@ export async function continueConversationMessage(
     },
   );
   const now = Date.now();
+  const topic = await ctx.runMutation(selfInternal.getOrCreateConversationTopic, {
+    worldId,
+    playerId,
+    conversationId,
+    now,
+  });
   const started = new Date(conversation.created);
   const embedding = await embeddingsCache.fetch(
     ctx,
     `What do you think about ${otherPlayer.name}?`,
   );
-  const memories = await memory.searchMemories(ctx, player.id as GameId<'players'>, embedding, 3);
+  const searchedMemories = await memory.searchMemories(
+    ctx,
+    player.id as GameId<'players'>,
+    embedding,
+    3,
+  );
+  const memories = filterLegacyMemories(searchedMemories);
+  const prevMessages = await ctx.runQuery(api.messages.listMessages, { worldId, conversationId });
   const prompt = [
     buildWorldPrompt(getWorldLocale()),
     `You are ${player.name}, and you're currently in a conversation with ${otherPlayer.name}.`,
     `The conversation started at ${started.toLocaleString()}. It's now ${now.toLocaleString()}.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
+  prompt.push(...conversationPromptRules(topic));
   prompt.push(...relatedMemoriesPrompt(memories));
   prompt.push(
     `Below is the current chat history between you and ${otherPlayer.name}.`,
-    `DO NOT greet them again. Do NOT use the word "Hey" too often. Your response should be brief and within 200 characters.`,
+    `DO NOT greet them again. Do NOT use the word "Hey" too often.`,
   );
+  if (observerAskedAboutSea(otherPlayer, prevMessages)) {
+    prompt.push(
+      '观察者问到了海洋设定。先说“镇上没有海，这座塔只是地标。”，再用一句短问句回应。',
+    );
+  }
 
   const llmMessages: LLMMessage[] = [
     {
       role: 'system',
       content: prompt.join('\n'),
     },
-    ...(await previousMessages(
-      ctx,
-      worldId,
-      player,
-      otherPlayer,
-      conversation.id as GameId<'conversations'>,
-    )),
+    ...formatPreviousMessages(prevMessages, player, otherPlayer),
   ];
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   llmMessages.push({ role: 'user', content: lastPrompt });
 
   const { content } = await chatCompletion({
     messages: llmMessages,
-    max_tokens: 300,
+    max_tokens: 120,
     stop: stopWords(otherPlayer.name, player.name),
   });
   return trimContentPrefx(content, lastPrompt);
@@ -153,35 +287,54 @@ export async function leaveConversationMessage(
       conversationId,
     },
   );
+  const topic = await ctx.runMutation(selfInternal.getOrCreateConversationTopic, {
+    worldId,
+    playerId,
+    conversationId,
+    now: Date.now(),
+  });
+  const embedding = await embeddingsCache.fetch(
+    ctx,
+    `What should ${player.name} remember while leaving ${otherPlayer.name}?`,
+  );
+  const searchedMemories = await memory.searchMemories(
+    ctx,
+    player.id as GameId<'players'>,
+    embedding,
+    3,
+  );
+  const memories = filterLegacyMemories(searchedMemories);
+  const prevMessages = await ctx.runQuery(api.messages.listMessages, { worldId, conversationId });
   const prompt = [
     buildWorldPrompt(getWorldLocale()),
     `You are ${player.name}, and you're currently in a conversation with ${otherPlayer.name}.`,
     `You've decided to leave the question and would like to politely tell them you're leaving the conversation.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
+  prompt.push(...conversationPromptRules(topic));
+  prompt.push(...relatedMemoriesPrompt(memories));
   prompt.push(
     `Below is the current chat history between you and ${otherPlayer.name}.`,
-    `How would you like to tell them that you're leaving? Your response should be brief and within 200 characters.`,
+    `How would you like to tell them that you're leaving?`,
   );
+  if (observerAskedAboutSea(otherPlayer, prevMessages)) {
+    prompt.push(
+      '观察者问到了海洋设定。先说“镇上没有海，这座塔只是地标。”，再用一句短问句回应。',
+    );
+  }
   const llmMessages: LLMMessage[] = [
     {
       role: 'system',
       content: prompt.join('\n'),
     },
-    ...(await previousMessages(
-      ctx,
-      worldId,
-      player,
-      otherPlayer,
-      conversation.id as GameId<'conversations'>,
-    )),
+    ...formatPreviousMessages(prevMessages, player, otherPlayer),
   ];
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   llmMessages.push({ role: 'user', content: lastPrompt });
 
   const { content } = await chatCompletion({
     messages: llmMessages,
-    max_tokens: 300,
+    max_tokens: 120,
     stop: stopWords(otherPlayer.name, player.name),
   });
   return trimContentPrefx(content, lastPrompt);
@@ -231,15 +384,12 @@ function relatedMemoriesPrompt(memories: memory.Memory[]): string[] {
   return prompt;
 }
 
-async function previousMessages(
-  ctx: ActionCtx,
-  worldId: Id<'worlds'>,
+function formatPreviousMessages(
+  prevMessages: readonly PriorMessage[],
   player: { id: string; name: string },
   otherPlayer: { id: string; name: string },
-  conversationId: GameId<'conversations'>,
 ) {
   const llmMessages: LLMMessage[] = [];
-  const prevMessages = await ctx.runQuery(api.messages.listMessages, { worldId, conversationId });
   for (const message of prevMessages) {
     const author = message.author === player.id ? player : otherPlayer;
     const recipient = message.author === player.id ? otherPlayer : player;

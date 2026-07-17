@@ -23,6 +23,22 @@ export default defineSchema({
     .index('conversationId', ['worldId', 'conversationId'])
     .index('messageUuid', ['conversationId', 'messageUuid']),
 
+  conversationTopics: defineTable({
+    worldId: v.id('worlds'),
+    playerId,
+    conversationId,
+    category: v.union(
+      v.literal('livelihood'),
+      v.literal('relationship'),
+      v.literal('public-life'),
+    ),
+    detail: v.string(),
+    dayKey: v.string(),
+    selectedAt: v.number(),
+  })
+    .index('conversation', ['worldId', 'conversationId', 'playerId'])
+    .index('residentDay', ['worldId', 'playerId', 'dayKey', 'selectedAt']),
+
   townEvents: defineTable({
     worldId: v.id('worlds'),
     status: v.union(
