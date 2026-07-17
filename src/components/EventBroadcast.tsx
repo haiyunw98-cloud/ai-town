@@ -6,6 +6,7 @@ import { useI18n } from '../i18n';
 import type { Locale } from '../i18n';
 import {
   buildBroadcastView,
+  buildCompletedArchiveView,
   buildTownStory,
   type BroadcastSnapshot,
 } from './eventBroadcastView';
@@ -104,36 +105,6 @@ export default function EventBroadcast({
             <div className="event-winner">{t('event.winner', { name: view.winnerName })}</div>
           )}
         </>
-      )}
-
-      {view.presentation === 'history' && (
-        <section className="event-history-card" aria-labelledby="past-event-heading">
-          <header>
-            <span>{locale === 'zh-CN' ? '历史公共事件' : 'Historical public event'}</span>
-            <h2 id="past-event-heading">{view.title}</h2>
-          </header>
-          <dl className="event-history-facts">
-            <div><dt>{locale === 'zh-CN' ? '活动' : 'Event'}</dt><dd>{view.history.eventName}</dd></div>
-            <div><dt>{locale === 'zh-CN' ? '冠军' : 'Champion'}</dt><dd>{view.history.champion}</dd></div>
-            <div><dt>{locale === 'zh-CN' ? '奖品' : 'Prize'}</dt><dd>{view.history.prize}</dd></div>
-            <div><dt>{locale === 'zh-CN' ? '最终结果' : 'Final result'}</dt><dd>{view.history.result}</dd></div>
-          </dl>
-          <div className="event-history-log">
-            <h3>{locale === 'zh-CN' ? '历史过程记录' : 'Event record'}</h3>
-            {view.history.logs.length === 0 ? (
-              <p className="event-empty">{t('event.noEntries')}</p>
-            ) : (
-              <ol>
-                {view.history.logs.map((entry) => (
-                  <li key={`${entry.eventKey}:${entry.sequence}:${entry.createdAt}`}>
-                    <time>{formatTime(entry.createdAt, locale)}</time>
-                    <p>{entry.text}</p>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </div>
-        </section>
       )}
 
       <div className="town-story">
@@ -237,7 +208,71 @@ export default function EventBroadcast({
           ))}
         </div>
       )}
+
+      {view.presentation === 'history' && (
+        <CompletedEventArchive
+          locale={locale}
+          title={view.title}
+          emptyLabel={t('event.noEntries')}
+          history={view.history}
+        />
+      )}
     </section>
+  );
+}
+
+function CompletedEventArchive({
+  locale,
+  title,
+  emptyLabel,
+  history,
+}: {
+  locale: Locale;
+  title: string;
+  emptyLabel: string;
+  history: {
+    eventName: string;
+    champion: string;
+    prize: string;
+    result: string;
+    logs: BroadcastSnapshot['logs'];
+  };
+}) {
+  const archive = buildCompletedArchiveView(title, history.champion, locale);
+  const initialDisclosure = archive.expandedByDefault ? { open: true } : {};
+  return (
+    <details className="event-history-card" {...initialDisclosure}>
+      <summary>
+        <span>
+          <small>{archive.contextLabel}</small>
+          <strong>{archive.title}</strong>
+        </span>
+        <em>{archive.winnerSummary}</em>
+      </summary>
+      <div className="event-history-body">
+        <dl className="event-history-facts">
+          <div><dt>{locale === 'zh-CN' ? '活动' : 'Event'}</dt><dd>{history.eventName}</dd></div>
+          <div><dt>{locale === 'zh-CN' ? '冠军' : 'Champion'}</dt><dd>{history.champion}</dd></div>
+          <div><dt>{locale === 'zh-CN' ? '奖品' : 'Prize'}</dt><dd>{history.prize}</dd></div>
+          <div><dt>{locale === 'zh-CN' ? '最终结果' : 'Final result'}</dt><dd>{history.result}</dd></div>
+        </dl>
+        <div className="event-history-log">
+          <h3>{locale === 'zh-CN' ? '历史过程记录' : 'Event record'}</h3>
+          {history.logs.length === 0 ? (
+            <p className="event-empty">{emptyLabel}</p>
+          ) : (
+            <ol>
+              {history.logs.map((entry) => (
+                <li key={`${entry.eventKey}:${entry.sequence}:${entry.createdAt}`}>
+                  <time>{formatTime(entry.createdAt, locale)}</time>
+                  <p>{entry.text}</p>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+    </details>
   );
 }
 

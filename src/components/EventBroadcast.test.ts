@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 import {
   buildDailyReport,
   buildBroadcastView,
+  buildCompletedArchiveView,
   buildTownStory,
   resolveSocialNarrative,
   type BroadcastSnapshot,
@@ -161,6 +162,30 @@ describe('event broadcast view model', () => {
       result: '赛事已结束，顾潮获得冠军。',
       logs: [completed.logs[1], completed.logs[2], completed.logs[0]],
     });
+  });
+
+  test('builds a collapsed native disclosure contract with a compact winner summary', () => {
+    const archive = buildCompletedArchiveView('往届赛事记录', '顾潮', 'zh-CN');
+
+    expect(archive).toEqual({
+      disclosure: 'details',
+      expandedByDefault: false,
+      title: '往届赛事记录',
+      contextLabel: '历史公共事件',
+      winnerSummary: '冠军：顾潮',
+    });
+  });
+
+  test('places the completed archive after reports, town life, conversations and chronicle', () => {
+    const source = readFileSync(new URL('./EventBroadcast.tsx', import.meta.url), 'utf8');
+    const archive = source.indexOf('<CompletedEventArchive');
+    expect(archive).toBeGreaterThan(source.indexOf('className="daily-report-export"'));
+    expect(archive).toBeGreaterThan(source.indexOf('className="town-story"'));
+    expect(archive).toBeGreaterThan(source.indexOf('className="resident-activity"'));
+    expect(archive).toBeGreaterThan(source.indexOf('className="town-conversations"'));
+    expect(archive).toBeGreaterThan(source.indexOf('className="event-chronicle"'));
+    expect(source).toContain('<details className="event-history-card"');
+    expect(source).toContain('<summary>');
   });
 
   test('exports the complete factual report in the required section order', () => {
