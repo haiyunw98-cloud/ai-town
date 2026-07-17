@@ -23,6 +23,46 @@ import { pickResidentActivity } from '../../data/worlds/lighthouse-town/activiti
 import { insertInput } from './insertInput';
 import { distance } from '../util/geometry';
 import { townLandmarkById } from '../../data/worlds/lighthouse-town/map';
+import {
+  ReplyContext,
+  ReplyRejectionReason,
+  validateResidentReply,
+} from '../agent/conversationPolicy';
+
+export async function generateValidatedResidentMessage(
+  args: { kind: ReplyContext['kind'] },
+  dependencies: {
+    generate: () => Promise<string>;
+    loadPolicyContext: () => Promise<Pick<ReplyContext, 'topic' | 'observerAskedAboutSea'>>;
+    send: (validatedText: string) => Promise<unknown>;
+    recordRejection: (reason: ReplyRejectionReason) => Promise<unknown>;
+    reportGenerationUnavailable?: () => void;
+  },
+): Promise<void> {
+  let raw = '';
+  try {
+    raw = await dependencies.generate();
+  } catch {
+    dependencies.reportGenerationUnavailable?.();
+  }
+  const policyContext = await dependencies.loadPolicyContext();
+  const validation = validateResidentReply(raw, { kind: args.kind, ...policyContext });
+  if (!validation.accepted) {
+    await dependencies.recordRejection(validation.reason);
+  }
+  await dependencies.send(validation.text);
+}
+
+export async function rememberConversationAndRelease(dependencies: {
+  remember: () => Promise<unknown>;
+  release: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await dependencies.remember();
+  } finally {
+    await dependencies.release();
+  }
+}
 
 export async function runAgentOperation(ctx: MutationCtx, operation: string, args: any) {
   let reference;
@@ -48,7 +88,7 @@ export const agentSendMessage = internalMutation({
     conversationId,
     agentId,
     playerId,
-    text: v.string(),
+    validatedText: v.string(),
     messageUuid: v.string(),
     leaveConversation: v.boolean(),
     operationId: v.string(),
@@ -57,7 +97,7 @@ export const agentSendMessage = internalMutation({
     await ctx.db.insert('messages', {
       conversationId: args.conversationId,
       author: args.playerId,
-      text: args.text,
+      text: args.validatedText,
       messageUuid: args.messageUuid,
       worldId: args.worldId,
     });
@@ -68,6 +108,24 @@ export const agentSendMessage = internalMutation({
       leaveConversation: args.leaveConversation,
       operationId: args.operationId,
     });
+  },
+});
+
+export const recordConversationPolicyEvent = internalMutation({
+  args: {
+    worldId: v.id('worlds'),
+    playerId,
+    conversationId,
+    reason: v.union(
+      v.literal('world-correction'),
+      v.literal('empty'),
+      v.literal('legacy-story'),
+      v.literal('too-long'),
+    ),
+    createdAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert('conversationPolicyEvents', args);
   },
 });
 
@@ -110,20 +168,25 @@ export const agentRememberConversation = internalAction({
     operationId: v.string(),
   },
   handler: async (ctx, args) => {
-    await rememberConversation(
-      ctx,
-      args.worldId,
-      args.agentId as GameId<'agents'>,
-      args.playerId as GameId<'players'>,
-      args.conversationId as GameId<'conversations'>,
-    );
-    await sleep(Math.random() * 1000);
-    await ctx.runMutation(api.aiTown.main.sendInput, {
-      worldId: args.worldId,
-      name: 'finishRememberConversation',
-      args: {
-        agentId: args.agentId,
-        operationId: args.operationId,
+    await rememberConversationAndRelease({
+      remember: () =>
+        rememberConversation(
+          ctx,
+          args.worldId,
+          args.agentId as GameId<'agents'>,
+          args.playerId as GameId<'players'>,
+          args.conversationId as GameId<'conversations'>,
+        ),
+      release: async () => {
+        await sleep(Math.random() * 1000);
+        await ctx.runMutation(api.aiTown.main.sendInput, {
+          worldId: args.worldId,
+          name: 'finishRememberConversation',
+          args: {
+            agentId: args.agentId,
+            operationId: args.operationId,
+          },
+        });
       },
     });
   },
@@ -141,7 +204,7 @@ export const agentGenerateMessage = internalAction({
     messageUuid: v.string(),
   },
   handler: async (ctx, args) => {
-    let completionFn;
+    let completionFn: typeof startConversationMessage;
     switch (args.type) {
       case 'start':
         completionFn = startConversationMessage;
@@ -155,24 +218,46 @@ export const agentGenerateMessage = internalAction({
       default:
         assertNever(args.type);
     }
-    const text = await completionFn(
-      ctx,
-      args.worldId,
-      args.conversationId as GameId<'conversations'>,
-      args.playerId as GameId<'players'>,
-      args.otherPlayerId as GameId<'players'>,
+    await generateValidatedResidentMessage(
+      { kind: args.type },
+      {
+        generate: () =>
+          completionFn(
+            ctx,
+            args.worldId,
+            args.conversationId as GameId<'conversations'>,
+            args.playerId as GameId<'players'>,
+            args.otherPlayerId as GameId<'players'>,
+          ),
+        loadPolicyContext: () =>
+          ctx.runQuery(internal.agent.conversation.getConversationPolicyContext, {
+            worldId: args.worldId,
+            playerId: args.playerId,
+            otherPlayerId: args.otherPlayerId,
+            conversationId: args.conversationId,
+          }),
+        recordRejection: (reason) =>
+          ctx.runMutation(internal.aiTown.agentOperations.recordConversationPolicyEvent, {
+            worldId: args.worldId,
+            playerId: args.playerId,
+            conversationId: args.conversationId,
+            reason,
+            createdAt: Date.now(),
+          }),
+        send: (validatedText) =>
+          ctx.runMutation(internal.aiTown.agentOperations.agentSendMessage, {
+            worldId: args.worldId,
+            conversationId: args.conversationId,
+            agentId: args.agentId,
+            playerId: args.playerId,
+            validatedText,
+            messageUuid: args.messageUuid,
+            leaveConversation: args.type === 'leave',
+            operationId: args.operationId,
+          }),
+        reportGenerationUnavailable: () => console.warn('resident-message-provider-unavailable'),
+      },
     );
-
-    await ctx.runMutation(internal.aiTown.agentOperations.agentSendMessage, {
-      worldId: args.worldId,
-      conversationId: args.conversationId,
-      agentId: args.agentId,
-      playerId: args.playerId,
-      text,
-      messageUuid: args.messageUuid,
-      leaveConversation: args.type === 'leave',
-      operationId: args.operationId,
-    });
   },
 });
 

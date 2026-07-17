@@ -40,6 +40,21 @@ export default defineSchema({
     .index('residentDay', ['worldId', 'playerId', 'dayKey', 'selectedAt'])
     .index('residentTime', ['worldId', 'playerId', 'selectedAt']),
 
+  conversationPolicyEvents: defineTable({
+    worldId: v.id('worlds'),
+    playerId,
+    conversationId,
+    reason: v.union(
+      v.literal('world-correction'),
+      v.literal('empty'),
+      v.literal('legacy-story'),
+      v.literal('too-long'),
+    ),
+    createdAt: v.number(),
+  })
+    .index('worldTime', ['worldId', 'createdAt'])
+    .index('playerTime', ['playerId', 'createdAt']),
+
   townEvents: defineTable({
     worldId: v.id('worlds'),
     status: v.union(

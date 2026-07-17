@@ -13,6 +13,7 @@ import {
   conversationPromptRules,
   deriveTopicSelectionInput,
   filterLegacyMemories,
+  isTopicDetail,
   observerSeaCorrectionInstruction,
   selectConversationTopic,
 } from './conversationPolicy';
@@ -127,6 +128,42 @@ export const getOrCreateConversationTopic = internalMutation({
     };
     await ctx.db.insert('conversationTopics', record);
     return record;
+  },
+});
+
+export const getConversationPolicyContext = internalQuery({
+  args: {
+    worldId: v.id('worlds'),
+    playerId,
+    otherPlayerId: playerId,
+    conversationId,
+  },
+  handler: async (ctx, args) => {
+    const topic = await ctx.db
+      .query('conversationTopics')
+      .withIndex('conversation', (q) =>
+        q
+          .eq('worldId', args.worldId)
+          .eq('conversationId', args.conversationId)
+          .eq('playerId', args.playerId),
+      )
+      .unique();
+    const world = await ctx.db.get(args.worldId);
+    const otherPlayer = world?.players.find((candidate) => candidate.id === args.otherPlayerId) ?? {
+      id: args.otherPlayerId,
+    };
+    const messages = await ctx.db
+      .query('messages')
+      .withIndex('conversationId', (q) =>
+        q.eq('worldId', args.worldId).eq('conversationId', args.conversationId),
+      )
+      .collect();
+
+    const recordedDetail = topic?.detail;
+    return {
+      topic: isTopicDetail(recordedDetail) ? recordedDetail : 'work',
+      observerAskedAboutSea: observerAskedAboutSea(otherPlayer, messages),
+    };
   },
 });
 

@@ -7,8 +7,13 @@ import { asyncMap } from '../util/asyncMap';
 import { GameId, agentId, conversationId, playerId } from '../aiTown/ids';
 import { SerializedPlayer } from '../aiTown/player';
 import { memoryFields } from './schema';
-import { buildWorldPrompt } from '../../data/worlds/lighthouse-town/manifest';
+import { buildWorldPrompt, WorldLocale } from '../../data/worlds/lighthouse-town/manifest';
 import { getWorldLocale } from '../util/worldLocale';
+import {
+  containsForbiddenAutonomousMemory,
+  filterLegacyMemories,
+  segmentConversationGraphemes,
+} from './conversationPolicy';
 
 // How long to wait before updating a memory's last access time.
 export const MEMORY_ACCESS_THROTTLE = 300_000; // In ms
@@ -22,6 +27,60 @@ export type MemoryType = Memory['data']['type'];
 export type MemoryOfType<T extends MemoryType> = Omit<Memory, 'data'> & {
   data: Extract<Memory['data'], { type: T }>;
 };
+
+const MEMORY_SUMMARY_FALLBACK: Record<WorldLocale, string> = {
+  'zh-CN': '我记得我们聊了些日常近况。',
+  en: 'I remember we talked about everyday life.',
+};
+
+function stripMemoryStageDirections(value: string): string {
+  const opening = new Set(['(', '（', '[', '【']);
+  const closing = new Set([')', '）', ']', '】']);
+  let depth = 0;
+  let result = '';
+  for (const character of value) {
+    if (opening.has(character)) {
+      depth += 1;
+    } else if (closing.has(character)) {
+      if (depth > 0) depth -= 1;
+    } else if (depth === 0) {
+      result += character;
+    }
+  }
+  return result;
+}
+
+export function sanitizeMemorySummary(raw: string, locale: WorldLocale): string {
+  const fallback = MEMORY_SUMMARY_FALLBACK[locale];
+  const sanitized = stripMemoryStageDirections(raw).replace(/\s+/gu, ' ').trim();
+  if (!sanitized || containsForbiddenAutonomousMemory(raw)) return fallback;
+  const shortened = segmentConversationGraphemes(sanitized).slice(0, 80).join('').trim();
+  if (!shortened || containsForbiddenAutonomousMemory(shortened)) return fallback;
+  return shortened;
+}
+
+export function prepareReflectionInput<
+  T extends { _creationTime: number; importance: number; description: string },
+>(memories: readonly T[], lastReflectionTs?: number) {
+  const filtered = filterLegacyMemories(memories);
+  return {
+    memories: filtered,
+    sumOfImportanceScore: filtered
+      .filter((memory) => memory._creationTime > (lastReflectionTs ?? 0))
+      .reduce((sum, memory) => sum + memory.importance, 0),
+    statements: filtered.map((memory, index) => `Statement ${index}: ${memory.description}`),
+  };
+}
+
+export function reflectionRelatedMemoryIds<T extends { _id: unknown }>(
+  memories: readonly T[],
+  statementIds: readonly number[],
+): Array<T['_id']> {
+  return statementIds.flatMap((index) => {
+    if (!Number.isInteger(index) || index < 0 || index >= memories.length) return [];
+    return [memories[index]._id];
+  });
+}
 
 export async function rememberConversation(
   ctx: ActionCtx,
@@ -41,16 +100,18 @@ export async function rememberConversation(
     return;
   }
 
+  const locale = getWorldLocale();
   const llmMessages: LLMMessage[] = [
     {
       role: 'system',
-      content: buildWorldPrompt(getWorldLocale()),
+      content: buildWorldPrompt(locale),
     },
     {
       role: 'user',
-      content: `You are ${player.name}, and you just finished a conversation with ${otherPlayer.name}. I would
-      like you to summarize the conversation from ${player.name}'s perspective, using first-person pronouns like
-      "I," and add if you liked or disliked this interaction.`,
+      content:
+        locale === 'zh-CN'
+          ? '用第一人称简体中文，只总结实际谈到的日常生活、承诺、交易、帮助或分歧。控制在 80 个中文字符以内。不要增加海洋、灯塔谜团、异变、心理诊断或未说出口的感情。'
+          : 'In first-person English, summarize only the daily life, promises, transactions, help, or disagreements actually discussed. Keep it within 80 characters. Do not add oceans, lighthouse mysteries, anomalies, psychological diagnoses, or unspoken feelings.',
     },
   ];
   const authors = new Set<GameId<'players'>>();
@@ -64,13 +125,20 @@ export async function rememberConversation(
     });
   }
   llmMessages.push({ role: 'user', content: 'Summary:' });
-  const { content } = await chatCompletion({
-    messages: llmMessages,
-    max_tokens: 500,
-  });
+  let summaryRaw = '';
+  try {
+    const completion = await chatCompletion({
+      messages: llmMessages,
+      max_tokens: 160,
+    });
+    summaryRaw = completion.content;
+  } catch {
+    console.warn('memory-summary-provider-unavailable');
+  }
+  const summary = sanitizeMemorySummary(summaryRaw, locale);
   const description = `Conversation with ${otherPlayer.name} at ${new Date(
     data.conversation._creationTime,
-  ).toLocaleString()}: ${content}`;
+  ).toLocaleString()}: ${summary}`;
   const importance = await calculateImportance(description);
   const { embedding } = await fetchEmbedding(description);
   authors.delete(player.id as GameId<'players'>);
@@ -268,7 +336,7 @@ async function calculateImportance(description: string) {
     importance = +(importanceRaw.match(/\d+/)?.[0] ?? NaN);
   }
   if (isNaN(importance)) {
-    console.debug('Could not parse memory importance from: ', importanceRaw);
+    console.warn('memory-importance-unparseable');
     importance = 5;
   }
   return importance;
@@ -333,35 +401,29 @@ async function reflectOnMemories(
   worldId: Id<'worlds'>,
   playerId: GameId<'players'>,
 ) {
-  const { memories, lastReflectionTs, name } = await ctx.runQuery(
-    internal.agent.memory.getReflectionMemories,
-    {
-      worldId,
-      playerId,
-      numberOfItems: 100,
-    },
-  );
+  const result = await ctx.runQuery(internal.agent.memory.getReflectionMemories, {
+    worldId,
+    playerId,
+    numberOfItems: 100,
+  });
+  const { name, lastReflectionTs } = result;
+  const prepared = prepareReflectionInput(result.memories, lastReflectionTs);
+  const memories = prepared.memories;
 
   // should only reflect if lastest 100 items have importance score of >500
-  const sumOfImportanceScore = memories
-    .filter((m) => m._creationTime > (lastReflectionTs ?? 0))
-    .reduce((acc, curr) => acc + curr.importance, 0);
+  const { sumOfImportanceScore } = prepared;
   const shouldReflect = sumOfImportanceScore > 500;
 
   if (!shouldReflect) {
     return false;
   }
-  console.debug('sum of importance score = ', sumOfImportanceScore);
-  console.debug('Reflecting...');
   const prompt = [
     buildWorldPrompt(getWorldLocale()),
     '[no prose]',
     '[Output only JSON]',
     `You are ${name}, statements about you:`,
   ];
-  memories.forEach((m, idx) => {
-    prompt.push(`Statement ${idx}: ${m.description}`);
-  });
+  prompt.push(...prepared.statements);
   prompt.push('What 3 high-level insights can you infer from the above statements?');
   prompt.push(
     'Return in JSON format, where the key is a list of input statements that contributed to your insights and value is your insight. Make the response parseable by Typescript JSON.parse() function. DO NOT escape characters or include "\n" or white space in response.',
@@ -381,27 +443,32 @@ async function reflectOnMemories(
 
   try {
     const insights = JSON.parse(reflection) as { insight: string; statementIds: number[] }[];
-    const memoriesToSave = await asyncMap(insights, async (item) => {
-      const relatedMemoryIds = item.statementIds.map((idx: number) => memories[idx]._id);
-      const importance = await calculateImportance(item.insight);
-      const { embedding } = await fetchEmbedding(item.insight);
-      console.debug('adding reflection memory...', item.insight);
+    const candidateMemories = await asyncMap(insights, async (item) => {
+      if (containsForbiddenAutonomousMemory(item.insight)) return null;
+      const description = sanitizeMemorySummary(item.insight, getWorldLocale());
+      const relatedMemoryIds = reflectionRelatedMemoryIds(memories, item.statementIds);
+      const importance = await calculateImportance(description);
+      const { embedding } = await fetchEmbedding(description);
       return {
-        description: item.insight,
+        description,
         embedding,
         importance,
         relatedMemoryIds,
       };
     });
+    const memoriesToSave = candidateMemories.filter(
+      (memory): memory is NonNullable<typeof memory> => memory !== null,
+    );
 
-    await ctx.runMutation(selfInternal.insertReflectionMemories, {
-      worldId,
-      playerId,
-      reflections: memoriesToSave,
-    });
-  } catch (e) {
-    console.error('error saving or parsing reflection', e);
-    console.debug('reflection', reflection);
+    if (memoriesToSave.length > 0) {
+      await ctx.runMutation(selfInternal.insertReflectionMemories, {
+        worldId,
+        playerId,
+        reflections: memoriesToSave,
+      });
+    }
+  } catch {
+    console.warn('reflection-processing-failed');
     return false;
   }
   return true;

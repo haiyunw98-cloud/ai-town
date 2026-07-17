@@ -16,6 +16,12 @@ export const TOPIC_DETAILS = {
 
 export type TopicDetail = (typeof TOPIC_DETAILS)[TopicCategory][number];
 
+const TOPIC_DETAIL_SET = new Set<string>(Object.values(TOPIC_DETAILS).flat());
+
+export function isTopicDetail(value: unknown): value is TopicDetail {
+  return typeof value === 'string' && TOPIC_DETAIL_SET.has(value);
+}
+
 export type ConversationTopic = {
   category: TopicCategory;
   detail: TopicDetail;
@@ -202,10 +208,44 @@ export function containsLegacyStory(value: string): boolean {
   );
 }
 
+const ARCHIVED_EVENT_PATTERNS = [
+  /灯塔镇百万金贝寻宝赛/u,
+  /百万金贝寻宝赛/u,
+  /\b(?:lighthouse[\s-]+town[\s-]+)?million[\s-]+gold(?:en)?[\s-]+shell(?:s)?[\s-]+treasure[\s-]+hunt(?:[\s-]+(?:race|competition))?\b/iu,
+] as const;
+
+/** Public archive content that must not become an agent's autonomous personal memory. */
+export function containsArchivedEventMemory(value: string): boolean {
+  const normalized = value.normalize('NFKC');
+  return ARCHIVED_EVENT_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+const AUTONOMOUS_MEMORY_FORBIDDEN_PATTERNS = [
+  /海洋/u,
+  /灯塔谜团/u,
+  /异变/u,
+  /心理诊断/u,
+  /未说出口的感情/u,
+  /\boceans?\b/iu,
+  /\blighthouse[\s-]+myster(?:y|ies)\b/iu,
+  /\banomal(?:y|ies|ous)\b/iu,
+  /\bpsychological[\s-]+diagnos(?:is|es|tic)\b/iu,
+  /\bunspoken[\s-]+feelings?\b/iu,
+] as const;
+
+export function containsForbiddenAutonomousMemory(value: string): boolean {
+  const normalized = value.normalize('NFKC');
+  return (
+    containsLegacyStory(normalized) ||
+    containsArchivedEventMemory(normalized) ||
+    AUTONOMOUS_MEMORY_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(normalized))
+  );
+}
+
 export function filterLegacyMemories<T extends { description: string }>(
   memories: readonly T[],
 ): T[] {
-  return memories.filter((memory) => !containsLegacyStory(memory.description));
+  return memories.filter((memory) => !containsForbiddenAutonomousMemory(memory.description));
 }
 
 export type ReplyContext = {
