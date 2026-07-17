@@ -1,5 +1,6 @@
 const OPEN_PARENTHESIS = new Set(['(', '（']);
 const CLOSE_PARENTHESIS = new Set([')', '）']);
+const CLOSING_QUOTE = new Set(['"', "'", '”', '’']);
 const FRAGMENT_PUNCTUATION = /[。！？.!?，,：:；;、]/u;
 const QUOTE_CHARACTER = /["'“”‘’]/u;
 const SENTENCE_END = /[。！？.!?]/u;
@@ -159,6 +160,10 @@ export function splitConversationClauses(value: string): string[] {
       && /\d/u.test(characters[index - 1] ?? '')
       && /\d/u.test(characters[index + 1] ?? '');
     if ((/[。！？!?；;，,\n]/u.test(character) && !isNumericComma) || isPeriodBoundary) {
+      while (CLOSING_QUOTE.has(characters[index + 1] ?? '')) {
+        index += 1;
+        clause += characters[index];
+      }
       finishClause();
       continue;
     }

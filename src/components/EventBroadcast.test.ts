@@ -204,11 +204,10 @@ describe('event broadcast view model', () => {
     expect(summarizeConversation(['顾潮'], [message])).toBe('暂无新的日常记录');
   });
 
-  test('preserves meaningful quoted ordinary speech', () => {
+  test('preserves balanced quotes around meaningful ordinary speech', () => {
     const summary = summarizeConversation(['白露'], ['“今天药庐配药。”']);
 
-    expect(summary).toContain('今天药庐配药');
-    expect(summary).not.toBe('暂无新的日常记录');
+    expect(summary).toBe('白露聊到公共生活：“今天药庐配药”。');
   });
 
   test('filters marine and completed-event archive content from the live summary', () => {
