@@ -286,17 +286,24 @@ dimension must match `EMBEDDING_DIMENSION`.
 
 ### Other OpenAI-compatible API
 
-You can use any OpenAI-compatible API, such as Anthropic, Groq, or Azure.
+This section applies only to upstream/general provider paths. The current Lighthouse Town resident
+path rejects `custom` providers and will not send resident conversation, memory, or observer work
+to an OpenAI-compatible cloud service.
+
+For a general path, you can use an OpenAI-compatible API, such as Anthropic, Groq, or Azure.
 
 - Change the static `EMBEDDING_DIMENSION` in `convex/util/embeddingDimension.ts` to match the
-  dimension of your embedding model.
+  dimension of your embedding model. This schema-time number must equal
+  `LLM_EMBEDDING_DIMENSION` in the Convex environment.
 - Edit `getLLMConfig` in `llm.ts` or set environment variables:
 
 ```sh
+npx convex env set LLM_PROVIDER 'custom'
 npx convex env set LLM_API_URL 'your-url'
 npx convex env set LLM_API_KEY 'your-key'
 npx convex env set LLM_MODEL 'your-chat-model'
 npx convex env set LLM_EMBEDDING_MODEL 'your-embedding-model'
+npx convex env set LLM_EMBEDDING_DIMENSION 'your-embedding-dimension'
 ```
 
 Note: if `LLM_API_KEY` is not required, don't set it.
