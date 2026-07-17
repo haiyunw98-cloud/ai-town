@@ -6,6 +6,7 @@ import {
   validateResidentReply,
 } from './conversationPolicy';
 import type { ReplyContext, TopicCategory, TopicDetail } from './conversationPolicy';
+import * as conversationPolicy from './conversationPolicy';
 
 const length = (value: string) => Array.from(value).length;
 
@@ -254,6 +255,50 @@ describe('validateResidentReply', () => {
     ).toBe(raw);
   });
 
+  test.each(['“（沉默(低头)）”', '...', '。。。', '“”', '""'])(
+    'treats sanitized punctuation-only content as empty: %s',
+    (raw) => {
+      const context = {
+        kind: 'continue',
+        topic: 'market',
+        observerAskedAboutSea: false,
+      } as const;
+
+      expect(validateResidentReply(raw, context)).toEqual(validateResidentReply('', context));
+    },
+  );
+
+  test.each(['🙂', '“🙂”'])('keeps meaningful emoji content: %s', (raw) => {
+    expect(
+      validateResidentReply(raw, {
+        kind: 'continue',
+        topic: 'market',
+        observerAskedAboutSea: false,
+      }),
+    ).toEqual({ accepted: true, text: raw });
+  });
+
+  test.each([
+    [`“今天先整理订单。${'接下来还要核对货架和账本，'.repeat(6)}”`, '今天先整理订单。'],
+    [
+      `"Today I will sort orders first. ${'Then I will check every shelf and account, '.repeat(5)}"`,
+      'Today I will sort orders first.',
+    ],
+    [
+      `“（认真(点头)）今天先整理订单。${'接下来还要核对货架和账本，'.repeat(6)}”`,
+      '今天先整理订单。',
+    ],
+  ])('does not return an unmatched opening quote when shortening %s', (raw, expected) => {
+    const result = validateResidentReply(raw, {
+      kind: 'continue',
+      topic: 'order',
+      observerAskedAboutSea: false,
+    });
+
+    expect(result).toEqual({ accepted: false, text: expected, reason: 'too-long' });
+    expect(length(result.text)).toBeLessThanOrEqual(60);
+  });
+
   test('returns a deterministic ordinary fallback for an empty reply', () => {
     const context = {
       kind: 'start',
@@ -379,6 +424,32 @@ describe('validateResidentReply', () => {
     });
   });
 
+  test('treats consecutive periods as an ellipsis rather than a sentence boundary', () => {
+    const result = validateResidentReply(
+      `我想想...还是先把账本理清楚。${'接下来还要整理订单和货架，'.repeat(5)}`,
+      { kind: 'start', topic: 'income', observerAskedAboutSea: false },
+    );
+
+    expect(result).toEqual({
+      accepted: false,
+      text: '我想想...还是先把账本理清楚。',
+      reason: 'too-long',
+    });
+  });
+
+  test('does not mistake a leading decimal point for a sentence boundary', () => {
+    const result = validateResidentReply(
+      `今天米价涨了.5元，账本已经记好。${'接下来还要整理订单和货架，'.repeat(5)}`,
+      { kind: 'start', topic: 'income', observerAskedAboutSea: false },
+    );
+
+    expect(result).toEqual({
+      accepted: false,
+      text: '今天米价涨了.5元，账本已经记好。',
+      reason: 'too-long',
+    });
+  });
+
   test.each([
     [
       `Dr. Chen checked today's order list. ${'The rest of the stock still needs counting, '.repeat(4)}`,
@@ -402,7 +473,7 @@ describe('validateResidentReply', () => {
     });
   });
 
-  test.each(['👨‍👩‍👧‍👦', 'e\u0301', '✈️'])(
+  test.each(['👨‍👩‍👧‍👦', 'e\u0301', '✈️', '🇨🇳'])(
     'truncates without splitting the %s grapheme cluster',
     (cluster) => {
       const result = validateResidentReply(`今${cluster.repeat(80)}稍后再聊`, {
@@ -419,6 +490,15 @@ describe('validateResidentReply', () => {
       expect(result.text.endsWith('。')).toBe(true);
     },
   );
+
+  test('pairs regional indicators in the deterministic no-Intl grapheme fallback', () => {
+    const internal = conversationPolicy as unknown as {
+      segmentConversationGraphemes: (value: string, segmenter: null) => string[];
+    };
+    const flag = '🇨🇳';
+
+    expect(internal.segmentConversationGraphemes(flag.repeat(3), null)).toEqual([flag, flag, flag]);
+  });
 
   test('does not leave a comma, colon, or semicolon at a trimmed boundary', () => {
     const result = validateResidentReply(

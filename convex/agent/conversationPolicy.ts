@@ -210,6 +210,10 @@ function sanitizeReply(value: string): string {
   return removeStageDirections(value).replace(/\s+/gu, ' ').trim();
 }
 
+function hasMeaningfulContent(value: string): boolean {
+  return Array.from(value).some((character) => SUBSTANTIVE_CHARACTER.test(character));
+}
+
 function unicodeLength(value: string): number {
   return Array.from(value).length;
 }
@@ -240,6 +244,11 @@ function extendsFallbackGrapheme(value: string): boolean {
   );
 }
 
+function isRegionalIndicator(value: string): boolean {
+  const codePoint = value.codePointAt(0) ?? 0;
+  return codePoint >= 0x1f1e6 && codePoint <= 0x1f1ff;
+}
+
 function fallbackGraphemes(value: string): string[] {
   const clusters: string[] = [];
   let joinNext = false;
@@ -249,7 +258,15 @@ function fallbackGraphemes(value: string): string[] {
       continue;
     }
     const lastIndex = clusters.length - 1;
-    if (codePoint === '\u200d') {
+    if (isRegionalIndicator(codePoint)) {
+      const previous = Array.from(clusters[lastIndex]);
+      if (previous.length === 1 && isRegionalIndicator(previous[0])) {
+        clusters[lastIndex] += codePoint;
+      } else {
+        clusters.push(codePoint);
+      }
+      joinNext = false;
+    } else if (codePoint === '\u200d') {
       clusters[lastIndex] += codePoint;
       joinNext = true;
     } else if (joinNext || extendsFallbackGrapheme(codePoint)) {
@@ -262,9 +279,13 @@ function fallbackGraphemes(value: string): string[] {
   return clusters;
 }
 
-function replyGraphemes(value: string): string[] {
-  if (!replyGraphemeSegmenter) return fallbackGraphemes(value);
-  return Array.from(replyGraphemeSegmenter.segment(value), ({ segment }) => segment);
+/** @internal Exported so the deterministic no-Intl path can be verified directly. */
+export function segmentConversationGraphemes(
+  value: string,
+  segmenter: GraphemeSegmenter | null = replyGraphemeSegmenter,
+): string[] {
+  if (!segmenter) return fallbackGraphemes(value);
+  return Array.from(segmenter.segment(value), ({ segment }) => segment);
 }
 
 const SHORT_ABBREVIATIONS = new Set([
@@ -284,7 +305,8 @@ const SHORT_ABBREVIATIONS = new Set([
 function isSentencePeriod(characters: string[], index: number): boolean {
   const previous = characters[index - 1] ?? '';
   const next = characters[index + 1] ?? '';
-  if (/\d/u.test(previous) && /\d/u.test(next)) return false;
+  if (previous === '.' || next === '.') return false;
+  if (/\d/u.test(next)) return false;
   if (/[A-Za-z]/u.test(previous) && /[A-Za-z]/u.test(next)) return false;
 
   const remainder = characters.slice(index + 1).join('');
@@ -294,6 +316,22 @@ function isSentencePeriod(characters: string[], index: number): boolean {
   if (word && SHORT_ABBREVIATIONS.has(word)) return false;
   if (/(?:\b[A-Za-z]\.)+[A-Za-z]$/u.test(prefix)) return false;
   return true;
+}
+
+const MATCHING_OUTER_QUOTES: Record<string, string> = {
+  '“': '”',
+  '‘': '’',
+  '"': '"',
+  "'": "'",
+};
+
+function stripMatchingOuterQuotes(value: string): string {
+  const characters = Array.from(value.trim());
+  const opening = characters[0];
+  if (!opening || MATCHING_OUTER_QUOTES[opening] !== characters[characters.length - 1]) {
+    return value;
+  }
+  return characters.slice(1, -1).join('').trim();
 }
 
 function firstCompleteSentence(value: string): string | undefined {
@@ -314,7 +352,7 @@ function trimNaturally(value: string, limit: number): string {
   const contentLimit = Math.max(0, limit - 1);
   let used = 0;
   let shortened = '';
-  for (const grapheme of replyGraphemes(value.trim())) {
+  for (const grapheme of segmentConversationGraphemes(value.trim())) {
     const graphemeLength = unicodeLength(grapheme);
     if (used + graphemeLength > contentLimit) break;
     shortened += grapheme;
@@ -337,7 +375,7 @@ export function validateResidentReply(raw: string, context: ReplyContext): Reply
   }
 
   const sanitized = sanitizeReply(raw);
-  if (!sanitized) {
+  if (!sanitized || !hasMeaningfulContent(sanitized)) {
     return {
       accepted: false,
       text: topicFallback(context.topic, context.kind, 'empty'),
@@ -357,7 +395,8 @@ export function validateResidentReply(raw: string, context: ReplyContext): Reply
     return { accepted: true, text: sanitized };
   }
 
-  const sentence = firstCompleteSentence(sanitized) ?? sanitized;
+  const truncationSource = stripMatchingOuterQuotes(sanitized);
+  const sentence = firstCompleteSentence(truncationSource) ?? truncationSource;
   return {
     accepted: false,
     text: unicodeLength(sentence) <= limit ? sentence : trimNaturally(sentence, limit),
