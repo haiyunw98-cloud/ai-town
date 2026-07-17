@@ -306,8 +306,8 @@ describe('event broadcast view model', () => {
     );
 
     for (const landmark of [
-      '灯塔书院', '白露药庐', '旧水码头', '听潮卦馆', '听雨茶庄',
-      '晨雾集市', '镇公所', '苏氏机关坊', '望潮食肆',
+      '灯塔书院', '白露药庐', '旧水码头', '时和卦馆', '听雨茶庄',
+      '晨雾集市', '镇公所', '苏氏机关坊', '河鲜食肆',
     ]) {
       expect(report).toContain(landmark);
     }
