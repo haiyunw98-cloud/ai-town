@@ -119,19 +119,48 @@ describe('event broadcast view model', () => {
   test('formats a running phase and countdown for observers', () => {
     const view = buildBroadcastView(running, 'zh-CN', 10_000);
     expect(view.mode).toBe('event');
-    expect(view.phaseLabel).toBe('八人寻宝冲刺');
-    expect(view.countdown).toBe('01:00');
-    expect(view.activeCount).toBe(1);
+    expect(view.presentation).toBe('live');
+    expect(view.live).toEqual({
+      phaseLabel: '八人寻宝冲刺',
+      countdown: '01:00',
+      activeCount: 1,
+    });
+    expect(view.history).toBeNull();
   });
 
-  test('shows the winner after awards', () => {
+  test('turns a completed competition into ordered history with no live view data', () => {
     const completed: BroadcastSnapshot = {
       ...running,
       event: { ...running.event!, status: 'completed', phase: 'awards', winnerId: 'p:1' },
+      participants: [{ ...running.participants[0], active: false, role: 'winner' }],
+      logs: [
+        {
+          eventKey: 'event-1:finish', sequence: 3, kind: 'award',
+          text: '顾潮领取一百万金贝。', createdAt: 79_000,
+        },
+        {
+          eventKey: 'event-1:start', sequence: 1, kind: 'announcement',
+          text: '八位居民抵达赛场。', createdAt: 10_000,
+        },
+        {
+          eventKey: 'event-1:final', sequence: 2, kind: 'round',
+          text: '顾潮点亮灯塔。', createdAt: 70_000,
+        },
+      ],
     };
     const view = buildBroadcastView(completed, 'zh-CN', 80_000);
-    expect(view.phaseLabel).toBe('百万金贝颁奖礼');
+    expect(view.mode).toBe('event');
+    expect(view.presentation).toBe('history');
+    expect(view.title).toBe('往届赛事记录');
+    expect(view.live).toBeNull();
     expect(view.winnerName).toBe('顾潮');
+    expect(view.history).toEqual({
+      eventName: '灯塔镇百万金贝寻宝赛',
+      champion: '顾潮',
+      prize: '一百万金贝',
+      result: '赛事已结束，顾潮获得冠军。',
+      logs: [completed.logs[1], completed.logs[2], completed.logs[0]],
+    });
   });
 
   test('exports the complete factual report in the required section order', () => {
