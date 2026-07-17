@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import * as conversation from './conversation';
+import { TOPIC_DETAILS } from './conversationPolicy';
+import type { TopicDetail } from './conversationPolicy';
 
 const conversationSource = readFileSync('convex/agent/conversation.ts', 'utf8');
 const schemaSource = readFileSync('convex/schema.ts', 'utf8');
@@ -58,14 +60,49 @@ describe('daily-life prompt contract', () => {
     expect(rules).toBeDefined();
     if (!rules) return;
 
-    expect(rules({ detail: '今日饭菜' })).toEqual([
-      '本轮日常话题：今日饭菜。',
+    expect(rules({ detail: 'meal' })).toEqual([
+      '本轮日常话题：饮食。',
       '用自然的简体中文交谈，每轮只推进一个意思。',
       '普通回复控制在 20–60 个中文字符；开场 15–45 字；告别 10–35 字。',
       '不要使用括号舞台说明，不要长篇描写动作、环境或内心。',
       '不要发起异变、谜团、调查、灯塔机关或海洋话题。',
     ]);
     expect(conversationSource).not.toContain('within 200 characters');
+  });
+
+  test('localizes every stable topic detail and safely labels unknown legacy details', () => {
+    const rules = conversation.conversationPromptRules;
+    const expectedLabels: Record<TopicDetail, string> = {
+      work: '工作',
+      order: '订单',
+      income: '收入',
+      shopping: '采购',
+      meal: '饮食',
+      clothing: '衣物',
+      home: '家务',
+      rest: '休息',
+      health: '健康',
+      friendship: '友情',
+      care: '照护',
+      date: '约会',
+      misunderstanding: '误会',
+      cooperation: '合作',
+      'neighbor-help': '邻里互助',
+      market: '集市',
+      class: '课程',
+      festival: '节庆',
+      institution: '机构服务',
+      'local-news': '地方消息',
+      safety: '公共安全',
+    };
+    const policyDetails = Object.values(TOPIC_DETAILS).flat() as TopicDetail[];
+
+    expect(Object.keys(expectedLabels).sort()).toEqual([...policyDetails].sort());
+    for (const detail of policyDetails) {
+      expect(rules({ detail })[0]).toBe(`本轮日常话题：${expectedLabels[detail]}。`);
+    }
+    expect(rules({ detail: 'retired-legacy-topic' })[0]).toBe('本轮日常话题：日常近况。');
+    expect(rules({ detail: 'toString' })[0]).toBe('本轮日常话题：日常近况。');
   });
 
   test.each([
@@ -130,6 +167,20 @@ describe('observer sea-question detection', () => {
     ).toBe(true);
   });
 
+  test.each(['这座塔是用来导航的吗？', 'Is the tower used for navigation?'])(
+    'detects a latest human navigation question: %s',
+    (text) => {
+      expect(detect).toBeDefined();
+      if (!detect) return;
+      expect(
+        detect(
+          { id: 'observer', human: 'observer-user' },
+          [{ author: 'observer', text }],
+        ),
+      ).toBe(true);
+    },
+  );
+
   test('does not trigger for an AI player or an older observer question', () => {
     expect(detect).toBeDefined();
     if (!detect) return;
@@ -140,9 +191,15 @@ describe('observer sea-question detection', () => {
       detect(
         { id: 'observer', human: 'observer-user' },
         [
-          { author: 'observer', text: '灯塔是观潮用的吗？' },
-          { author: 'resident', text: '今天集市很热闹。' },
+          { author: 'observer', text: '这座塔是用来导航的吗？' },
+          { author: 'observer', text: '今天集市几点开？' },
         ],
+      ),
+    ).toBe(false);
+    expect(
+      detect(
+        { id: 'observer', human: 'observer-user' },
+        [{ author: 'resident-ai', text: '这座塔是用来导航的吗？' }],
       ),
     ).toBe(false);
   });

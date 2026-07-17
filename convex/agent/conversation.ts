@@ -13,6 +13,7 @@ import {
   filterLegacyMemories,
   selectConversationTopic,
   TopicCategory,
+  TopicDetail,
 } from './conversationPolicy';
 
 const selfInternal = internal.agent.conversation;
@@ -31,9 +32,36 @@ export function shanghaiDayKey(selectedAt: number): string {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
+const TOPIC_LABELS: Record<TopicDetail, string> = {
+  work: '工作',
+  order: '订单',
+  income: '收入',
+  shopping: '采购',
+  meal: '饮食',
+  clothing: '衣物',
+  home: '家务',
+  rest: '休息',
+  health: '健康',
+  friendship: '友情',
+  care: '照护',
+  date: '约会',
+  misunderstanding: '误会',
+  cooperation: '合作',
+  'neighbor-help': '邻里互助',
+  market: '集市',
+  class: '课程',
+  festival: '节庆',
+  institution: '机构服务',
+  'local-news': '地方消息',
+  safety: '公共安全',
+};
+
 export function conversationPromptRules(topic: { detail: string }): string[] {
+  const label = Object.prototype.hasOwnProperty.call(TOPIC_LABELS, topic.detail)
+    ? TOPIC_LABELS[topic.detail as TopicDetail]
+    : '日常近况';
   return [
-    `本轮日常话题：${topic.detail}。`,
+    `本轮日常话题：${label}。`,
     '用自然的简体中文交谈，每轮只推进一个意思。',
     '普通回复控制在 20–60 个中文字符；开场 15–45 字；告别 10–35 字。',
     '不要使用括号舞台说明，不要长篇描写动作、环境或内心。',
@@ -43,7 +71,8 @@ export function conversationPromptRules(topic: { detail: string }): string[] {
 
 type PriorMessage = { author: string; text: string };
 
-const EXPLICIT_SEA_TOPIC = /海洋|航标|观潮|潮汐|(?<!上)海|\b(?:sea|ocean|beacon)\b/iu;
+const EXPLICIT_SEA_TOPIC =
+  /海洋|航标|观潮|潮汐|导航|航行|(?<!上)海|\b(?:sea|ocean|beacon|navigation)\b/iu;
 const QUESTION_FORM = /[?？]|(?:吗|呢|么|怎么|为何|为什么|是否|是不是|有没有|哪里|哪儿|什么|谁|几|多少)(?:[。！!]?)$/iu;
 
 export function observerAskedAboutSea(
