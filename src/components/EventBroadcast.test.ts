@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { jest } from '@jest/globals';
+import { summarizeConversation } from '../../convex/events';
 import {
   buildDailyReport,
   buildBroadcastView,
@@ -50,6 +51,7 @@ describe('event broadcast view model', () => {
 
     expect(eventsModule).toHaveProperty('isObserverIntervention');
     expect(eventsModule).toHaveProperty('collectHumanPlayerIds');
+    expect(eventsModule).toHaveProperty('summarizeConversation');
     const isObserverIntervention = eventsModule.isObserverIntervention as (
       humanPlayerIds: ReadonlySet<string>,
       authorId: string,
@@ -112,9 +114,56 @@ describe('event broadcast view model', () => {
       },
     ]);
 
-    expect(story.headline).toContain('小镇异变');
+    expect(story.headline).toBe('今日灯塔镇');
+    expect(story.headline).not.toMatch(/小镇异变|线索交汇/u);
     expect(story.bullets).toHaveLength(2);
     expect(story.bullets[0]).toContain('白露');
+  });
+
+  test('does not resurrect legacy mystery framing in the live observer summary', () => {
+    const summary = summarizeConversation(['顾潮', '白露'], [
+      '旧记录提到灯火装置与河道线索。',
+      '今天药庐配了三份常用药，食肆准备了午饭。',
+    ]);
+
+    expect(summary).toContain('药庐');
+    expect(summary).toContain('午饭');
+    expect(summary).not.toMatch(/异变|线索交汇|灯火装置|河道水位|花木生长|机关结构/u);
+  });
+
+  test('shows an honest empty state when only legacy content exists', () => {
+    expect(summarizeConversation(['顾潮'], ['灯塔异常闪光。']))
+      .toBe('暂无新的日常记录');
+  });
+
+  test('filters marine and completed-event archive content from the live summary', () => {
+    expect(summarizeConversation(['林澜'], ['海潮推动航标，夜航即将开始。']))
+      .toBe('暂无新的日常记录');
+    expect(summarizeConversation(['顾潮'], ['顾潮领取一百万金贝，寻宝赛已经结束。']))
+      .toBe('暂无新的日常记录');
+  });
+
+  test('classifies ordinary relationship and business facts without clue language', () => {
+    const summary = summarizeConversation(
+      ['唐果', '苏萤'],
+      ['账目已经对清，明天和邻里继续合作。'],
+    );
+
+    expect(summary).toContain('商业、友情与关系');
+    expect(summary).toMatch(/账目|邻里|合作/u);
+    expect(summary).not.toMatch(/交换信息|最新线索|线索交汇/u);
+  });
+
+  test('uses only the six agreed daily-life taxonomy labels', () => {
+    const summary = summarizeConversation(['白露', '唐果'], [
+      '今天坐诊并核对账目，吃了午饭，也照顾朋友，和邻里合作后去了镇公所。',
+    ]);
+
+    expect(summary).toContain('劳动、商业、饮食、照护、友情与关系、公共生活');
+  });
+
+  test('uses the daily empty state when there are no messages', () => {
+    expect(summarizeConversation([], [])).toBe('暂无新的日常记录');
   });
 
   test('formats a running phase and countdown for observers', () => {

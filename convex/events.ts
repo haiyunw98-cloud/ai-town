@@ -15,6 +15,7 @@ import { eventCheckpoints } from '../data/worlds/lighthouse-town/map';
 import { requestEventDecision } from './events/model';
 import { advanceEvent, createInitialEvent } from './events/stateMachine';
 import { EventPhase, TownEventState } from './events/types';
+import { containsForbiddenAutonomousMemory } from './agent/conversationPolicy';
 
 const EVENT_NAME = '灯塔镇百万金贝寻宝赛';
 
@@ -244,21 +245,39 @@ function groupConversationMessages(
     .slice(0, 6);
 }
 
-function summarizeConversation(participantNames: string[], messages: string[]) {
-  const combined = messages.join('');
-  const topics = [
-    [/河|水位|航道|渡口/, '河道水位'],
-    [/灯|灯塔|火光|灯架/, '灯火装置'],
-    [/花|草药|根系|枯萎/, '花木生长'],
-    [/机关|齿轮|结构|零件/, '机关结构'],
-    [/金贝|寻宝|比赛|线索/, '寻宝赛事'],
-  ]
-    .filter(([pattern]) => (pattern as RegExp).test(combined))
-    .map(([, label]) => label as string)
-    .slice(0, 3);
-  const latest = cleanDialogue(messages.at(-1) ?? '').slice(0, 54);
-  const subject = topics.length > 0 ? topics.join('、') : '近日见闻';
-  return `${participantNames.join('与')}围绕${subject}交换了${messages.length}条信息，最新线索是“${latest}${latest.length >= 54 ? '…' : ''}”。`;
+export function summarizeConversation(participantNames: string[], messages: string[]) {
+  const dailySegments = messages.flatMap((message) =>
+    (cleanDialogue(message).match(/[^。！？!?；;，,\n]+[。！？!?；;，,]?/gu) ?? [])
+      .map((segment) => segment.replace(/[。！？!?；;，,]+$/u, '').trim())
+      .filter((segment) => segment.length > 0 && !isLegacyObserverContent(segment)),
+  );
+  if (dailySegments.length === 0) return '暂无新的日常记录';
+
+  const combined = dailySegments.join('；');
+  const dailyTopicLabels = [
+    ['劳动', /工作|上课|备课|修理|送货|坐诊/u],
+    ['商业', /买|卖|订单|工资|采购|账目|生意/u],
+    ['饮食', /吃|饭|茶|点心|粥|面/u],
+    ['照护', /照顾|看病|休息|健康/u],
+    ['友情与关系', /朋友|约会|关心|误会|合作|邻里/u],
+    ['公共生活', /集市|书院|药庐|茶庄|镇公所|食肆/u],
+  ] as const;
+  const topics = dailyTopicLabels
+    .filter(([, pattern]) => pattern.test(combined))
+    .map(([label]) => label);
+  const factCharacters = Array.from(combined);
+  const factExcerpt = factCharacters.slice(0, 80).join('');
+  const fact = `${factExcerpt}${factCharacters.length > 80 ? '…' : '。'}`;
+  const residents = participantNames.join('与') || '居民';
+  return topics.length > 0
+    ? `${residents}聊到${topics.join('、')}：${fact}`
+    : `${residents}聊了今天的日常：${fact}`;
+}
+
+const observerLegacyContent = /海面|海潮|潮汐|观潮|航标|海风|海浪|夜航|失落航路|无海航路|灯塔导航|异变|异常|谜团|谜题|追查|调查|失踪|线索|灯火装置|河道水位|花木生长|机关结构/u;
+
+function isLegacyObserverContent(text: string) {
+  return observerLegacyContent.test(text) || containsForbiddenAutonomousMemory(text);
 }
 
 function cleanDialogue(text: string) {

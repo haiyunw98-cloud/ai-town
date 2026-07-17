@@ -533,10 +533,8 @@ export function buildDailyReport(
 }
 
 export function buildTownStory(conversations: BroadcastSnapshot['conversations']) {
-  const combined = conversations.map((conversation) => conversation.summary).join('');
-  const hasMystery = /异常|枯萎|挪动|水位|机关|雾|失踪|追查/.test(combined);
   return {
-    headline: hasMystery ? '小镇异变：河道、灯火与花木的线索正在交汇' : '今日灯塔镇：居民们各自生活，也悄悄影响着彼此',
+    headline: '今日灯塔镇',
     bullets: conversations.slice(0, 4).map(
       (conversation) => `${conversation.participantNames.join(' × ')}｜${conversation.summary}`,
     ),
