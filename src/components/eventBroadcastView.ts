@@ -562,6 +562,16 @@ const phaseLabels: Record<Locale, Record<string, string>> = {
   },
 };
 
+export function buildCompletedArchiveView(title: string, champion: string, locale: Locale) {
+  return {
+    disclosure: 'details' as const,
+    expandedByDefault: false,
+    title,
+    contextLabel: locale === 'zh-CN' ? '历史公共事件' : 'Historical public event',
+    winnerSummary: locale === 'zh-CN' ? `冠军：${champion}` : `Champion: ${champion}`,
+  };
+}
+
 export function buildBroadcastView(snapshot: BroadcastSnapshot, locale: Locale, now = Date.now()) {
   if (!snapshot.event) {
     return {
