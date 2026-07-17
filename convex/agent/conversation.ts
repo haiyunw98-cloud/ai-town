@@ -10,13 +10,15 @@ import { NUM_MEMORIES_TO_SEARCH } from '../constants';
 import { buildWorldPrompt } from '../../data/worlds/lighthouse-town/manifest';
 import { getWorldLocale } from '../util/worldLocale';
 import {
+  conversationPromptRules,
+  deriveTopicSelectionInput,
   filterLegacyMemories,
+  observerSeaCorrectionInstruction,
   selectConversationTopic,
-  TopicCategory,
-  TopicDetail,
 } from './conversationPolicy';
 
 const selfInternal = internal.agent.conversation;
+export const CONVERSATION_MAX_TOKENS = 120;
 
 const shanghaiDateFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Shanghai',
@@ -32,48 +34,15 @@ export function shanghaiDayKey(selectedAt: number): string {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
-const TOPIC_LABELS: Record<TopicDetail, string> = {
-  work: '工作',
-  order: '订单',
-  income: '收入',
-  shopping: '采购',
-  meal: '饮食',
-  clothing: '衣物',
-  home: '家务',
-  rest: '休息',
-  health: '健康',
-  friendship: '友情',
-  care: '照护',
-  date: '约会',
-  misunderstanding: '误会',
-  cooperation: '合作',
-  'neighbor-help': '邻里互助',
-  market: '集市',
-  class: '课程',
-  festival: '节庆',
-  institution: '机构服务',
-  'local-news': '地方消息',
-  safety: '公共安全',
-};
-
-export function conversationPromptRules(topic: { detail: string }): string[] {
-  const label = Object.prototype.hasOwnProperty.call(TOPIC_LABELS, topic.detail)
-    ? TOPIC_LABELS[topic.detail as TopicDetail]
-    : '日常近况';
-  return [
-    `本轮日常话题：${label}。`,
-    '用自然的简体中文交谈，每轮只推进一个意思。',
-    '普通回复控制在 20–60 个中文字符；开场 15–45 字；告别 10–35 字。',
-    '不要使用括号舞台说明，不要长篇描写动作、环境或内心。',
-    '不要发起异变、谜团、调查、灯塔机关或海洋话题。',
-  ];
-}
-
 type PriorMessage = { author: string; text: string };
 
-const EXPLICIT_SEA_TOPIC =
-  /海洋|航标|观潮|潮汐|导航|航行|(?<!上)海|\b(?:sea|ocean|beacon|navigation)\b/iu;
-const QUESTION_FORM = /[?？]|(?:吗|呢|么|怎么|为何|为什么|是否|是不是|有没有|哪里|哪儿|什么|谁|几|多少)(?:[。！!]?)$/iu;
+const FINAL_QUESTION = /[?？]["'”’」』）)]*\s*$/u;
+const EXPLICIT_CHINESE_MARINE = /海洋|海上|大海|海边|海岸|海潮|潮汐|观潮|航标/u;
+const CHINESE_TOWER_NAVIGATION =
+  /(?:(?:灯塔|这座塔|高塔)[\s\S]{0,12}(?:导航|航行)|(?:导航|航行)[\s\S]{0,12}(?:灯塔|这座塔|高塔))/u;
+const EXPLICIT_ENGLISH_MARINE = /\b(?:sea|ocean|tides?|coasts?|seaside)\b/iu;
+const ENGLISH_TOWER_NAVIGATION =
+  /(?:\b(?:lighthouse|tower)\b[\s\S]{0,80}\b(?:navigation|navigate|navigational|beacon)\b|\b(?:navigation|navigate|navigational|beacon)\b[\s\S]{0,80}\b(?:lighthouse|tower)\b)/iu;
 
 export function observerAskedAboutSea(
   otherPlayer: { id: string; human?: string },
@@ -83,8 +52,11 @@ export function observerAskedAboutSea(
   const latest = messages[messages.length - 1];
   return (
     latest.author === otherPlayer.id &&
-    EXPLICIT_SEA_TOPIC.test(latest.text) &&
-    QUESTION_FORM.test(latest.text.trim())
+    FINAL_QUESTION.test(latest.text) &&
+    (EXPLICIT_CHINESE_MARINE.test(latest.text) ||
+      CHINESE_TOWER_NAVIGATION.test(latest.text) ||
+      EXPLICIT_ENGLISH_MARINE.test(latest.text) ||
+      ENGLISH_TOWER_NAVIGATION.test(latest.text))
   );
 }
 
@@ -115,13 +87,12 @@ export const getOrCreateConversationTopic = internalMutation({
       )
       .order('asc')
       .collect();
-    const counts: Record<TopicCategory, number> = {
-      livelihood: 0,
-      relationship: 0,
-      'public-life': 0,
-    };
-    for (const topic of residentTopics) counts[topic.category] += 1;
-    const recent = residentTopics.slice(-3).map((topic) => topic.detail);
+    const recentTopics = await ctx.db
+      .query('conversationTopics')
+      .withIndex('residentTime', (q) => q.eq('worldId', args.worldId).eq('playerId', args.playerId))
+      .order('desc')
+      .take(3);
+    const { counts, recent } = deriveTopicSelectionInput(residentTopics, recentTopics);
     const selected = selectConversationTopic(
       `${dayKey}:${args.worldId}:${args.playerId}:${args.conversationId}`,
       recent,
@@ -170,6 +141,7 @@ export async function startConversationMessage(
       conversationId,
     },
   );
+  const locale = getWorldLocale();
   const topic = await ctx.runMutation(selfInternal.getOrCreateConversationTopic, {
     worldId,
     playerId,
@@ -193,11 +165,11 @@ export async function startConversationMessage(
     (m) => m.data.type === 'conversation' && m.data.playerIds.includes(otherPlayerId),
   );
   const prompt = [
-    buildWorldPrompt(getWorldLocale()),
+    buildWorldPrompt(locale),
     `You are ${player.name}, and you just started a conversation with ${otherPlayer.name}.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
-  prompt.push(...conversationPromptRules(topic));
+  prompt.push(...conversationPromptRules(topic, locale));
   prompt.push(...previousConversationPrompt(otherPlayer, lastConversation));
   prompt.push(...relatedMemoriesPrompt(memories));
   if (memoryWithOtherPlayer) {
@@ -215,7 +187,7 @@ export async function startConversationMessage(
         content: prompt.join('\n'),
       },
     ],
-    max_tokens: 120,
+    max_tokens: CONVERSATION_MAX_TOKENS,
     stop: stopWords(otherPlayer.name, player.name),
   });
   return trimContentPrefx(content, lastPrompt);
@@ -244,6 +216,7 @@ export async function continueConversationMessage(
       conversationId,
     },
   );
+  const locale = getWorldLocale();
   const now = Date.now();
   const topic = await ctx.runMutation(selfInternal.getOrCreateConversationTopic, {
     worldId,
@@ -265,21 +238,19 @@ export async function continueConversationMessage(
   const memories = filterLegacyMemories(searchedMemories);
   const prevMessages = await ctx.runQuery(api.messages.listMessages, { worldId, conversationId });
   const prompt = [
-    buildWorldPrompt(getWorldLocale()),
+    buildWorldPrompt(locale),
     `You are ${player.name}, and you're currently in a conversation with ${otherPlayer.name}.`,
     `The conversation started at ${started.toLocaleString()}. It's now ${now.toLocaleString()}.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
-  prompt.push(...conversationPromptRules(topic));
+  prompt.push(...conversationPromptRules(topic, locale));
   prompt.push(...relatedMemoriesPrompt(memories));
   prompt.push(
     `Below is the current chat history between you and ${otherPlayer.name}.`,
     `DO NOT greet them again. Do NOT use the word "Hey" too often.`,
   );
   if (observerAskedAboutSea(otherPlayer, prevMessages)) {
-    prompt.push(
-      '观察者问到了海洋设定。先说“镇上没有海，这座塔只是地标。”，再用一句短问句回应。',
-    );
+    prompt.push(observerSeaCorrectionInstruction(locale));
   }
 
   const llmMessages: LLMMessage[] = [
@@ -294,7 +265,7 @@ export async function continueConversationMessage(
 
   const { content } = await chatCompletion({
     messages: llmMessages,
-    max_tokens: 120,
+    max_tokens: CONVERSATION_MAX_TOKENS,
     stop: stopWords(otherPlayer.name, player.name),
   });
   return trimContentPrefx(content, lastPrompt);
@@ -316,6 +287,7 @@ export async function leaveConversationMessage(
       conversationId,
     },
   );
+  const locale = getWorldLocale();
   const topic = await ctx.runMutation(selfInternal.getOrCreateConversationTopic, {
     worldId,
     playerId,
@@ -335,21 +307,19 @@ export async function leaveConversationMessage(
   const memories = filterLegacyMemories(searchedMemories);
   const prevMessages = await ctx.runQuery(api.messages.listMessages, { worldId, conversationId });
   const prompt = [
-    buildWorldPrompt(getWorldLocale()),
+    buildWorldPrompt(locale),
     `You are ${player.name}, and you're currently in a conversation with ${otherPlayer.name}.`,
     `You've decided to leave the question and would like to politely tell them you're leaving the conversation.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
-  prompt.push(...conversationPromptRules(topic));
+  prompt.push(...conversationPromptRules(topic, locale));
   prompt.push(...relatedMemoriesPrompt(memories));
   prompt.push(
     `Below is the current chat history between you and ${otherPlayer.name}.`,
     `How would you like to tell them that you're leaving?`,
   );
   if (observerAskedAboutSea(otherPlayer, prevMessages)) {
-    prompt.push(
-      '观察者问到了海洋设定。先说“镇上没有海，这座塔只是地标。”，再用一句短问句回应。',
-    );
+    prompt.push(observerSeaCorrectionInstruction(locale));
   }
   const llmMessages: LLMMessage[] = [
     {
@@ -363,7 +333,7 @@ export async function leaveConversationMessage(
 
   const { content } = await chatCompletion({
     messages: llmMessages,
-    max_tokens: 120,
+    max_tokens: CONVERSATION_MAX_TOKENS,
     stop: stopWords(otherPlayer.name, player.name),
   });
   return trimContentPrefx(content, lastPrompt);

@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import * as conversation from './conversation';
+import * as conversationPolicy from './conversationPolicy';
 import { TOPIC_DETAILS } from './conversationPolicy';
-import type { TopicDetail } from './conversationPolicy';
+import type { TopicCategory, TopicDetail } from './conversationPolicy';
 
 const conversationSource = readFileSync('convex/agent/conversation.ts', 'utf8');
 const schemaSource = readFileSync('convex/schema.ts', 'utf8');
@@ -34,14 +35,16 @@ describe('conversation topic schema', () => {
     expect(schemaSource).toMatch(
       /\.index\(['"]residentDay['"],\s*\[['"]worldId['"],\s*['"]playerId['"],\s*['"]dayKey['"],\s*['"]selectedAt['"]\]\)/u,
     );
+    expect(schemaSource).toMatch(
+      /\.index\(['"]residentTime['"],\s*\[['"]worldId['"],\s*['"]playerId['"],\s*['"]selectedAt['"]\]\)/u,
+    );
   });
 });
 
 describe('Shanghai day key', () => {
   test('changes at 16:00Z, which is midnight in Asia/Shanghai', () => {
-    const dayKey = (
-      conversation as unknown as { shanghaiDayKey?: (selectedAt: number) => string }
-    ).shanghaiDayKey;
+    const dayKey = (conversation as unknown as { shanghaiDayKey?: (selectedAt: number) => string })
+      .shanghaiDayKey;
     expect(dayKey).toBeDefined();
     if (!dayKey) return;
 
@@ -53,14 +56,14 @@ describe('Shanghai day key', () => {
 describe('daily-life prompt contract', () => {
   test('exports the exact shared simplified-Chinese short-turn rules', () => {
     const rules = (
-      conversation as unknown as {
-        conversationPromptRules?: (topic: { detail: string }) => string[];
+      conversationPolicy as unknown as {
+        conversationPromptRules?: (topic: { detail: string }, locale: 'zh-CN' | 'en') => string[];
       }
     ).conversationPromptRules;
     expect(rules).toBeDefined();
     if (!rules) return;
 
-    expect(rules({ detail: 'meal' })).toEqual([
+    expect(rules({ detail: 'meal' }, 'zh-CN')).toEqual([
       '本轮日常话题：饮食。',
       '用自然的简体中文交谈，每轮只推进一个意思。',
       '普通回复控制在 20–60 个中文字符；开场 15–45 字；告别 10–35 字。',
@@ -71,7 +74,13 @@ describe('daily-life prompt contract', () => {
   });
 
   test('localizes every stable topic detail and safely labels unknown legacy details', () => {
-    const rules = conversation.conversationPromptRules;
+    const rules = (
+      conversationPolicy as unknown as {
+        conversationPromptRules?: (topic: { detail: string }, locale: 'zh-CN' | 'en') => string[];
+      }
+    ).conversationPromptRules;
+    expect(rules).toBeDefined();
+    if (!rules) return;
     const expectedLabels: Record<TopicDetail, string> = {
       work: '工作',
       order: '订单',
@@ -99,10 +108,59 @@ describe('daily-life prompt contract', () => {
 
     expect(Object.keys(expectedLabels).sort()).toEqual([...policyDetails].sort());
     for (const detail of policyDetails) {
-      expect(rules({ detail })[0]).toBe(`本轮日常话题：${expectedLabels[detail]}。`);
+      expect(rules({ detail }, 'zh-CN')[0]).toBe(`本轮日常话题：${expectedLabels[detail]}。`);
     }
-    expect(rules({ detail: 'retired-legacy-topic' })[0]).toBe('本轮日常话题：日常近况。');
-    expect(rules({ detail: 'toString' })[0]).toBe('本轮日常话题：日常近况。');
+    expect(rules({ detail: 'retired-legacy-topic' }, 'zh-CN')[0]).toBe('本轮日常话题：日常近况。');
+    expect(rules({ detail: 'toString' }, 'zh-CN')[0]).toBe('本轮日常话题：日常近况。');
+  });
+
+  test('renders complete English topic rules and an English-only observer correction', () => {
+    const policy = conversationPolicy as unknown as {
+      conversationPromptRules?: (topic: { detail: string }, locale: 'zh-CN' | 'en') => string[];
+      observerSeaCorrectionInstruction?: (locale: 'zh-CN' | 'en') => string;
+    };
+    expect(policy.conversationPromptRules).toBeDefined();
+    expect(policy.observerSeaCorrectionInstruction).toBeDefined();
+    if (!policy.conversationPromptRules || !policy.observerSeaCorrectionInstruction) return;
+
+    const expectedLabels: Record<TopicDetail, string> = {
+      work: 'Work',
+      order: 'Orders',
+      income: 'Income',
+      shopping: 'Shopping',
+      meal: 'Food',
+      clothing: 'Clothing',
+      home: 'Housework',
+      rest: 'Rest',
+      health: 'Health',
+      friendship: 'Friendship',
+      care: 'Care',
+      date: 'Dating',
+      misunderstanding: 'Misunderstandings',
+      cooperation: 'Cooperation',
+      'neighbor-help': 'Neighborly help',
+      market: 'Market',
+      class: 'Classes',
+      festival: 'Festivals',
+      institution: 'Public services',
+      'local-news': 'Local news',
+      safety: 'Public safety',
+    };
+    const policyDetails = Object.values(TOPIC_DETAILS).flat() as TopicDetail[];
+    for (const detail of policyDetails) {
+      const rules = policy.conversationPromptRules({ detail }, 'en');
+      expect(rules[0]).toBe(`Daily-life topic for this conversation: ${expectedLabels[detail]}.`);
+      expect(rules.join('\n')).not.toMatch(/[\u3400-\u9fff]/u);
+    }
+    expect(policy.conversationPromptRules({ detail: 'legacy' }, 'en')[0]).toBe(
+      'Daily-life topic for this conversation: Daily life.',
+    );
+    const zhCorrection = policy.observerSeaCorrectionInstruction('zh-CN');
+    const enCorrection = policy.observerSeaCorrectionInstruction('en');
+    expect(zhCorrection).toContain('镇上没有海，这座塔只是地标。');
+    expect(zhCorrection).not.toContain('There is no sea');
+    expect(enCorrection).toContain('There is no sea in town; this tower is only a landmark.');
+    expect(enCorrection).not.toMatch(/[\u3400-\u9fff]/u);
   });
 
   test.each([
@@ -112,7 +170,9 @@ describe('daily-life prompt contract', () => {
   ] as const)('%s obtains one persisted topic and adds the shared prompt rules', (name, next) => {
     const source = sourceFor(name, next);
     expect(source).toContain('selfInternal.getOrCreateConversationTopic');
-    expect(source).toContain('conversationPromptRules(topic)');
+    expect(source.match(/const locale = getWorldLocale\(\)/gu) ?? []).toHaveLength(1);
+    expect(source).toContain('buildWorldPrompt(locale)');
+    expect(source).toContain('conversationPromptRules(topic, locale)');
   });
 
   test.each([
@@ -137,12 +197,51 @@ describe('daily-life prompt contract', () => {
     expect(selectionAt).toBeGreaterThan(filterAt);
   });
 
-  test('bounds every conversation completion to at most 160 tokens', () => {
-    const tokenValues = [...conversationSource.matchAll(/max_tokens\s*:\s*(\d+)/gu)].map((match) =>
-      Number(match[1]),
+  test('uses the exact executable 120-token conversation limit in every completion', () => {
+    const maxTokens = (conversation as unknown as { CONVERSATION_MAX_TOKENS?: number })
+      .CONVERSATION_MAX_TOKENS;
+    expect(maxTokens).toBe(120);
+    expect(conversationSource.match(/max_tokens:\s*CONVERSATION_MAX_TOKENS/gu)).toHaveLength(3);
+  });
+});
+
+describe('cross-day topic selection input', () => {
+  test('resets category counts at Shanghai midnight while retaining prior-day details', () => {
+    const derive = (
+      conversationPolicy as unknown as {
+        deriveTopicSelectionInput?: (
+          currentDayRows: readonly { category: TopicCategory; detail: string }[],
+          recentRows: readonly { category: TopicCategory; detail: string }[],
+        ) => { counts: Record<TopicCategory, number>; recent: string[] };
+      }
+    ).deriveTopicSelectionInput;
+    expect(derive).toBeDefined();
+    if (!derive) return;
+
+    const midnight = Date.parse('2026-07-17T16:00:00.000Z');
+    const rows = [
+      { category: 'livelihood' as const, detail: 'work', selectedAt: midnight - 3 },
+      { category: 'livelihood' as const, detail: 'order', selectedAt: midnight - 2 },
+      { category: 'livelihood' as const, detail: 'income', selectedAt: midnight - 1 },
+    ];
+    const currentDayRows = rows.filter(
+      (row) =>
+        conversation.shanghaiDayKey(row.selectedAt) === conversation.shanghaiDayKey(midnight),
     );
-    expect(tokenValues).toHaveLength(3);
-    expect(tokenValues.every((value) => value <= 160)).toBe(true);
+    const recentRows = [...rows].sort((a, b) => b.selectedAt - a.selectedAt).slice(0, 3);
+    const input = derive(currentDayRows, recentRows);
+
+    expect(input).toEqual({
+      counts: { livelihood: 0, relationship: 0, 'public-life': 0 },
+      recent: ['income', 'order', 'work'],
+    });
+    const selected = conversationPolicy.selectConversationTopic(
+      'after-midnight',
+      input.recent,
+      input.counts,
+    );
+    expect(selected.category).toBe('livelihood');
+    expect(input.recent).not.toContain(selected.detail);
   });
 });
 
@@ -160,10 +259,9 @@ describe('observer sea-question detection', () => {
     expect(detect).toBeDefined();
     if (!detect) return;
     expect(
-      detect(
-        { id: 'observer', human: 'observer-user' },
-        [{ author: 'observer', text: '那座塔是海上的航标吗？' }],
-      ),
+      detect({ id: 'observer', human: 'observer-user' }, [
+        { author: 'observer', text: '那座塔是海上的航标吗？' },
+      ]),
     ).toBe(true);
   });
 
@@ -173,55 +271,194 @@ describe('observer sea-question detection', () => {
       expect(detect).toBeDefined();
       if (!detect) return;
       expect(
-        detect(
-          { id: 'observer', human: 'observer-user' },
-          [{ author: 'observer', text }],
-        ),
+        detect({ id: 'observer', human: 'observer-user' }, [{ author: 'observer', text }]),
       ).toBe(true);
     },
   );
 
+  test.each([
+    '海鲜市场几点开？',
+    '这张海报是谁画的？',
+    '海棠花什么时候开？',
+    '手机导航怎么设置？',
+    'GPS导航准吗？',
+    '地图导航好用吗？',
+    'Does this software beacon work?',
+    'Is web navigation accessible?',
+    'Do you like the sea? Then what time is the market',
+  ])(
+    'does not treat unrelated or non-final question syntax as a sea-setting question: %s',
+    (text) => {
+      expect(detect).toBeDefined();
+      if (!detect) return;
+      expect(
+        detect({ id: 'observer', human: 'observer-user' }, [{ author: 'observer', text }]),
+      ).toBe(false);
+    },
+  );
+
+  test.each([
+    '镇外有海洋吗？',
+    '这里能看到海上日落吗？',
+    '附近有大海或海边吗？',
+    '海岸会有海潮吗？',
+    '潮汐适合观潮吗？',
+    '那是航标吗？',
+    '高塔可以航行定位吗？',
+    'Is there an ocean coast nearby?',
+    'Is the lighthouse used as a beacon?',
+    'Is that a sea beacon?”  ',
+  ])('detects explicit final marine or tower-navigation questions: %s', (text) => {
+    expect(detect).toBeDefined();
+    if (!detect) return;
+    expect(detect({ id: 'observer', human: 'observer-user' }, [{ author: 'observer', text }])).toBe(
+      true,
+    );
+  });
+
   test('does not trigger for an AI player or an older observer question', () => {
     expect(detect).toBeDefined();
     if (!detect) return;
+    expect(detect({ id: 'ai-player' }, [{ author: 'ai-player', text: '镇外有海洋吗？' }])).toBe(
+      false,
+    );
     expect(
-      detect({ id: 'ai-player' }, [{ author: 'ai-player', text: '镇外有海洋吗？' }]),
+      detect({ id: 'observer', human: 'observer-user' }, [
+        { author: 'observer', text: '这座塔是用来导航的吗？' },
+        { author: 'observer', text: '今天集市几点开？' },
+      ]),
     ).toBe(false);
     expect(
-      detect(
-        { id: 'observer', human: 'observer-user' },
-        [
-          { author: 'observer', text: '这座塔是用来导航的吗？' },
-          { author: 'observer', text: '今天集市几点开？' },
-        ],
-      ),
-    ).toBe(false);
-    expect(
-      detect(
-        { id: 'observer', human: 'observer-user' },
-        [{ author: 'resident-ai', text: '这座塔是用来导航的吗？' }],
-      ),
+      detect({ id: 'observer', human: 'observer-user' }, [
+        { author: 'resident-ai', text: '这座塔是用来导航的吗？' },
+      ]),
     ).toBe(false);
   });
 
-  test('continue and leave use the exact correction, while start does not invent one', () => {
-    const correction =
-      '观察者问到了海洋设定。先说“镇上没有海，这座塔只是地标。”，再用一句短问句回应。';
+  test('continue and leave use the locale correction helper, while start does not invent one', () => {
     const start = sourceFor('startConversationMessage', 'continueConversationMessage');
     const continuing = sourceFor('continueConversationMessage', 'leaveConversationMessage');
     const leaving = sourceFor('leaveConversationMessage');
-    expect(start).not.toContain(correction);
-    expect(continuing).toContain(correction);
-    expect(leaving).toContain(correction);
+    expect(start).not.toContain('observerSeaCorrectionInstruction(locale)');
+    expect(continuing).toContain('observerSeaCorrectionInstruction(locale)');
+    expect(leaving).toContain('observerSeaCorrectionInstruction(locale)');
   });
 });
 
 describe('topic get-or-create contract', () => {
   test('is idempotent per speaker/conversation and balances the resident day', () => {
-    expect(conversationSource).toMatch(/export const getOrCreateConversationTopic\s*=\s*internalMutation/u);
+    expect(conversationSource).toMatch(
+      /export const getOrCreateConversationTopic\s*=\s*internalMutation/u,
+    );
     expect(conversationSource).toContain("withIndex('conversation'");
     expect(conversationSource).toContain("withIndex('residentDay'");
+    expect(conversationSource).toContain("withIndex('residentTime'");
+    expect(conversationSource).toContain(".order('desc')");
+    expect(conversationSource).toContain('.take(3)');
     expect(conversationSource).toContain('selectConversationTopic(');
     expect(conversationSource).toContain("ctx.db.insert('conversationTopics'");
+  });
+
+  type TopicRecord = {
+    worldId: string;
+    playerId: string;
+    conversationId: string;
+    category: TopicCategory;
+    detail: string;
+    dayKey: string;
+    selectedAt: number;
+  };
+
+  function fakeTopicContext(options: {
+    existing?: TopicRecord;
+    currentDay?: TopicRecord[];
+    recent?: TopicRecord[];
+    shared?: TopicRecord[];
+  }) {
+    const indexes: string[] = [];
+    const inserts: TopicRecord[] = [];
+    const db = {
+      query: (_table: string) => {
+        let index = '';
+        const builder: Record<string, unknown> = {};
+        const chain = {
+          eq: () => chain,
+        };
+        builder.withIndex = (name: string, apply: (q: typeof chain) => unknown) => {
+          index = name;
+          indexes.push(name);
+          apply(chain);
+          return builder;
+        };
+        builder.unique = async () => options.existing ?? null;
+        builder.order = () => builder;
+        builder.take = async (limit: number) => (options.recent ?? []).slice(0, limit);
+        builder.collect = async () =>
+          index === 'residentDay' ? (options.currentDay ?? []) : (options.shared ?? []);
+        return builder;
+      },
+      insert: async (_table: string, record: TopicRecord) => {
+        inserts.push(record);
+        return 'topic-id';
+      },
+    };
+    return { ctx: { db }, indexes, inserts };
+  }
+
+  const registeredMutation =
+    conversation.getOrCreateConversationTopic as typeof conversation.getOrCreateConversationTopic & {
+      _handler: (
+        ctx: unknown,
+        args: { worldId: string; playerId: string; conversationId: string; now: number },
+      ) => Promise<TopicRecord>;
+    };
+
+  test('registered mutation returns an existing speaker topic without inserting', async () => {
+    const existing: TopicRecord = {
+      worldId: 'world',
+      playerId: 'speaker',
+      conversationId: 'conversation',
+      category: 'relationship',
+      detail: 'care',
+      dayKey: '2026-07-18',
+      selectedAt: 10,
+    };
+    const fake = fakeTopicContext({ existing });
+
+    await expect(
+      registeredMutation._handler(fake.ctx, {
+        worldId: 'world',
+        playerId: 'speaker',
+        conversationId: 'conversation',
+        now: 20,
+      }),
+    ).resolves.toBe(existing);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.indexes).toEqual(['conversation']);
+  });
+
+  test('registered mutation reuses a shared conversation topic and inserts exactly once', async () => {
+    const shared: TopicRecord = {
+      worldId: 'world',
+      playerId: 'first-speaker',
+      conversationId: 'conversation',
+      category: 'public-life',
+      detail: 'market',
+      dayKey: '2026-07-17',
+      selectedAt: 10,
+    };
+    const fake = fakeTopicContext({ shared: [shared] });
+
+    const result = await registeredMutation._handler(fake.ctx, {
+      worldId: 'world',
+      playerId: 'new-speaker',
+      conversationId: 'conversation',
+      now: Date.parse('2026-07-17T16:00:00.000Z'),
+    });
+
+    expect(result).toMatchObject({ category: 'public-life', detail: 'market' });
+    expect(fake.inserts).toHaveLength(1);
+    expect(fake.inserts[0]).toMatchObject({ category: 'public-life', detail: 'market' });
+    expect(fake.indexes).toEqual(['conversation', 'residentDay', 'residentTime', 'conversation']);
   });
 });

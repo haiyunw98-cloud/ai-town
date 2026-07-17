@@ -143,7 +143,8 @@ describe('Lighthouse Town content', () => {
     );
     const memory = readFileSync(new URL('../../../convex/agent/memory.ts', import.meta.url), 'utf8');
     expect(agentInputs).toContain('localizedDescriptions(getWorldLocale())');
-    expect(conversation).toContain('buildWorldPrompt(getWorldLocale())');
+    expect(conversation.match(/const locale = getWorldLocale\(\)/gu)).toHaveLength(3);
+    expect(conversation.match(/buildWorldPrompt\(locale\)/gu)).toHaveLength(3);
     expect(memory).toContain('buildWorldPrompt(getWorldLocale())');
   });
 });

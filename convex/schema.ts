@@ -37,7 +37,8 @@ export default defineSchema({
     selectedAt: v.number(),
   })
     .index('conversation', ['worldId', 'conversationId', 'playerId'])
-    .index('residentDay', ['worldId', 'playerId', 'dayKey', 'selectedAt']),
+    .index('residentDay', ['worldId', 'playerId', 'dayKey', 'selectedAt'])
+    .index('residentTime', ['worldId', 'playerId', 'selectedAt']),
 
   townEvents: defineTable({
     worldId: v.id('worlds'),

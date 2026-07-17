@@ -1,3 +1,5 @@
+import type { WorldLocale } from '../../data/worlds/lighthouse-town/manifest';
+
 export type TopicCategory = 'livelihood' | 'relationship' | 'public-life';
 
 const TOPIC_TARGETS: Record<TopicCategory, number> = {
@@ -18,6 +20,112 @@ export type ConversationTopic = {
   category: TopicCategory;
   detail: TopicDetail;
 };
+
+export type TopicSelectionRow = {
+  category: TopicCategory;
+  detail: string;
+};
+
+export function deriveTopicSelectionInput(
+  currentDayRows: readonly TopicSelectionRow[],
+  recentRows: readonly TopicSelectionRow[],
+): { counts: Record<TopicCategory, number>; recent: string[] } {
+  const counts: Record<TopicCategory, number> = {
+    livelihood: 0,
+    relationship: 0,
+    'public-life': 0,
+  };
+  for (const topic of currentDayRows) counts[topic.category] += 1;
+  return {
+    counts,
+    recent: recentRows.slice(0, 3).map((topic) => topic.detail),
+  };
+}
+
+export const CONVERSATION_TOPIC_LABELS: Record<WorldLocale, Record<TopicDetail, string>> = {
+  'zh-CN': {
+    work: '工作',
+    order: '订单',
+    income: '收入',
+    shopping: '采购',
+    meal: '饮食',
+    clothing: '衣物',
+    home: '家务',
+    rest: '休息',
+    health: '健康',
+    friendship: '友情',
+    care: '照护',
+    date: '约会',
+    misunderstanding: '误会',
+    cooperation: '合作',
+    'neighbor-help': '邻里互助',
+    market: '集市',
+    class: '课程',
+    festival: '节庆',
+    institution: '机构服务',
+    'local-news': '地方消息',
+    safety: '公共安全',
+  },
+  en: {
+    work: 'Work',
+    order: 'Orders',
+    income: 'Income',
+    shopping: 'Shopping',
+    meal: 'Food',
+    clothing: 'Clothing',
+    home: 'Housework',
+    rest: 'Rest',
+    health: 'Health',
+    friendship: 'Friendship',
+    care: 'Care',
+    date: 'Dating',
+    misunderstanding: 'Misunderstandings',
+    cooperation: 'Cooperation',
+    'neighbor-help': 'Neighborly help',
+    market: 'Market',
+    class: 'Classes',
+    festival: 'Festivals',
+    institution: 'Public services',
+    'local-news': 'Local news',
+    safety: 'Public safety',
+  },
+};
+
+function conversationTopicLabel(detail: string, locale: WorldLocale): string {
+  const labels = CONVERSATION_TOPIC_LABELS[locale];
+  return Object.prototype.hasOwnProperty.call(labels, detail)
+    ? labels[detail as TopicDetail]
+    : locale === 'en'
+      ? 'Daily life'
+      : '日常近况';
+}
+
+export function conversationPromptRules(topic: { detail: string }, locale: WorldLocale): string[] {
+  const label = conversationTopicLabel(topic.detail, locale);
+  if (locale === 'en') {
+    return [
+      `Daily-life topic for this conversation: ${label}.`,
+      'Speak in natural English and advance only one idea per turn.',
+      'Keep ordinary replies to 10–30 words; openings to 8–24 words; farewells to 6–18 words.',
+      'Do not use parenthetical stage directions or lengthy descriptions of actions, surroundings, or inner thoughts.',
+      'Do not initiate anomalies, mysteries, investigations, tower mechanisms, or ocean topics.',
+    ];
+  }
+  return [
+    `本轮日常话题：${label}。`,
+    '用自然的简体中文交谈，每轮只推进一个意思。',
+    '普通回复控制在 20–60 个中文字符；开场 15–45 字；告别 10–35 字。',
+    '不要使用括号舞台说明，不要长篇描写动作、环境或内心。',
+    '不要发起异变、谜团、调查、灯塔机关或海洋话题。',
+  ];
+}
+
+export function observerSeaCorrectionInstruction(locale: WorldLocale): string {
+  if (locale === 'en') {
+    return 'The observer asked about the ocean setting. First say “There is no sea in town; this tower is only a landmark.” Then respond with one short question.';
+  }
+  return '观察者问到了海洋设定。先说“镇上没有海，这座塔只是地标。”，再用一句短问句回应。';
+}
 
 const TOPIC_CATEGORIES = Object.keys(TOPIC_TARGETS) as TopicCategory[];
 
@@ -118,36 +226,12 @@ const REPLY_LIMITS: Record<ReplyContext['kind'], number> = {
   leave: 35,
 };
 
-const TOPIC_LABELS: Record<TopicDetail, string> = {
-  work: '手头工作',
-  order: '订单进展',
-  income: '收入安排',
-  shopping: '采买计划',
-  meal: '今日饭菜',
-  clothing: '衣物添置',
-  home: '居家琐事',
-  rest: '休息安排',
-  health: '身体近况',
-  friendship: '朋友近况',
-  care: '彼此照应',
-  date: '约会安排',
-  misunderstanding: '误会化解',
-  cooperation: '合作进展',
-  'neighbor-help': '邻里帮忙',
-  market: '集市见闻',
-  class: '课堂学习',
-  festival: '节庆准备',
-  institution: '镇上机构',
-  'local-news': '镇上消息',
-  safety: '日常安全',
-};
-
 function topicFallback(
   topic: TopicDetail,
   kind: ReplyContext['kind'],
   reason: 'empty' | 'legacy-story',
 ): string {
-  const label = TOPIC_LABELS[topic];
+  const label = CONVERSATION_TOPIC_LABELS['zh-CN'][topic];
   if (reason === 'empty') {
     if (kind === 'start') return `今天想聊聊${label}，你最近怎么样？`;
     if (kind === 'continue') return `说说${label}吧，你最近有什么新鲜事？`;
