@@ -9,7 +9,7 @@ type Reason = 'world-correction' | 'empty' | 'legacy-story' | 'too-long';
 
 const agentOperations = agentOperationsModule as unknown as {
   generateValidatedResidentMessage?: (
-    args: { kind: 'start' | 'continue' | 'leave' },
+    args: { kind: 'start' | 'continue' | 'leave'; locale: 'zh-CN' | 'en' },
     dependencies: {
       generate: () => Promise<string>;
       loadPolicyContext: () => Promise<{ topic: 'work'; observerAskedAboutSea: boolean }>;
@@ -98,7 +98,7 @@ describe('final resident send boundary', () => {
       let generations = 0;
 
       await agentOperations.generateValidatedResidentMessage(
-        { kind: 'continue' },
+        { kind: 'continue', locale: 'zh-CN' },
         {
           generate: async () => {
             generations += 1;
@@ -127,7 +127,7 @@ describe('final resident send boundary', () => {
     let generations = 0;
 
     await agentOperations.generateValidatedResidentMessage(
-      { kind: 'continue' },
+      { kind: 'continue', locale: 'zh-CN' },
       {
         generate: async () => {
           generations += 1;
@@ -157,7 +157,7 @@ describe('final resident send boundary', () => {
 
     await expect(
       agentOperations.generateValidatedResidentMessage(
-        { kind: 'continue' },
+        { kind: 'continue', locale: 'zh-CN' },
         {
           generate: async () => {
             calls.push('generate');
@@ -210,6 +210,70 @@ describe('final resident send boundary', () => {
       }),
     ).rejects.toThrow('memory failed');
     expect(calls).toEqual(['remember', 'release']);
+  });
+
+  test.each([
+    [
+      'world correction',
+      'continue',
+      'The sea was bright last night.',
+      true,
+      'There is no sea here; the tower is a landmark. What now?',
+      'world-correction',
+    ],
+    [
+      'empty',
+      'continue',
+      '',
+      false,
+      "Let's talk about Work. What's new with you?",
+      'empty',
+    ],
+    [
+      'archived memory',
+      'continue',
+      'I won the million golden shells prize.',
+      false,
+      "Let's skip rumors and discuss Work.",
+      'legacy-story',
+    ],
+    [
+      'natural trim',
+      'leave',
+      'Today I need to sort orders and check every shelf and update the account book '.repeat(3),
+      false,
+      'Today I need to sort orders and ch.',
+      'too-long',
+    ],
+  ] as const)(
+    'uses the English %s fallback on the final send guard path',
+    async (_name, kind, output, observerAskedAboutSea, expected, reason) => {
+      expect(agentOperations.generateValidatedResidentMessage).toBeDefined();
+      if (!agentOperations.generateValidatedResidentMessage) return;
+      const sent: string[] = [];
+      const recorded: Reason[] = [];
+
+      await agentOperations.generateValidatedResidentMessage(
+        { kind, locale: 'en' },
+        {
+          generate: async () => output,
+          loadPolicyContext: async () => ({ topic: 'work', observerAskedAboutSea }),
+          send: async (text) => void sent.push(text),
+          recordRejection: async (value) => void recorded.push(value),
+        },
+      );
+
+      expect(sent).toEqual([expected]);
+      expect(recorded).toEqual([reason]);
+    },
+  );
+
+  test('threads configured world locale into the final resident send guard', () => {
+    const source = readFileSync('convex/aiTown/agentOperations.ts', 'utf8');
+
+    expect(source).toMatch(
+      /generateValidatedResidentMessage\(\s*\{\s*kind:\s*args\.type,\s*locale:\s*getWorldLocale\(\)\s*\}/u,
+    );
   });
 
   test('nonlocal memory preflight performs zero completion and embedding work and still releases', async () => {

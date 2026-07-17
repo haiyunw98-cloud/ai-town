@@ -208,6 +208,54 @@ describe('legacy story isolation', () => {
 });
 
 describe('validateResidentReply', () => {
+  test.each([
+    ['zh-CN', '我赢得了百万金贝大奖。'],
+    ['zh-CN', '我们聊起海洋里的新异变。'],
+    ['en', 'I won the million golden shells prize.'],
+    ['en', 'We discussed an ocean anomaly.'],
+  ] as const)('rejects forbidden autonomous memory at the final boundary in %s', (locale, raw) => {
+    const result = validateResidentReply(raw, {
+      kind: 'continue',
+      topic: 'work',
+      observerAskedAboutSea: false,
+      locale,
+    });
+
+    expect(result).toMatchObject({ accepted: false, reason: 'legacy-story' });
+    expect(result.text).not.toBe(raw);
+  });
+
+  test.each([
+    ['zh-CN', '我在运河边帮邻居搬货。'],
+    ['en', 'I helped a neighbor by the canal.'],
+  ] as const)('preserves valid inland daily talk in %s', (locale, raw) => {
+    expect(
+      validateResidentReply(raw, {
+        kind: 'continue',
+        topic: 'neighbor-help',
+        observerAskedAboutSea: false,
+        locale,
+      }),
+    ).toEqual({ accepted: true, text: raw });
+  });
+
+  test('uses English punctuation when naturally trimming an English reply', () => {
+    const result = validateResidentReply(
+      'Today I need to sort orders and check every shelf and update the account book '.repeat(3),
+      {
+        kind: 'leave',
+        topic: 'work',
+        observerAskedAboutSea: false,
+        locale: 'en',
+      },
+    );
+
+    expect(result).toMatchObject({ accepted: false, reason: 'too-long' });
+    expect(result.text).toMatch(/\.$/u);
+    expect(result.text).not.toContain('。');
+    expect(length(result.text)).toBeLessThanOrEqual(35);
+  });
+
   test('always corrects an observer sea question with the exact prefix and a short question', () => {
     const result = validateResidentReply('海上昨晚确实有灯光。', {
       kind: 'continue',

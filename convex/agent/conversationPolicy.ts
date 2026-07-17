@@ -254,6 +254,7 @@ export type ReplyContext = {
   kind: 'start' | 'continue' | 'leave';
   topic: TopicDetail;
   observerAskedAboutSea: boolean;
+  locale?: WorldLocale;
 };
 
 export type ReplyRejectionReason = 'world-correction' | 'empty' | 'legacy-story' | 'too-long';
@@ -272,8 +273,19 @@ function topicFallback(
   topic: TopicDetail,
   kind: ReplyContext['kind'],
   reason: 'empty' | 'legacy-story',
+  locale: WorldLocale,
 ): string {
-  const label = CONVERSATION_TOPIC_LABELS['zh-CN'][topic];
+  const label = CONVERSATION_TOPIC_LABELS[locale][topic];
+  if (locale === 'en') {
+    if (reason === 'empty') {
+      if (kind === 'start') return `Let's discuss ${label}. How are you?`;
+      if (kind === 'continue') return `Let's talk about ${label}. What's new with you?`;
+      return `More ${label} another day.`;
+    }
+    if (kind === 'start') return `Skip rumors; let's discuss ${label}.`;
+    if (kind === 'continue') return `Let's skip rumors and discuss ${label}.`;
+    return `No rumors; ${label} later.`;
+  }
   if (reason === 'empty') {
     if (kind === 'start') return `今天想聊聊${label}，你最近怎么样？`;
     if (kind === 'continue') return `说说${label}吧，你最近有什么新鲜事？`;
@@ -474,7 +486,7 @@ function firstCompleteSentence(value: string): string | undefined {
   return undefined;
 }
 
-function trimNaturally(value: string, limit: number): string {
+function trimNaturally(value: string, limit: number, locale: WorldLocale): string {
   const contentLimit = Math.max(0, limit - 1);
   let used = 0;
   let shortened = '';
@@ -488,14 +500,19 @@ function trimNaturally(value: string, limit: number): string {
   if (/[。！？.!?]$/u.test(shortened)) {
     return shortened;
   }
-  return shortened ? `${shortened}。` : '改天再聊。';
+  if (shortened) return `${shortened}${locale === 'en' ? '.' : '。'}`;
+  return locale === 'en' ? "Let's talk another day." : '改天再聊。';
 }
 
 export function validateResidentReply(raw: string, context: ReplyContext): ReplyValidation {
+  const locale = context.locale ?? 'zh-CN';
   if (context.observerAskedAboutSea) {
     return {
       accepted: false,
-      text: '镇上没有海，这座塔只是地标。你今天想聊聊镇上的什么？',
+      text:
+        locale === 'en'
+          ? 'There is no sea here; the tower is a landmark. What now?'
+          : '镇上没有海，这座塔只是地标。你今天想聊聊镇上的什么？',
       reason: 'world-correction',
     };
   }
@@ -504,14 +521,14 @@ export function validateResidentReply(raw: string, context: ReplyContext): Reply
   if (!sanitized || !hasMeaningfulContent(sanitized)) {
     return {
       accepted: false,
-      text: topicFallback(context.topic, context.kind, 'empty'),
+      text: topicFallback(context.topic, context.kind, 'empty', locale),
       reason: 'empty',
     };
   }
-  if (containsLegacyStory(sanitized)) {
+  if (containsForbiddenAutonomousMemory(sanitized)) {
     return {
       accepted: false,
-      text: topicFallback(context.topic, context.kind, 'legacy-story'),
+      text: topicFallback(context.topic, context.kind, 'legacy-story', locale),
       reason: 'legacy-story',
     };
   }
@@ -525,7 +542,7 @@ export function validateResidentReply(raw: string, context: ReplyContext): Reply
   const sentence = firstCompleteSentence(truncationSource) ?? truncationSource;
   return {
     accepted: false,
-    text: unicodeLength(sentence) <= limit ? sentence : trimNaturally(sentence, limit),
+    text: unicodeLength(sentence) <= limit ? sentence : trimNaturally(sentence, limit, locale),
     reason: 'too-long',
   };
 }

@@ -28,9 +28,10 @@ import {
   ReplyRejectionReason,
   validateResidentReply,
 } from '../agent/conversationPolicy';
+import { getWorldLocale } from '../util/worldLocale';
 
 export async function generateValidatedResidentMessage(
-  args: { kind: ReplyContext['kind'] },
+  args: { kind: ReplyContext['kind']; locale: NonNullable<ReplyContext['locale']> },
   dependencies: {
     generate: () => Promise<string>;
     loadPolicyContext: () => Promise<Pick<ReplyContext, 'topic' | 'observerAskedAboutSea'>>;
@@ -47,7 +48,11 @@ export async function generateValidatedResidentMessage(
     dependencies.reportGenerationUnavailable?.();
   }
   const policyContext = await dependencies.loadPolicyContext();
-  const validation = validateResidentReply(raw, { kind: args.kind, ...policyContext });
+  const validation = validateResidentReply(raw, {
+    kind: args.kind,
+    locale: args.locale,
+    ...policyContext,
+  });
   await dependencies.send(validation.text);
   if (!validation.accepted) {
     try {
@@ -224,7 +229,7 @@ export const agentGenerateMessage = internalAction({
         assertNever(args.type);
     }
     await generateValidatedResidentMessage(
-      { kind: args.type },
+      { kind: args.type, locale: getWorldLocale() },
       {
         generate: () =>
           completionFn(
