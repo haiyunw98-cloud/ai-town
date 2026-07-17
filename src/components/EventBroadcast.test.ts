@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { jest } from '@jest/globals';
-import { groupConversationMessages, summarizeConversation } from '../../convex/events';
+import {
+  groupConversationMessages,
+  resolveObserverDayKey,
+  summarizeConversation,
+} from '../../convex/events';
 import {
   buildDailyReport,
   buildBroadcastView,
@@ -53,6 +57,7 @@ describe('event broadcast view model', () => {
     expect(eventsModule).toHaveProperty('collectHumanPlayerIds');
     expect(eventsModule).toHaveProperty('summarizeConversation');
     expect(eventsModule).toHaveProperty('groupConversationMessages');
+    expect(eventsModule).toHaveProperty('resolveObserverDayKey');
     const isObserverIntervention = eventsModule.isObserverIntervention as (
       humanPlayerIds: ReadonlySet<string>,
       authorId: string,
@@ -164,6 +169,15 @@ describe('event broadcast view model', () => {
     ]);
   });
 
+  test('accepts only the actual current Shanghai day as an observer presentation key', () => {
+    const now = Date.parse('2026-07-15T16:30:00Z');
+
+    expect(resolveObserverDayKey(undefined, now)).toBe('2026-07-16');
+    expect(resolveObserverDayKey('2026-07-16', now)).toBe('2026-07-16');
+    expect(resolveObserverDayKey('2026-07-15', now)).toBe('2026-07-16');
+    expect(resolveObserverDayKey('not-a-day', now)).toBe('2026-07-16');
+  });
+
   test('does not resurrect legacy mystery framing in the live observer summary', () => {
     const summary = summarizeConversation(['顾潮', '白露'], [
       '旧记录提到灯火装置与河道线索。',
@@ -178,6 +192,23 @@ describe('event broadcast view model', () => {
   test('shows an honest empty state when only legacy content exists', () => {
     expect(summarizeConversation(['顾潮'], ['灯塔异常闪光。']))
       .toBe('暂无新的日常记录');
+  });
+
+  test.each([
+    '“灯塔异常闪光”',
+    '"灯塔异常闪光"',
+    '“……”',
+    '""',
+    '（沉默）“”',
+  ])('treats quoted forbidden or silence residue as an empty daily summary: %s', (message) => {
+    expect(summarizeConversation(['顾潮'], [message])).toBe('暂无新的日常记录');
+  });
+
+  test('preserves meaningful quoted ordinary speech', () => {
+    const summary = summarizeConversation(['白露'], ['“今天药庐配药。”']);
+
+    expect(summary).toContain('今天药庐配药');
+    expect(summary).not.toBe('暂无新的日常记录');
   });
 
   test('filters marine and completed-event archive content from the live summary', () => {
@@ -234,6 +265,29 @@ describe('event broadcast view model', () => {
     expect(summary).not.toMatch(/旧记录|灯火装置/u);
   });
 
+  test('keeps a daily prefix before a legacy clause without leaking the legacy text', () => {
+    const summary = summarizeConversation(
+      ['苏萤'],
+      ['今天完成送货后聊起旧记录中的灯火装置。'],
+    );
+
+    expect(summary).toContain('今天完成送货');
+    expect(summary).not.toMatch(/旧记录|灯火装置/u);
+  });
+
+  test('preserves daily facts on both sides of legacy clauses', () => {
+    const summary = summarizeConversation(
+      ['苏萤'],
+      [
+        '今天完成送货后聊起旧记录中的灯火装置。',
+        '旧记录说河道线索但今天也核对了账目。',
+      ],
+    );
+
+    expect(summary).toMatch(/送货.*账目/u);
+    expect(summary).not.toMatch(/旧记录|灯火装置|河道线索/u);
+  });
+
   test('sanitizes nested mixed-width and unmatched stage-direction delimiters', () => {
     const summary = summarizeConversation(
       ['白露'],
@@ -267,6 +321,24 @@ describe('event broadcast view model', () => {
       expect(graphemes).toHaveLength(80);
       expect(graphemes.slice(2).every((value) => value === cluster)).toBe(true);
       expect(summary.endsWith('…')).toBe(true);
+    },
+  );
+
+  test('keeps an ordinary current treasure contest as public life', () => {
+    const summary = summarizeConversation(
+      ['沈砚'],
+      ['今天书院举行寻宝比赛并供应点心。'],
+    );
+
+    expect(summary).toContain('今天书院举行寻宝比赛并供应点心');
+    expect(summary).toContain('饮食、公共生活');
+  });
+
+  test.each(['100万金贝', '1,000,000枚金贝'])(
+    'filters the specific old million-gold archive variant %s',
+    (prize) => {
+      expect(summarizeConversation(['顾潮'], [`顾潮领取${prize}，往届活动结束。`]))
+        .toBe('暂无新的日常记录');
     },
   );
 
@@ -1057,6 +1129,24 @@ describe('event broadcast view model', () => {
 
     expect(source).toContain('<p className="event-empty">暂无新的日常记录</p>');
     expect(source).not.toContain('新的故事线形成后会出现在这里');
+  });
+
+  test('keys the observer query by the ticking Shanghai day without exposing old days', () => {
+    const componentSource = readFileSync(new URL('./EventBroadcast.tsx', import.meta.url), 'utf8');
+    const eventsSource = readFileSync(new URL('../../convex/events.ts', import.meta.url), 'utf8');
+
+    expect(componentSource.indexOf('const [now, setNow] = useState(Date.now());'))
+      .toBeLessThan(componentSource.indexOf('useQuery(api.events.observerSnapshot'));
+    expect(componentSource).toContain('dayKey: shanghaiDayKey(now)');
+    expect(eventsSource).toContain('dayKey: v.optional(v.string())');
+    expect(eventsSource).toContain('resolveObserverDayKey(args.dayKey');
+  });
+
+  test('keeps generic text helpers neutral and observer filtering out of agent policy', () => {
+    const source = readFileSync(new URL('../../convex/events.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toMatch(/from ['"]\.\/agent\/conversationPolicy['"]/u);
+    expect(source).toContain("from './util/conversationText'");
   });
 
   test('offers separate factual and social report exports with a local fallback flow', () => {

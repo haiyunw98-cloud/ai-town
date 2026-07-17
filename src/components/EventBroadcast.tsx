@@ -8,6 +8,7 @@ import {
   buildBroadcastView,
   buildCompletedArchiveView,
   buildTownStory,
+  shanghaiDayKey,
   type BroadcastSnapshot,
 } from './eventBroadcastView';
 import {
@@ -25,11 +26,14 @@ export default function EventBroadcast({
   onSelectResident?: (residentId: GameId<'players'>) => void;
 }) {
   const { locale, t } = useI18n();
-  const snapshot = useQuery(api.events.observerSnapshot, { worldId }) as
+  const [now, setNow] = useState(Date.now());
+  const snapshot = useQuery(api.events.observerSnapshot, {
+    worldId,
+    dayKey: shanghaiDayKey(now),
+  }) as
     | BroadcastSnapshot
     | undefined;
   const generateSocialObservation = useAction(api.socialObservations.generate);
-  const [now, setNow] = useState(Date.now());
   const socialReportStore = getSocialReportExportStore(worldId);
   const socialReportPending = useSyncExternalStore(
     socialReportStore.subscribe,

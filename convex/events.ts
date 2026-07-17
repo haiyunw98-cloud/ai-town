@@ -16,12 +16,11 @@ import { requestEventDecision } from './events/model';
 import { advanceEvent, createInitialEvent } from './events/stateMachine';
 import { EventPhase, TownEventState } from './events/types';
 import {
-  containsArchivedEventMemory,
-  containsLegacyStory,
+  hasMeaningfulConversationText,
   sanitizeConversationText,
   segmentConversationGraphemes,
   splitConversationClauses,
-} from './agent/conversationPolicy';
+} from './util/conversationText';
 
 const EVENT_NAME = '灯塔镇百万金贝寻宝赛';
 
@@ -88,7 +87,7 @@ export const advanceActiveEvents = internalMutation({
 });
 
 export const observerSnapshot = query({
-  args: { worldId: v.optional(v.id('worlds')) },
+  args: { worldId: v.optional(v.id('worlds')), dayKey: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const worldStatus = args.worldId
       ? undefined
@@ -147,7 +146,13 @@ export const observerSnapshot = query({
       createdAt: message._creationTime,
       observerIntervention: isObserverIntervention(humanPlayerIds, message.author),
     }));
-    const conversations = groupConversationMessages(messages, names, world?.conversations ?? [], Date.now());
+    const observerNow = Date.now();
+    const observerDayKey = resolveObserverDayKey(args.dayKey, observerNow);
+    const conversations = groupConversationMessages(messages, names,
+      world?.conversations ?? [],
+      observerNow,
+      observerDayKey,
+    );
     const residentActivity = buildResidentActivity(world?.players ?? [], world?.conversations ?? [], names);
     const event = await ctx.db
       .query('townEvents')
@@ -216,9 +221,11 @@ export function groupConversationMessages(
   names: Map<string, string>,
   liveConversations: Array<{ id: string; participants: Array<{ playerId: string }> }>,
   now = Date.now(),
+  requestedDayKey?: string,
 ) {
+  const dayKey = resolveObserverDayKey(requestedDayKey, now);
   const currentDayMessages = messages.filter((message) =>
-    shanghaiDayKey(message._creationTime) === shanghaiDayKey(now),
+    shanghaiDayKey(message._creationTime) === dayKey,
   );
   const grouped = new Map<string, typeof messages>();
   for (const message of currentDayMessages) {
@@ -259,7 +266,7 @@ export function summarizeConversation(participantNames: string[], messages: stri
   const dailySegments = messages.flatMap((message) =>
     splitConversationClauses(sanitizeConversationText(message))
       .flatMap(removeLegacyObserverContent)
-      .filter((segment) => segment.length > 0),
+      .filter(hasMeaningfulConversationText),
   );
   if (dailySegments.length === 0) return '暂无新的日常记录';
 
@@ -284,26 +291,66 @@ export function summarizeConversation(participantNames: string[], messages: stri
     : `${residents}聊了今天的日常：${fact}`;
 }
 
-const observerLegacyContext = /旧(?:记录|档案|赛事)|历史(?:记录|档案)|往届|异变|谜团|谜题|失踪|河道线索|花木线索|机关线索|灯塔线索|最新线索|关键线索|追查(?:河道|灯塔|机关|花木)/u;
-const archivedMillionGold = /(?:一)?百万枚金贝/u;
+const observerLegacyPatterns = [
+  /海面|海潮|潮汐|观潮|航标|海风|海浪|夜航|失落航路|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮|灯塔导航/u,
+  /\bocean(?:ic)?[\s/-]+(?:tides?|beacons?|navigation|navigational|waves?|breeze|surface)\b/iu,
+  /\bsea[\s/-]+(?:beacons?|navigation|navigational|voyage|route|waves?|breeze)\b/iu,
+  /\blighthouse[\s/-]+(?:myster(?:y|ies)|navigation|navigational)\b/iu,
+  /旧(?:记录|档案|赛事)|历史(?:记录|档案)|往届|异变|谜团|谜题|失踪|河道线索|花木线索|机关线索|灯塔线索|最新线索|关键线索|追查(?:河道|灯塔|机关|花木)/u,
+  /寻宝(?:赛|比赛|竞赛)(?:已经|已)?结束/u,
+  /(?:一?百万|100万|1(?:[,，]000){2})(?:枚)?金贝/u,
+  /\bmillion[\s-]+(?:gold(?:en)?[\s-]+)?shells?\b/iu,
+] as const;
 const dailyTransition = /今天|今日|现在|随后|之后|接着|然后/u;
+const dailyFactMarker = /今天|今日|现在|随后|之后|接着|然后|工作|上课|备课|修理|送货|坐诊|买|卖|订单|工资|采购|账目|生意|吃|饭|茶|点心|粥|面|照顾|看病|休息|健康|朋友|约会|关心|误会|合作|邻里|集市|书院|药庐|茶庄|镇公所|食肆/u;
+
+function firstLegacyObserverMatch(text: string) {
+  return observerLegacyPatterns
+    .flatMap((pattern) => {
+      const match = text.match(pattern);
+      return match?.index === undefined ? [] : [{ index: match.index, text: match[0] }];
+    })
+    .sort((left, right) => left.index - right.index)[0];
+}
 
 function isLegacyObserverContent(text: string) {
-  return containsLegacyStory(text)
-    || containsArchivedEventMemory(text)
-    || archivedMillionGold.test(text)
-    || observerLegacyContext.test(text);
+  return firstLegacyObserverMatch(text) !== undefined;
 }
 
 function removeLegacyObserverContent(segment: string): string[] {
-  if (!isLegacyObserverContent(segment)) return [segment];
-  const transitionIndex = segment.search(dailyTransition);
-  if (transitionIndex <= 0) return [];
-  const dailySuffix = segment.slice(transitionIndex).trim();
-  return dailySuffix && !isLegacyObserverContent(dailySuffix) ? [dailySuffix] : [];
+  const legacy = firstLegacyObserverMatch(segment);
+  if (!legacy) return [segment];
+
+  const dailyParts: string[] = [];
+  const prefix = segment
+    .slice(0, legacy.index)
+    .replace(/(?:后)?(?:聊起|提到|说起|谈到|谈及)\s*$/u, '')
+    .trim();
+  if (
+    dailyFactMarker.test(prefix)
+    && hasMeaningfulConversationText(prefix)
+    && !isLegacyObserverContent(prefix)
+  ) {
+    dailyParts.push(prefix);
+  }
+
+  const afterLegacy = segment.slice(legacy.index + legacy.text.length);
+  const transitionIndex = afterLegacy.search(dailyTransition);
+  if (transitionIndex >= 0) {
+    const suffix = afterLegacy.slice(transitionIndex).trim();
+    if (hasMeaningfulConversationText(suffix) && !isLegacyObserverContent(suffix)) {
+      dailyParts.push(suffix);
+    }
+  }
+  return dailyParts;
 }
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+export function resolveObserverDayKey(requestedDayKey: string | undefined, now = Date.now()) {
+  const currentDayKey = shanghaiDayKey(now);
+  return requestedDayKey === currentDayKey ? requestedDayKey : currentDayKey;
+}
 
 function shanghaiDayKey(timestamp: number) {
   return new Date(timestamp + SHANGHAI_OFFSET_MS).toISOString().slice(0, 10);
