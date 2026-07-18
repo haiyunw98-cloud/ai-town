@@ -355,7 +355,11 @@ describe('social observation structured model boundary', () => {
   test.each([
     ['new person', '当日记录显示，新人物王五可能参与了互动。'],
     ['ordinary unseen person', '当日记录显示，王五可能参与了互动。'],
+    ['unlisted short alias', '当日记录显示，阿强可能参与互动。'],
+    ['unlisted literary name', '当日记录显示，林黛玉可能参与互动。'],
+    ['Latin alias', '当日记录显示，Xavier可能参与互动。'],
     ['new place', '现有记录显示，月光酒馆可能承担了机构活动。'],
+    ['unknown place without a configured suffix', '当日记录显示，望月台可能承担活动。'],
     ['new event', '当日记录显示，七夕庆典可能形成公共活动。'],
     ['psychological diagnosis', '当日记录显示，居民可能患有抑郁症。'],
     ['moral judgment', '当日记录显示，居民可能非常自私。'],
@@ -365,6 +369,10 @@ describe('social observation structured model boundary', () => {
     ['HTML', '当日记录显示，<script>互动集中</script>。'],
     ['control character', '当日记录显示，互动\u0000集中。'],
     ['single backticks', '当日记录显示，`互动`可能集中。'],
+    ['emphasis asterisks', '当日记录显示，*互动*可能集中。'],
+    ['underscore emphasis', '当日记录显示，_互动_可能集中。'],
+    ['hash marker', '当日记录显示，#互动可能集中。'],
+    ['HTML comment', '当日记录显示，<!--注入-->互动可能集中。'],
     ['pipe table', '当日记录显示，互动可能集中。|证据|结论|'],
     ['reference link', '当日记录显示，[互动][evidence]可能集中。'],
   ])('rejects unsafe claim content: %s', async (_name, claim) => {
@@ -395,7 +403,10 @@ describe('social observation structured model boundary', () => {
     expectExactFallback(result, '输出无效');
   });
 
-  test.each(['促使', '使得', '致使', '归因于', '带来', '推动']) (
+  test.each([
+    '令', '由于', '从而', '进而', '以致', '促成', '带动',
+    '使', '使得', '促使', '致使', '归因于', '导致', '造成', '引发', '带来', '推动',
+  ]) (
     'rejects causal bypass term %s in every analysis field',
     async (term) => {
       const output = {
@@ -407,15 +418,42 @@ describe('social observation structured model boundary', () => {
     },
   );
 
-  test('accepts known person, place and event tokens from visible evidence', async () => {
+  test.each([
+    '观察者消息令互动增加。',
+    '由于观察者消息，互动增加。',
+  ])('rejects the exact causal construction %s', async (claim) => {
+    const output = {
+      ...validModelResult,
+      findings: [{ ...validModelResult.findings[0], claim: `当日记录显示，${claim}` }, ...validModelResult.findings.slice(1)],
+    };
+    const result = await requestSocialObservation(evidenceJson(), completion(output));
+    expectExactFallback(result, '输出无效');
+  });
+
+  test('accepts generic cautious analysis fully segmentable from the safe lexicon', async () => {
+    const output = {
+      ...validModelResult,
+      findings: [{
+        ...validModelResult.findings[0],
+        claim: '当日记录显示，统计方法可能影响结果。',
+      }, ...validModelResult.findings.slice(1)],
+    };
+
+    await expect(requestSocialObservation(evidenceJson(), completion(output))).resolves.toEqual({
+      source: 'model',
+      ...output,
+    });
+  });
+
+  test('accepts known place and event tokens extracted from visible evidence', async () => {
     const known = structuredClone(bundle);
-    known.evidence[0].statement = '当日记录到王五在晨光书院参与七夕庆典。';
+    known.evidence[0].statement = '当日记录到晨光书院举办七夕庆典。';
     const output = {
       ...validModelResult,
       findings: [
         {
           ...validModelResult.findings[0],
-          claim: '当日记录显示，王五可能参与了互动。',
+          claim: '当日记录显示，居民在晨光书院可能参与活动。',
         },
         {
           ...validModelResult.findings[1],
@@ -434,6 +472,22 @@ describe('social observation structured model boundary', () => {
       source: 'model',
       ...output,
     });
+  });
+
+  test('does not admit a personal name merely because it appears in visible evidence', async () => {
+    const withPerson = structuredClone(bundle);
+    withPerson.evidence[0].statement = '当日记录到阿强在晨光书院参与活动。';
+    const output = {
+      ...validModelResult,
+      findings: [{
+        ...validModelResult.findings[0],
+        claim: '当日记录显示，阿强可能参与互动。',
+      }, ...validModelResult.findings.slice(1)],
+    };
+
+    const result = await requestSocialObservation(evidenceJson(withPerson), completion(output));
+
+    expectExactFallback(result, '输出无效', withPerson);
   });
 
   test.each([

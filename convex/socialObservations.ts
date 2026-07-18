@@ -50,13 +50,38 @@ const defaultDependencies: SocialObservationDependencies = {
   complete: (body) => localChatCompletionOnce(body),
 };
 
-const UNSAFE_FORMAT = /[\u0000-\u001f\u007f`|]|<\/?[a-z][^>]*>|(?:^|\n)\s{0,3}(?:#{1,6}\s|[-+*]\s|>\s|\d+[.)]\s)|!\[|\[[^\]]+\]\s*(?:\([^)]*\)|\[[^\]]*\])|\*\*|__|~~|https?:\/\//imu;
-const FORBIDDEN_ANALYSIS = /心理诊断|精神病|抑郁症|焦虑症|人格障碍|自闭症|偏执|道德败坏|恶意|邪恶|自私|懒惰|必然|一定会|已经证明|足以证明|证明了|证实了|毫无疑问|显然|肯定|注定|导致|造成|引发|促使|使得|致使|归因|带来|推动|决定了|源于|因为[^。；]{0,80}所以|因此/u;
+const UNSAFE_FORMAT = /[\u0000-\u001f\u007f`<>*_|#\[\]]/u;
+const LATIN_TEXT = /[A-Za-z]/u;
+const FORBIDDEN_ANALYSIS = /心理诊断|精神病|抑郁症|焦虑症|人格障碍|自闭症|偏执|道德败坏|恶意|邪恶|自私|懒惰|必然|一定会|已经证明|足以证明|证明了|证实了|毫无疑问|显然|肯定|注定|由于|从而|进而|以致|促成|带动|令|使得|促使|致使|归因|导致|造成|引发|带来|推动|使(?!用)|决定了|源于|因为[^。；]{0,80}所以|因此/u;
 const CAUTIOUS_CLAIM = /记录显示|现有记录|当前记录|当日记录|可见|可能|或许|尚需|倾向|迹象|在已记录范围内|从现有记录看|未必|暂可/u;
-const ENTITY_SUFFIX = /[\p{Script=Han}A-Za-z·]{2,12}(?:镇公所|机关坊|酒馆|茶馆|会馆|广场|书院|药庐|集市|市集|商店|食肆|卦馆|客栈|饭馆|餐馆|工坊|作坊|学院|学校|医院|诊所|公园|码头|港口|车站|村庄|小镇|庆典|节庆|节日|比赛|竞赛|大会|仪式|展览|演出|庙会|宴会|论坛)/gu;
-const INTRODUCED_ENTITY = /新(?:人物|居民|镇民|角色|地点|机构|事件)[：为名叫做\s“"'「『]*([^，。；、”"'」』\s]{2,16})/gu;
-const PERSON_CONTEXT = /([赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳唐罗薛伍余米贝姚孟顾尹江钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫房裘缪解应宗丁宣邓郁单杭洪包诸左石崔吉龚程嵇邢裴陆荣翁荀羊于惠甄曲封芮储靳段富巫乌焦巴牧山谷车侯全班秋仲伊宫宁仇栾甘厉祖武符刘景詹龙叶司黎白怀蒲鄂赖卓屠池乔谭劳申冉牛尚农温庄晏柴瞿阎连茹习艾容向古易慎廖庾居衡步都耿满弘匡国文寇广东欧沃利蔚越隆师巩聂晁冷辛简饶曾沙鞠丰关查红游权盖益桓][\p{Script=Han}]{1,2}?)(?:[，、]?\s*)(?=可能|或许|曾|已|正在|参与|担任|负责|前往|来到|进入|抵达|组织|开展|照护|交易|互动|出现|工作|活动|居住|任职|与|和|在)/gu;
-const GENERIC_PERSON_CONTEXT = /^(?:居民|市民|村民|镇民|.*(?:时段|记录|活动|机构|消息|变化|分布|范围|样本|互动|时间))$/u;
+const SAFE_ANALYSIS_TOKENS = new Set([
+  '当日记录显示', '现有记录显示', '当前记录显示', '从现有记录看',
+  '在已记录范围内', '当日可见记录', '当日可见', '可见记录', '当日记录',
+  '居民互动', '可见互动模式', '可见活动分布', '观察者消息',
+  '未覆盖时段', '其他时段', '其他互动', '使用次数', '活动持续时间',
+  '邻近变化', '原有活动安排', '机构活动', '机构使用分布', '互动分布',
+  '活动分布', '记录密度', '可见分布', '局部结构', '不同结构',
+  '跨日基线', '统计方法', '公共记录', '后续记录', '后续比较', '继续记录',
+  '未出现互动', '持续观察', '少数组合', '仅覆盖', '只覆盖',
+  '居民', '互动', '活动', '机构', '分析', '记录', '结果', '变化',
+  '可能', '或许', '尚需', '倾向', '迹象', '未必', '暂可',
+  '集中', '较集中', '较多', '承担', '参与', '存在', '代表', '来自',
+  '影响', '反映', '呈现', '出现', '比较', '覆盖', '没有', '不均',
+  '部分', '范围', '结构', '分布', '模式', '消息', '时段',
+  '可见', '现有', '当前', '当日', '后续', '其他', '原有', '公共',
+  '在', '中', '的', '与', '或', '但', '其', '了',
+]);
+const KNOWN_ENTITY_SUFFIXES = [
+  '镇公所', '机关坊', '酒馆', '茶馆', '会馆', '广场', '书院', '药庐',
+  '集市', '市集', '商店', '食肆', '卦馆', '客栈', '饭馆', '餐馆',
+  '工坊', '作坊', '学院', '学校', '医院', '诊所', '公园', '码头',
+  '港口', '车站', '村庄', '小镇', '庆典', '节庆', '节日', '比赛',
+  '竞赛', '大会', '仪式', '展览', '演出', '庙会', '宴会', '论坛', '台',
+] as const;
+const ENTITY_BOUNDARY_MARKERS = [
+  '记录到', '记录中', '记录显示', '显示', '位于', '前往', '进入', '抵达',
+  '来自', '举办', '参加', '使用', '到达', '在', '于', '到', '与', '和',
+] as const;
 
 type PromptEvidence = Pick<
   ObservationEvidence,
@@ -72,7 +97,7 @@ type PromptPayload = {
 export type SocialObservationPrompt = {
   prompt: string;
   visibleEvidenceIds: ReadonlySet<string>;
-  evidenceCorpus: string;
+  knownEntityTokens: ReadonlySet<string>;
 };
 
 export function buildSocialObservationPrompt(bundle: SocialEvidenceBundle): SocialObservationPrompt {
@@ -94,7 +119,7 @@ export function buildSocialObservationPrompt(bundle: SocialEvidenceBundle): Soci
   return {
     prompt: `${promptStart}\n${serialized}\n${promptEnd}`,
     visibleEvidenceIds: new Set(payload.evidence.map((entry) => entry.evidenceId)),
-    evidenceCorpus: promptPayloadCorpus(payload),
+    knownEntityTokens: extractKnownEntityTokens(payload.evidence),
   };
 }
 
@@ -143,7 +168,7 @@ export async function requestSocialObservation(
   const modelResult = parseModelResult(
     completion.content,
     prompt.visibleEvidenceIds,
-    prompt.evidenceCorpus,
+    prompt.knownEntityTokens,
   );
   if (!modelResult) return fallbackSocialObservation(bundle, '输出无效');
   return { source: 'model', ...modelResult };
@@ -165,7 +190,7 @@ function fallbackSocialObservation(
 function parseModelResult(
   content: string,
   visibleEvidenceIds: ReadonlySet<string>,
-  evidenceCorpus: string,
+  knownEntityTokens: ReadonlySet<string>,
 ) {
   if (countCharacters(content) > MAX_RESPONSE_JSON_CHARACTERS) return undefined;
   let value: unknown;
@@ -200,7 +225,7 @@ function parseModelResult(
   ];
   if (
     countCharacters(allText.join('')) > MAX_ANALYSIS_CHARACTERS
-    || allText.some((text) => !isSafeAnalysisText(text, evidenceCorpus))
+    || allText.some((text) => !isSafeAnalysisText(text, knownEntityTokens))
   ) return undefined;
   return {
     findings: findings.map(cloneFinding),
@@ -233,18 +258,17 @@ function parseFinding(
   };
 }
 
-function isSafeAnalysisText(value: string, sourceCorpus: string) {
-  if (!value.trim() || UNSAFE_FORMAT.test(value) || FORBIDDEN_ANALYSIS.test(value)) return false;
-  for (const match of value.matchAll(ENTITY_SUFFIX)) {
-    if (!sourceCorpus.includes(match[0])) return false;
-  }
-  for (const match of value.matchAll(INTRODUCED_ENTITY)) {
-    if (!sourceCorpus.includes(match[1])) return false;
-  }
-  for (const match of value.matchAll(PERSON_CONTEXT)) {
-    if (!GENERIC_PERSON_CONTEXT.test(match[1]) && !sourceCorpus.includes(match[1])) return false;
-  }
-  return true;
+function isSafeAnalysisText(value: string, knownEntityTokens: ReadonlySet<string>) {
+  if (
+    !value.trim()
+    || UNSAFE_FORMAT.test(value)
+    || LATIN_TEXT.test(value)
+    || FORBIDDEN_ANALYSIS.test(value)
+  ) return false;
+  const hanRuns = value.match(/\p{Script=Han}+/gu) ?? [];
+  if (hanRuns.length === 0) return false;
+  const tokens = [...SAFE_ANALYSIS_TOKENS, ...knownEntityTokens];
+  return hanRuns.every((run) => isSegmentableHanRun(run, tokens));
 }
 
 function parseEvidenceBundle(evidenceJson: string): SocialEvidenceBundle {
@@ -398,16 +422,63 @@ function escapePromptJson(value: string) {
     .replace(/>/gu, '\\u003e');
 }
 
-function promptPayloadCorpus(payload: PromptPayload) {
-  return [
-    ...payload.evidence.flatMap((entry) => [
-      entry.statement,
-      ...entry.sourceKeys,
-      ...entry.limitations,
-    ]),
-    ...payload.limitations,
-    ...payload.methodNotes,
-  ].join('\n');
+function extractKnownEntityTokens(evidence: readonly PromptEvidence[]) {
+  const tokens = new Set<string>();
+  for (const entry of evidence) {
+    for (const run of entry.statement.match(/\p{Script=Han}+/gu) ?? []) {
+      for (const suffix of KNOWN_ENTITY_SUFFIXES) {
+        let searchFrom = 0;
+        let suffixIndex = run.indexOf(suffix, searchFrom);
+        while (suffixIndex >= 0) {
+          let entityStart = 0;
+          for (const marker of ENTITY_BOUNDARY_MARKERS) {
+            const markerIndex = run.lastIndexOf(marker, suffixIndex);
+            const afterMarker = markerIndex + marker.length;
+            if (markerIndex >= 0 && afterMarker > entityStart && afterMarker <= suffixIndex) {
+              entityStart = afterMarker;
+            }
+          }
+          const token = run.slice(entityStart, suffixIndex + suffix.length);
+          const length = countCharacters(token);
+          if (length >= 2 && length <= 12) tokens.add(token);
+          searchFrom = suffixIndex + suffix.length;
+          suffixIndex = run.indexOf(suffix, searchFrom);
+        }
+      }
+    }
+  }
+  return tokens;
+}
+
+function isSegmentableHanRun(run: string, candidateTokens: readonly string[]) {
+  const characters = Array.from(run);
+  const tokensByFirstCharacter = new Map<string, string[][]>();
+  for (const token of candidateTokens) {
+    const tokenCharacters = Array.from(token);
+    const first = tokenCharacters[0];
+    if (!first || tokenCharacters.length > characters.length) continue;
+    const group = tokensByFirstCharacter.get(first) ?? [];
+    group.push(tokenCharacters);
+    tokensByFirstCharacter.set(first, group);
+  }
+  for (const group of tokensByFirstCharacter.values()) {
+    group.sort((left, right) => right.length - left.length);
+  }
+
+  const reachable = Array<boolean>(characters.length + 1).fill(false);
+  reachable[0] = true;
+  for (let index = 0; index < characters.length; index += 1) {
+    if (!reachable[index]) continue;
+    for (const token of tokensByFirstCharacter.get(characters[index]) ?? []) {
+      if (
+        index + token.length <= characters.length
+        && token.every((character, offset) => characters[index + offset] === character)
+      ) {
+        reachable[index + token.length] = true;
+      }
+    }
+  }
+  return reachable[characters.length];
 }
 
 function cloneFinding(finding: AnalysisFinding): AnalysisFinding {
