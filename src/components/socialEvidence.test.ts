@@ -538,6 +538,43 @@ describe('social evidence builder', () => {
   });
 
   test.each([
+    ['在晨雾集市摆摊卖鱼。', '晨雾集市'],
+    ['在听雨茶庄喝茶。', '听雨茶庄'],
+    ['在灯塔书院备课。', '灯塔书院'],
+    ['在旧水码头摆渡。', '旧水码头'],
+    ['在时和卦馆排节气日程。', '时和卦馆'],
+  ])('counts explicit present location with runtime action: %s', (text, landmark) => {
+    const institution = evidenceFor(fixtureBroadcastSnapshot({
+      dailyLifeEvents: [{
+        residentId: 'resident:a', displayName: '甲', kind: 'work', text,
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyMessages: [],
+      logs: [],
+    }), 'institution-use');
+
+    expect(institution.statement).toContain(`${landmark} 1 次`);
+  });
+
+  test.each(['但', '但是', '不过', '然而', '却'])(
+    'treats %s as an institution assertion boundary',
+    (boundary) => {
+      const institution = evidenceFor(fixtureBroadcastSnapshot({
+        dailyLifeEvents: [{
+          residentId: 'resident:a', displayName: '甲', kind: 'work',
+          text: `没有去晨雾集市${boundary}在听雨茶庄整理订单。`,
+          createdAt: Date.parse('2026-07-17T01:00:00Z'),
+        }],
+        dailyMessages: [],
+        logs: [],
+      }), 'institution-use');
+
+      expect(institution.statement).toContain('听雨茶庄 1 次');
+      expect(institution.statement).not.toMatch(/晨雾集市 [1-9]\d* 次/u);
+    },
+  );
+
+  test.each([
     '如果在听雨茶庄工作就好了。',
     '拒绝在听雨茶庄工作。',
     '他说“在听雨茶庄工作”。',
@@ -619,6 +656,9 @@ describe('social evidence builder', () => {
   test.each([
     '未合作。',
     '不交易。',
+    '无合作。',
+    '并无交易。',
+    '毫无分歧。',
     '绝非朋友。',
     '尚未交易。',
     '否认我们是朋友。',
@@ -632,6 +672,8 @@ describe('social evidence builder', () => {
     '例如“双方合作”。',
     '「我们是朋友」',
     '居民说我们是朋友。',
+    '唐果说我们是朋友。',
+    '沈砚表示双方合作。',
   ])('rejects non-asserted relationship signal: %s', (text) => {
     const relationship = evidenceFor(fixtureBroadcastSnapshot({
       conversations: [],
@@ -659,6 +701,31 @@ describe('social evidence builder', () => {
     expect(relationship.statement).toMatch(
       /友情 1 条.*亲密 1 条.*合作 1 条.*照护 1 条.*交易 1 条.*分歧 1 条/u,
     );
+  });
+
+  test('does not let a valid post-signal word negate the relationship assertion', () => {
+    const relationship = evidenceFor(fixtureBroadcastSnapshot({
+      conversations: [],
+      dailyMessages: [{ ...residentMessage(0, 'resident:a'), text: '我们合作得不错。' }],
+      dailyLifeEvents: [],
+      logs: [],
+    }), 'relationship-signal');
+
+    expect(relationship.statement).toMatch(/合作 1 条/u);
+  });
+
+  test('keeps a positive relationship assertion after an adversative boundary', () => {
+    const relationship = evidenceFor(fixtureBroadcastSnapshot({
+      conversations: [],
+      dailyMessages: [{
+        ...residentMessage(0, 'resident:a'),
+        text: '没有交易但合作得不错。',
+      }],
+      dailyLifeEvents: [],
+      logs: [],
+    }), 'relationship-signal');
+
+    expect(relationship.statement).toMatch(/合作 1 条.*交易 0 条/u);
   });
 
   test('reports distinct visible activity before and after observer intervention', () => {

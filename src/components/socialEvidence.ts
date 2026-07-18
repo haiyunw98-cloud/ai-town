@@ -84,7 +84,7 @@ const explicitSignalPatterns = {
   cooperation: /合作|协作|共同|一起|合力|配合/u,
   care: /照顾|照料|关心|看望|陪同|送药|换药|问诊|护理/u,
   trade: /交易|订单|购买|售出|买入|卖出|采购|付款|收款|结算|工资|账目/u,
-  dispute: /分歧|争执|争吵|冲突|反对|拒绝|误会/u,
+  dispute: /分歧|争执|争吵|冲突|反对|误会/u,
 } as const;
 
 type CoverageAssessment = {
@@ -234,8 +234,10 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const ASSERTION_BLOCKER = /不|未|没有|没|并非|绝非|尚未|从未|拒绝|否认|如果|假如|计划|打算|准备|明天|将要|想|希望|可能/u;
-const REPORTED_OR_EXAMPLE = /例如|比如|举例|例子|听说|据说|(?:他|她|他们|她们|居民|邻居|对方|有人)(?:说|称|表示|声称|提到)|报道称|消息称/u;
+const INSTITUTION_ASSERTION_BLOCKER = /不|未|没有|没|并非|绝非|尚未|从未|拒绝|否认|如果|假如|计划|打算|准备|明天|将要|想|希望|可能/u;
+const RELATIONSHIP_MODAL_BLOCKER = /如果|假如|计划|打算|准备|明天|将要|想|希望|可能/u;
+const RELATIONSHIP_NEGATING_PREFIX = /(?:并非|绝非|尚未|从未|并无|毫无|否认|拒绝|没有|未|不|没|无)[^。！？!?；;，,]{0,8}$/u;
+const REPORTED_OR_EXAMPLE = /例如|比如|举例|例子|听说|据说|[\p{Script=Han}]{2,8}(?:说|称|表示|声称|提到)|报道称|消息称/u;
 
 function stripQuotedText(value: string) {
   const openingToClosing: Record<string, string> = {
@@ -263,23 +265,47 @@ function stripQuotedText(value: string) {
   return result.trim();
 }
 
-function assertedClauses(value: string) {
+function candidateAssertionClauses(value: string) {
   return splitConversationClauses(normalizeText(value))
+    .flatMap((clause) => clause.split(/但是|不过|然而|但|却/u))
     .map(stripQuotedText)
-    .filter((clause) => clause.length > 0)
-    .filter((clause) => !ASSERTION_BLOCKER.test(clause) && !REPORTED_OR_EXAMPLE.test(clause));
+    .filter((clause) => clause.length > 0);
+}
+
+function assertedInstitutionClauses(value: string) {
+  return candidateAssertionClauses(value).filter((clause) =>
+    !INSTITUTION_ASSERTION_BLOCKER.test(clause) && !REPORTED_OR_EXAMPLE.test(clause),
+  );
+}
+
+function assertedRelationshipClauses(value: string) {
+  return candidateAssertionClauses(value).filter((clause) =>
+    !RELATIONSHIP_MODAL_BLOCKER.test(clause) && !REPORTED_OR_EXAMPLE.test(clause),
+  );
+}
+
+function hasAffirmedRelationshipSignal(clause: string, pattern: RegExp) {
+  const matcher = new RegExp(pattern.source, `${pattern.flags.replaceAll('g', '')}g`);
+  for (const match of clause.matchAll(matcher)) {
+    const signalStart = match.index ?? 0;
+    const localPrefix = clause.slice(Math.max(0, signalStart - 12), signalStart);
+    if (!RELATIONSHIP_NEGATING_PREFIX.test(localPrefix)) return true;
+  }
+  return false;
 }
 
 function isExplicitCompletedInstitutionUse(value: string, institutionName: string) {
   const name = escapeRegex(institutionName);
   const action = '工作|整理|营业|坐诊|上课|采购|购买|销售|卖货|用餐|吃饭|休息|拜访|探望|办理|修理|送货|换药|开会|学习';
   const movement = `(?:去(?:了)?|到(?:了)?|进入(?:了)?|抵达(?:了)?|来到(?:了)?|回到(?:了)?|走进(?:了)?)${name}`;
+  const presentLocation = `在${name}(?:$|[^。！？])`;
   const actionAtInstitution = `(?:在|于)${name}[^。！？]{0,40}(?:${action})`;
   const institutionAfterAction = `(?:${action})[^。！？]{0,40}(?:在|于)${name}(?:[^。！？]{0,12}(?:完成|进行))?`;
-  return assertedClauses(value).some((clause) =>
+  return assertedInstitutionClauses(value).some((clause) =>
     clause.includes(institutionName)
       && (
         new RegExp(movement, 'u').test(clause)
+        || new RegExp(presentLocation, 'u').test(clause)
         || new RegExp(actionAtInstitution, 'u').test(clause)
         || new RegExp(institutionAfterAction, 'u').test(clause)
       ),
@@ -511,9 +537,11 @@ function buildRelationshipDraft(
   const matchingResidents = new Set<string>();
   for (const record of records) {
     let matched = false;
-    const clauses = assertedClauses(record.source.text);
+    const clauses = assertedRelationshipClauses(record.source.text);
     for (const kind of Object.keys(explicitSignalPatterns) as Array<keyof typeof counts>) {
-      const explicitlyAffirmed = clauses.some((clause) => explicitSignalPatterns[kind].test(clause));
+      const explicitlyAffirmed = clauses.some((clause) =>
+        hasAffirmedRelationshipSignal(clause, explicitSignalPatterns[kind]),
+      );
       if (!explicitlyAffirmed) continue;
       counts[kind] += 1;
       matched = true;
