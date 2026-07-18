@@ -18,7 +18,7 @@ import {
 } from '../data/worlds/lighthouse-town/map';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
-import { internalMutation, type MutationCtx } from './_generated/server';
+import { internalMutation, internalQuery, type MutationCtx } from './_generated/server';
 import { MAX_MONEY, MAX_STOCK } from './townEconomyRules';
 import { settlePurchase, settleWork } from './townEconomyRules';
 import { distance } from './util/geometry';
@@ -27,6 +27,8 @@ const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
 // The final millisecond that still formats as a four-digit Shanghai calendar year.
 const MAX_SHANGHAI_TIMESTAMP = Date.parse('9999-12-31T15:59:59.999Z');
 const STARTING_INSTITUTION_CASH = 120;
+const DAILY_INSTITUTION_OPERATING_COST = 2;
+const DAILY_ECONOMY_WORLD_PAGE_SIZE = 32;
 const MAX_LEDGER_KEY_LENGTH = 160;
 const MAX_LEDGER_TEXT_LENGTH = 500;
 const CANONICAL_KEY = /^[a-z0-9][a-z0-9:._-]*$/u;
@@ -189,6 +191,216 @@ export async function initializeTownEconomy(
   };
 }
 
+export async function advanceDailyEconomy(
+  ctx: EconomyDbContext,
+  now = Date.now(),
+) {
+  assertDateTimestamp(now, 'daily economy timestamp');
+  const worldStatuses = await ctx.db.query('worldStatus').collect();
+  let advancedWorlds = 0;
+  let advancedInstitutions = 0;
+  for (const worldStatus of worldStatuses) {
+    if (worldStatus.status !== 'running') continue;
+    await initializeTownEconomy(ctx, worldStatus.worldId, now);
+    if (await ensureDailyEconomyAdvanced(ctx, worldStatus.worldId, now)) {
+      advancedWorlds += 1;
+      advancedInstitutions += institutions.length;
+    }
+  }
+  return { advancedWorlds, advancedInstitutions };
+}
+
+export async function dispatchDailyEconomyPage(
+  ctx: EconomyReconciliationContext,
+  args: { cursor: string | null; now: number },
+) {
+  assertDateTimestamp(args.now, 'daily economy timestamp');
+  const page = await ctx.db
+    .query('worldStatus')
+    .paginate({ cursor: args.cursor, numItems: DAILY_ECONOMY_WORLD_PAGE_SIZE });
+  let scheduledWorlds = 0;
+  for (const worldStatus of page.page) {
+    if (worldStatus.status !== 'running') continue;
+    await ctx.scheduler.runAfter(0, internal.townEconomy.advanceDailyEconomyForWorld, {
+      worldId: worldStatus.worldId,
+      now: args.now,
+    });
+    scheduledWorlds += 1;
+  }
+  if (!page.isDone) {
+    await ctx.scheduler.runAfter(0, internal.townEconomy.advanceDailyEconomyTick, {
+      cursor: page.continueCursor,
+      now: args.now,
+    });
+  }
+  return { scheduledWorlds, done: page.isDone };
+}
+
+export async function advanceDailyEconomyForWorldNow(
+  ctx: EconomyDbContext,
+  args: { worldId: Id<'worlds'>; now: number },
+) {
+  assertDateTimestamp(args.now, 'daily economy timestamp');
+  const worldStatus = await ctx.db
+    .query('worldStatus')
+    .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+    .unique();
+  if (!worldStatus || worldStatus.status !== 'running') {
+    return { status: 'world-not-running' as const, advancedInstitutions: 0 };
+  }
+  const requestedDayKey = shanghaiEconomyDayKey(args.now);
+  const latestMarker = await latestDailyEconomyMarker(ctx, args.worldId);
+  if (latestMarker && latestMarker.dayKey > requestedDayKey) {
+    return { status: 'stale' as const, advancedInstitutions: 0 };
+  }
+  await initializeTownEconomy(ctx, args.worldId, args.now);
+  const advanced = await ensureDailyEconomyAdvanced(ctx, args.worldId, args.now);
+  return {
+    status: advanced ? 'advanced' as const : 'already-advanced' as const,
+    advancedInstitutions: advanced ? institutions.length : 0,
+  };
+}
+
+export async function ensureDailyEconomyAdvanced(
+  ctx: EconomyDbContext,
+  worldId: Id<'worlds'>,
+  now: number,
+) {
+  assertDateTimestamp(now, 'daily economy timestamp');
+  const dayKey = shanghaiEconomyDayKey(now);
+  const marker = await ctx.db
+    .query('dailyEconomyDays')
+    .withIndex('worldDay', (q) => q.eq('worldId', worldId).eq('dayKey', dayKey))
+    .unique();
+  if (marker) return false;
+  const latestMarker = await latestDailyEconomyMarker(ctx, worldId);
+  if (latestMarker && latestMarker.dayKey > dayKey) return false;
+  const [accounts, institutionRows] = await Promise.all([
+    ctx.db
+      .query('residentEconomy')
+      .withIndex('world', (q) => q.eq('worldId', worldId))
+      .collect(),
+    ctx.db
+      .query('townInstitutions')
+      .withIndex('world', (q) => q.eq('worldId', worldId))
+      .collect(),
+  ]);
+  if (institutionRows.length !== institutions.length) {
+    throw new Error('Daily economy requires every configured institution');
+  }
+  for (const account of accounts) {
+    await ctx.db.patch(account._id, {
+      todayIncome: 0,
+      todayExpense: 0,
+      dayKey,
+      updatedAt: now,
+    });
+  }
+  for (const institution of institutionRows) {
+    const definition = institutionDefinition(institution.institutionId);
+    const stock = parseCounterJson(institution.stockJson);
+    const configuredStock = initialStock(definition);
+    const restocked: Record<string, number> = {};
+    let quantity = 0;
+    for (const goodId of definition.goods) {
+      const current = stock[goodId] ?? 0;
+      const cap = configuredStock[goodId] ?? 0;
+      const added = Math.max(0, cap - current);
+      if (added > 0) {
+        stock[goodId] = cap;
+        restocked[goodId] = added;
+        quantity += added;
+      }
+    }
+    assertBoundedSafeInteger(quantity, MAX_STOCK, `${definition.id}.dailyRestock`);
+    const operatingCost = Math.min(DAILY_INSTITUTION_OPERATING_COST, institution.cash);
+    assertBoundedSafeInteger(operatingCost, DAILY_INSTITUTION_OPERATING_COST, 'operating cost');
+    await ctx.db.patch(institution._id, {
+      cash: institution.cash - operatingCost,
+      stockJson: JSON.stringify(stock),
+      todayIncome: 0,
+      todayExpense: operatingCost,
+      visitorCount: 0,
+      dayKey,
+      updatedAt: now,
+    });
+    const item = JSON.stringify(restocked);
+    await appendEconomyLedger(ctx, {
+      worldId,
+      idempotencyKey: `daily:${dayKey}:restock:${definition.id}`,
+      dayKey,
+      institutionId: definition.id,
+      kind: 'restock',
+      amount: operatingCost,
+      item,
+      quantity,
+      sourceKey: `daily:${dayKey}:restock:${definition.id}`,
+      text: `${definition.name}实际支出 ${operatingCost} 金贝运营成本，按配置补充 ${quantity} 件商品库存。`,
+      createdAt: now,
+    });
+  }
+  await ctx.db.insert('dailyEconomyDays', { worldId, dayKey, advancedAt: now });
+  return true;
+}
+
+async function latestDailyEconomyMarker(
+  ctx: EconomyDbContext,
+  worldId: Id<'worlds'>,
+) {
+  return ctx.db
+    .query('dailyEconomyDays')
+    .withIndex('worldTime', (q) => q.eq('worldId', worldId))
+    .order('desc')
+    .first();
+}
+
+export const advanceDailyEconomyTick = internalMutation({
+  args: { cursor: v.optional(v.string()), now: v.optional(v.number()) },
+  handler: (ctx, args) => dispatchDailyEconomyPage(ctx, {
+    cursor: args.cursor ?? null,
+    now: args.now ?? Date.now(),
+  }),
+});
+
+export const advanceDailyEconomyForWorld = internalMutation({
+  args: { worldId: v.id('worlds'), now: v.number() },
+  handler: (ctx, args) => advanceDailyEconomyForWorldNow(ctx, args),
+});
+
+export const residentEconomyState = internalQuery({
+  args: { worldId: v.id('worlds'), residentId: v.string() },
+  handler: async (ctx, args) => {
+    const status = await ctx.db
+      .query('worldStatus')
+      .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+      .unique();
+    if (!status || status.status !== 'running') return null;
+    const account = await ctx.db
+      .query('residentEconomy')
+      .withIndex('resident', (q) =>
+        q.eq('worldId', args.worldId).eq('residentId', args.residentId),
+      )
+      .unique();
+    if (!account) return null;
+    const institutionRows = await ctx.db
+      .query('townInstitutions')
+      .withIndex('world', (q) => q.eq('worldId', args.worldId))
+      .collect();
+    return {
+      hunger: account.hunger,
+      energy: account.energy,
+      balance: account.balance,
+      institutions: institutionRows.map((institution) => ({
+        institutionId: institution.institutionId,
+        cash: institution.cash,
+        stock: parseCounterJson(institution.stockJson),
+        serviceCounters: parseCounterJson(institution.serviceCountersJson),
+        open: true,
+      })),
+    };
+  },
+});
+
 export async function reconcileTownEconomyAfterAgentCreation(
   ctx: EconomyReconciliationContext,
   args: { worldId: Id<'worlds'>; attempt: number; now?: number },
@@ -324,6 +536,7 @@ export async function settleActivity(
     .unique();
 
   await ensureActivityEconomyInitialized(ctx, args, now);
+  await ensureDailyEconomyAdvanced(ctx, args.worldId, now);
   const world = await ctx.db.get(args.worldId);
   if (!world) return { status: 'resident-not-active' as const };
   const player = world.players.find((candidate) => candidate.id === args.residentId);
@@ -415,9 +628,10 @@ export async function settleActivity(
       );
       return { status: 'rejected' as const, reason: 'counter-boundary-exceeded' as const };
     }
+    const needs = decayResidentNeeds(account);
     await ctx.db.patch(account._id, {
-      energy: Math.min(100, account.energy + 25),
-      hunger: Math.max(0, account.hunger - 1),
+      energy: Math.min(100, needs.energy + 25),
+      hunger: needs.hunger,
       todayIncome: residentIncome,
       todayExpense: residentExpense,
       dayKey,
@@ -492,10 +706,11 @@ export async function settleActivity(
       return { status: 'rejected' as const, reason: 'counter-boundary-exceeded' as const };
     }
     counters[item] = result.stock;
+    const needs = decayResidentNeeds(account);
     await ctx.db.patch(account._id, {
       balance: result.residentBalance,
-      hunger: Math.max(0, account.hunger - 2),
-      energy: Math.max(0, account.energy - 4),
+      hunger: needs.hunger,
+      energy: needs.energy,
       todayIncome: residentIncome + amount,
       todayExpense: residentExpense,
       dayKey,
@@ -575,10 +790,11 @@ export async function settleActivity(
     return { status: 'rejected' as const, reason: 'counter-boundary-exceeded' as const };
   }
   stock[good.id] = result.stock;
+  const needs = decayResidentNeeds(account);
   await ctx.db.patch(account._id, {
     balance: result.residentBalance,
-    hunger: Math.min(100, account.hunger + (good.id === 'meal' ? 25 : 12)),
-    energy: Math.max(0, account.energy - 1),
+    hunger: Math.min(100, needs.hunger + (good.id === 'meal' ? 25 : 12)),
+    energy: needs.energy,
     todayIncome: residentIncome,
     todayExpense: residentExpense + amount,
     dayKey,
@@ -923,6 +1139,13 @@ function parseCounterJson(json: string): Record<string, number> {
   return { ...parsed };
 }
 
+function decayResidentNeeds(account: { hunger: number; energy: number }) {
+  return {
+    hunger: Math.max(0, account.hunger - 1),
+    energy: Math.max(0, account.energy - 1),
+  };
+}
+
 export const initializeForWorld = internalMutation({
   args: { worldId: v.id('worlds') },
   handler: async (ctx, args) => initializeTownEconomy(ctx, args.worldId),
@@ -1201,7 +1424,13 @@ function validateLedgerEntryShape(entry: EconomyLedgerEntry) {
       throw new Error('compensationKind is invalid');
     }
   }
-  if (entry.quantity !== undefined) assertPositiveQuantity(entry.quantity, 'quantity');
+  if (entry.quantity !== undefined) {
+    if (runtimeKind === 'restock') {
+      assertBoundedSafeInteger(entry.quantity, MAX_STOCK, 'quantity');
+    } else {
+      assertPositiveQuantity(entry.quantity, 'quantity');
+    }
+  }
   const requireField = (field: string) => {
     if (runtime[field] === undefined) throw new Error(`${runtimeKind} ${field} is required`);
   };
@@ -1285,7 +1514,18 @@ async function validateLedgerContract(ctx: EconomyDbContext, entry: EconomyLedge
       return;
     case 'restock': {
       const institution = await requireInstitution(ctx, entry);
-      requireInstitutionGood(institution, entry.item, 'restock item');
+      if (!entry.item) throw new Error('restock item summary is required');
+      if (!entry.item.startsWith('{')) {
+        requireInstitutionGood(institution, entry.item, 'restock item');
+        return;
+      }
+      const summary = parseCounterJson(entry.item);
+      assertCounterRecord(summary, 'restock item summary');
+      for (const item of Object.keys(summary)) requireInstitutionGood(
+        institution, item, 'restock item',
+      );
+      const total = Object.values(summary).reduce((sum, value) => sum + value, 0);
+      if (total !== entry.quantity) throw new Error('restock quantity must match item summary');
       return;
     }
     case 'event-service': {

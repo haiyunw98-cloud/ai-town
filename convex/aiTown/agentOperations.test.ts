@@ -1,4 +1,8 @@
-import { nextActivitySettlementAttempt } from './agentOperations';
+import {
+  buildResidentActivityChoicePrompt,
+  chooseResidentActivityWithLocalModel,
+  nextActivitySettlementAttempt,
+} from './agentOperations';
 
 type RetryArgs = Parameters<typeof nextActivitySettlementAttempt>[1];
 
@@ -10,6 +14,52 @@ const args = {
 };
 
 describe('activity settlement retry policy', () => {
+  test('gives the local activity model needs and state without prescribing an action', () => {
+    const prompt = buildResidentActivityChoicePrompt('唐果', {
+      needs: ['food'],
+      criticalNeeds: [],
+      state: { hunger: 20, energy: 90, balance: 40 },
+      activities: [
+        { category: 'food', description: '吃一顿饭' },
+        { category: 'work', description: '整理茶叶' },
+        { category: 'social', description: '和邻居聊天' },
+      ],
+    });
+
+    expect(prompt).toContain('hunger=20');
+    expect(prompt).toContain('energy=90');
+    expect(prompt).toContain('balance=40');
+    expect(prompt).toContain('needs=food');
+    expect(prompt).toContain('[0] food');
+    expect(prompt).toContain('[1] work');
+    expect(prompt).toContain('[2] social');
+    expect(prompt).not.toMatch(/必须选择|只能选择|优先选择|固定选择/u);
+  });
+
+  test('performs zero local completion calls when the world paused before fetch', async () => {
+    let completionCalls = 0;
+    const selected = await chooseResidentActivityWithLocalModel('唐果', {
+      needs: ['food'],
+      criticalNeeds: [],
+      state: { hunger: 20, energy: 90, balance: 40 },
+      activities: [{
+        description: '吃饭', emoji: '🍚', duration: 1, category: 'food',
+        landmarkId: 'restaurant',
+        economicAction: {
+          kind: 'purchase', institutionId: 'restaurant', goodId: 'meal', quantity: 1,
+        },
+      }],
+    }, {
+      isWorldRunning: async () => false,
+      complete: async () => {
+        completionCalls += 1;
+        return { content: '0', retries: 0, ms: 1 };
+      },
+    });
+
+    expect(selected).toBeNull();
+    expect(completionCalls).toBe(0);
+  });
   test('paused worlds retry in sixty seconds without consuming arrival grace', () => {
     expect(nextActivitySettlementAttempt({ status: 'world-not-running' }, args, 20_000)).toEqual({
       kind: 'retry', delay: 60_000, arrivalGraceStartedAt: undefined, lastAttemptAt: 20_000,

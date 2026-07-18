@@ -132,7 +132,7 @@ export default defineSchema({
     inputId: v.optional(v.id('inputs')),
     landmarkId: v.string(),
     category: v.string(),
-    economicActionJson: v.string(),
+    economicActionJson: v.optional(v.string()),
     startedAt: v.number(),
     state: v.union(v.literal('intent'), v.literal('activated'), v.literal('abandoned')),
     deliveryState: v.union(
@@ -222,6 +222,14 @@ export default defineSchema({
   })
     .index('institution', ['worldId', 'institutionId'])
     .index('world', ['worldId']),
+
+  dailyEconomyDays: defineTable({
+    worldId: v.id('worlds'),
+    dayKey: v.string(),
+    advancedAt: v.number(),
+  })
+    .index('worldDay', ['worldId', 'dayKey'])
+    .index('worldTime', ['worldId', 'dayKey']),
 
   // Append-only factual journal. Code writes through appendEconomyLedger, whose
   // stable idempotency key preserves the first observed settlement.

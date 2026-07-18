@@ -20,6 +20,13 @@ crons.interval('restart dead worlds', { seconds: 60 }, internal.world.restartDea
 
 crons.interval('advance town challenge', { seconds: 30 }, internal.events.advanceActiveEvents);
 
+crons.interval(
+  'advance daily town economy',
+  { seconds: 60 },
+  internal.townEconomy.advanceDailyEconomyTick,
+  {},
+);
+
 crons.daily('vacuum old entries', { hourUTC: 4, minuteUTC: 20 }, internal.crons.vacuumOldEntries);
 
 export default crons;
@@ -148,7 +155,7 @@ export async function vacuumActivityRegistrationPage(
         || registration.abandonReason === 'ack-processing-failed'
       );
     if (registration.state === 'activated') {
-      const [complete, failed] = await Promise.all(['complete', 'failed'].map((phase) =>
+      const [complete, failed, start] = await Promise.all(['complete', 'failed', 'start'].map((phase) =>
         ctx.db
           .query('lifeEvents')
           .withIndex('sourceKey', (q) =>
@@ -157,7 +164,29 @@ export async function vacuumActivityRegistrationPage(
           )
           .unique(),
       ));
-      safeToDelete = !!complete || !!failed;
+      const acknowledgedNonfinancialStart = registration.economicActionJson === undefined
+        && registration.deliveryState === 'processed'
+        && registration.activatedAt !== undefined
+        && registration.activityUntil !== undefined
+        && registration.activityUntil <= args.before + ACTIVITY_REGISTRATION_RETENTION_MS
+        && start?.residentId === registration.residentId
+        && start.operationId === registration.operationId
+        && start.phase === 'start'
+        && start.category === registration.category
+        && start.landmarkId === registration.landmarkId
+        && start.economicActionJson === undefined
+        && start.activityUntil === registration.activityUntil
+        && start.createdAt === registration.activatedAt
+        && start.text === `开始${registration.activityText}`;
+      safeToDelete = !!complete || !!failed || acknowledgedNonfinancialStart;
+      if (acknowledgedNonfinancialStart && registration.inputId) {
+        const input = await ctx.db.get(registration.inputId);
+        const inputRegistrationId = input?.name === 'finishDoSomething'
+          && input.args && typeof input.args === 'object'
+          ? (input.args as { activityRegistrationId?: unknown }).activityRegistrationId
+          : undefined;
+        if (input && inputRegistrationId === registration._id) await ctx.db.delete(input._id);
+      }
     }
     if (safeToDelete) {
       await ctx.db.delete(registration._id);

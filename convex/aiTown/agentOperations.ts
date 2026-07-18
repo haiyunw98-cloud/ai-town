@@ -1,5 +1,5 @@
 import { v } from 'convex/values';
-import type { MutationCtx } from '../_generated/server';
+import type { MutationCtx, QueryCtx } from '../_generated/server';
 import { internalAction, internalMutation, internalQuery } from '../_generated/server';
 import { WorldMap, serializedWorldMap } from './worldMap';
 import { rememberConversation } from '../agent/memory';
@@ -21,8 +21,10 @@ import { sleep } from '../util/sleep';
 import { serializedPlayer } from './player';
 import {
   ACTIVITY_CATEGORIES,
-  pickResidentActivity,
+  feasibleActivitiesForState,
   type EconomicAction,
+  type FeasibleActivityView,
+  type ResidentActivity,
 } from '../../data/worlds/lighthouse-town/activities';
 import { insertInput } from './insertInput';
 import { distance } from '../util/geometry';
@@ -39,6 +41,7 @@ import { getWorldLocale } from '../util/worldLocale';
 import { settleActivity, validateActivityRegistration } from '../townEconomy';
 import { recordActivityFact } from '../lives';
 import type { Id } from '../_generated/dataModel';
+import { localChatCompletionOnce } from '../util/llm';
 
 const economicActionValidator = v.union(
   v.object({
@@ -64,6 +67,70 @@ const SETTLEMENT_RETRY_MS = 2_000;
 const SETTLEMENT_ARRIVAL_GRACE_MS = 8_000;
 const SETTLEMENT_PROGRESS_GRACE_MS = 5 * 60_000;
 const PAUSED_SETTLEMENT_RETRY_DELAYS = [60_000, 300_000, 1_800_000, 3_600_000] as const;
+
+type ActivityChoiceView = Pick<FeasibleActivityView, 'needs' | 'criticalNeeds' | 'state'> & {
+  activities: ReadonlyArray<Pick<ResidentActivity, 'category' | 'description'>>;
+};
+
+export function buildResidentActivityChoicePrompt(
+  residentName: string,
+  view: ActivityChoiceView,
+) {
+  const choices = view.activities.map(
+    (activity, index) => `[${index}] ${activity.category}: ${activity.description}`,
+  );
+  return [
+    `Resident=${residentName}`,
+    `State: hunger=${view.state.hunger}, energy=${view.state.energy}, balance=${view.state.balance}`,
+    `Context: needs=${view.needs.join(',') || 'none'}, critical=${view.criticalNeeds.join(',') || 'none'}`,
+    'Choose one plausible next activity from the finite options below.',
+    ...choices,
+    'Return only the option index.',
+  ].join('\n');
+}
+
+export async function chooseResidentActivityWithLocalModel(
+  residentName: string,
+  view: FeasibleActivityView,
+  dependencies: {
+    complete?: typeof localChatCompletionOnce;
+    random?: () => number;
+    isWorldRunning?: () => Promise<boolean>;
+  } = {},
+): Promise<ResidentActivity | null> {
+  if (view.activities.length === 0) {
+    throw new Error(`No feasible resident activities: ${residentName}`);
+  }
+  if (dependencies.isWorldRunning && !await dependencies.isWorldRunning()) return null;
+  try {
+    const completion = await (dependencies.complete ?? localChatCompletionOnce)({
+      model: 'gemma4:12b',
+      messages: [{
+        role: 'user',
+        content: buildResidentActivityChoicePrompt(residentName, view),
+      }],
+      temperature: 0.2,
+      max_tokens: 8,
+    });
+    const match = completion.content.trim().match(/^\[?(\d+)\]?\.?$/u);
+    const index = match ? Number(match[1]) : -1;
+    if (Number.isSafeInteger(index) && index >= 0 && index < view.activities.length) {
+      return view.activities[index];
+    }
+  } catch {
+    // A local model outage may use the bounded in-process choice below, never a cloud fallback.
+  }
+  const criticalCategories = new Set<ResidentActivity['category']>(
+    view.criticalNeeds.map((need) => need === 'food' ? 'food' : 'care'),
+  );
+  const critical = view.activities.filter((activity) =>
+    criticalCategories.has(activity.category),
+  );
+  const candidates = critical.length > 0 ? critical : view.activities;
+  const random = dependencies.random ?? Math.random;
+  const index = Math.min(Math.floor(random() * candidates.length), candidates.length - 1);
+  return candidates[index];
+}
 
 export async function generateValidatedResidentMessage(
   args: { kind: ReplyContext['kind']; locale: NonNullable<ReplyContext['locale']> },
@@ -365,7 +432,7 @@ export async function wakeOutstandingActivitySettlements(
     .take(16);
   let scheduled = 0;
   for (const registration of registrations) {
-    if (registration.activityUntil === undefined) continue;
+    if (registration.activityUntil === undefined || !registration.economicActionJson) continue;
     if (
       registration.settlementWakeScheduledAt !== undefined
       && registration.settlementWakeScheduledAt >= now - 60_000
@@ -441,7 +508,14 @@ export async function wakeOutstandingActivitySettlements(
   return { scheduled };
 }
 
-type ActivityIntentArgs = Omit<Parameters<typeof validateActivityRegistration>[0], 'activityUntil'> & {
+type ActivityIntentArgs = {
+  worldId: Id<'worlds'>;
+  residentId: string;
+  operationId: string;
+  activityText: string;
+  landmarkId: TownLandmarkId;
+  category: ResidentActivity['category'];
+  economicAction?: EconomicAction;
   activityDuration: number;
   startedAt: number;
   agentId: string;
@@ -459,7 +533,7 @@ export const enqueueResidentActivity = internalMutation({
     activityDuration: v.number(),
     landmarkId: v.string(),
     category: activityCategoryValidator,
-    economicAction: economicActionValidator,
+    economicAction: v.optional(economicActionValidator),
     startedAt: v.number(),
     destination: v.object({ x: v.number(), y: v.number() }),
     emoji: v.optional(v.string()),
@@ -471,6 +545,13 @@ export async function enqueueResidentActivityInput(
   ctx: MutationCtx,
   args: ActivityIntentArgs,
 ) {
+  const worldStatus = await ctx.db
+    .query('worldStatus')
+    .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+    .unique();
+  if (!worldStatus || worldStatus.status !== 'running') {
+    return { status: 'world-not-running' as const };
+  }
   const { startedAt, activityDuration, agentId: registeredAgentId, ...activityArgs } = args;
   if (
     !Number.isSafeInteger(activityDuration)
@@ -479,17 +560,26 @@ export async function enqueueResidentActivityInput(
   ) {
     throw new Error('activityDuration must be a positive bounded integer');
   }
-  validateActivityRegistration({
-    worldId: activityArgs.worldId,
-    residentId: activityArgs.residentId,
-    operationId: activityArgs.operationId,
-    activityText: activityArgs.activityText,
-    activityUntil: startedAt + activityDuration,
-    landmarkId: activityArgs.landmarkId,
-    category: activityArgs.category,
-    economicAction: activityArgs.economicAction,
-  }, startedAt);
-  const economicActionJson = JSON.stringify(args.economicAction);
+  if (activityArgs.economicAction) {
+    validateActivityRegistration({
+      worldId: activityArgs.worldId,
+      residentId: activityArgs.residentId,
+      operationId: activityArgs.operationId,
+      activityText: activityArgs.activityText,
+      activityUntil: startedAt + activityDuration,
+      landmarkId: activityArgs.landmarkId,
+      category: activityArgs.category,
+      economicAction: activityArgs.economicAction,
+    }, startedAt);
+  } else {
+    if (activityArgs.category !== 'social' && activityArgs.category !== 'leisure') {
+      throw new Error('nonfinancial activity category mismatch');
+    }
+    townLandmarkById(activityArgs.landmarkId);
+  }
+  const economicActionJson = args.economicAction
+    ? JSON.stringify(args.economicAction)
+    : undefined;
   const existing = await ctx.db
     .query('activityRegistrations')
     .withIndex('operation', (q) =>
@@ -523,7 +613,7 @@ export async function enqueueResidentActivityInput(
     activityDuration: args.activityDuration,
     landmarkId: args.landmarkId,
     category: args.category,
-    economicActionJson,
+    ...(economicActionJson ? { economicActionJson } : {}),
     startedAt,
     state: 'intent',
     deliveryState: 'queued',
@@ -600,8 +690,10 @@ async function applyActivityRegistrationAckAtomically(
       ? { status: 'already-activated' as const }
       : { status: 'ignored' as const, reason: 'terminal-registration' as const };
   }
-  const economicAction = JSON.parse(registration.economicActionJson) as EconomicAction;
-  const settlementArgs = {
+  const economicAction = registration.economicActionJson
+    ? JSON.parse(registration.economicActionJson) as EconomicAction
+    : undefined;
+  const settlementArgs = economicAction ? {
     worldId: registration.worldId,
     residentId: registration.residentId,
     operationId: registration.operationId,
@@ -612,8 +704,8 @@ async function applyActivityRegistrationAckAtomically(
     economicAction,
     lastAttemptAt: args.activityUntil,
     pauseRetryCount: 0,
-  };
-  validateActivityRegistration(settlementArgs, args.activatedAt);
+  } : undefined;
+  if (settlementArgs) validateActivityRegistration(settlementArgs, args.activatedAt);
   await recordActivityFact(ctx, {
     worldId: registration.worldId,
     residentId: registration.residentId,
@@ -625,7 +717,9 @@ async function applyActivityRegistrationAckAtomically(
     phase: 'start',
     category: registration.category,
     landmarkId: registration.landmarkId,
-    economicActionJson: registration.economicActionJson,
+    ...(registration.economicActionJson
+      ? { economicActionJson: registration.economicActionJson }
+      : {}),
     activityUntil: args.activityUntil,
   });
   await ctx.db.patch(registration._id, {
@@ -635,11 +729,13 @@ async function applyActivityRegistrationAckAtomically(
     activityUntil: args.activityUntil,
     updatedAt: args.activatedAt,
   });
-  await ctx.scheduler.runAfter(
-    registration.activityDuration,
-    internal.aiTown.agentOperations.settleResidentActivity,
-    settlementArgs,
-  );
+  if (settlementArgs) {
+    await ctx.scheduler.runAfter(
+      registration.activityDuration,
+      internal.aiTown.agentOperations.settleResidentActivity,
+      settlementArgs,
+    );
+  }
   return { status: 'activated' as const };
 }
 
@@ -986,34 +1082,45 @@ export const pendingResidentActivitySettlement = internalQuery({
     activityText: v.string(),
     activityUntil: v.number(),
   },
-  handler: async (ctx, args) => {
-    const recent = await ctx.db
-      .query('lifeEvents')
-      .withIndex('resident', (q) =>
-        q.eq('worldId', args.worldId).eq('residentId', args.residentId),
-      )
-      .order('desc')
-      .take(20);
-    const start = recent.find((event) =>
-      event.phase === 'start'
-      && event.text === `开始${args.activityText}`
-      && event.activityUntil === args.activityUntil
-      && event.operationId !== undefined
-      && event.landmarkId !== undefined,
-    );
-    if (!start?.operationId || !start.landmarkId) return null;
-    const outcomes = await Promise.all(['complete', 'failed'].map((phase) =>
-      ctx.db
-        .query('lifeEvents')
-        .withIndex('sourceKey', (q) =>
-          q.eq('worldId', args.worldId)
-            .eq('sourceKey', `activity:${start.operationId}:${phase}`),
-        )
-        .unique(),
-    ));
-    return outcomes.some(Boolean) ? null : start.landmarkId;
-  },
+  handler: pendingResidentActivitySettlementForResident,
 });
+
+export async function pendingResidentActivitySettlementForResident(
+  ctx: Pick<QueryCtx, 'db'>,
+  args: {
+    worldId: Id<'worlds'>;
+    residentId: string;
+    activityText: string;
+    activityUntil: number;
+  },
+) {
+  const recent = await ctx.db
+    .query('lifeEvents')
+    .withIndex('resident', (q) =>
+      q.eq('worldId', args.worldId).eq('residentId', args.residentId),
+    )
+    .order('desc')
+    .take(20);
+  const start = recent.find((event) =>
+    event.phase === 'start'
+    && event.economicActionJson !== undefined
+    && event.text === `开始${args.activityText}`
+    && event.activityUntil === args.activityUntil
+    && event.operationId !== undefined
+    && event.landmarkId !== undefined,
+  );
+  if (!start?.operationId || !start.landmarkId) return null;
+  const outcomes = await Promise.all(['complete', 'failed'].map((phase) =>
+    ctx.db
+      .query('lifeEvents')
+      .withIndex('sourceKey', (q) =>
+        q.eq('worldId', args.worldId)
+          .eq('sourceKey', `activity:${start.operationId}:${phase}`),
+      )
+      .unique(),
+  ));
+  return outcomes.some(Boolean) ? null : start.landmarkId;
+}
 
 export const agentRememberConversation = internalAction({
   args: {
@@ -1183,53 +1290,56 @@ export const agentDoSomething = internalAction({
         });
         return;
       } else {
-        const activity = pickResidentActivity(args.residentName);
+        const residentState = await ctx.runQuery(
+          internal.townEconomy.residentEconomyState,
+          { worldId: args.worldId, residentId: player.id },
+        );
+        if (!residentState) {
+          await sleep(Math.random() * 1000);
+          await ctx.runMutation(internal.aiTown.main.sendInput, {
+            worldId: args.worldId,
+            name: 'finishDoSomething',
+            args: {
+              operationId: args.operationId,
+              agentId: agent.id,
+              destination: wanderDestination(map),
+            },
+          });
+          return;
+        }
+        const feasible = feasibleActivitiesForState(args.residentName, residentState);
+        const activity = await chooseResidentActivityWithLocalModel(
+          args.residentName,
+          feasible,
+          {
+            isWorldRunning: async () => !!(await ctx.runQuery(
+              internal.townEconomy.residentEconomyState,
+              { worldId: args.worldId, residentId: player.id },
+            )),
+          },
+        );
+        if (!activity) return;
         const landmark = townLandmarkById(activity.landmarkId);
         const locatedActivity = `在${landmark.name}：${activity.description}`;
         const activityDuration = activity.duration + 60_000;
-        const activityUntil = now + activityDuration;
-        if (activity.economicAction) {
-          await ctx.runMutation(
-            internal.aiTown.agentOperations.enqueueResidentActivity,
-            {
-              worldId: args.worldId,
-              residentId: player.id,
-              agentId: agent.id,
-              operationId: args.operationId,
-              activityText: locatedActivity,
-              activityDuration,
-              landmarkId: activity.landmarkId,
-              category: activity.category,
-              economicAction: activity.economicAction,
-              startedAt: now,
-              destination: landmark.destination,
-              emoji: activity.emoji,
-            },
-          );
-          return;
-        }
-        await sleep(Math.random() * 1000);
-        await ctx.runMutation(internal.aiTown.main.sendInput, {
-          worldId: args.worldId,
-          name: 'finishDoSomething',
-          args: {
-            operationId: args.operationId,
+        const enqueueResult = await ctx.runMutation(
+          internal.aiTown.agentOperations.enqueueResidentActivity,
+          {
+            worldId: args.worldId,
+            residentId: player.id,
             agentId: agent.id,
+            operationId: args.operationId,
+            activityText: locatedActivity,
+            activityDuration,
+            landmarkId: activity.landmarkId,
+            category: activity.category,
+            ...(activity.economicAction ? { economicAction: activity.economicAction } : {}),
+            startedAt: now,
             destination: landmark.destination,
-            activity: {
-              description: locatedActivity,
-              emoji: activity.emoji,
-              until: activityUntil,
-            },
+            emoji: activity.emoji,
           },
-        });
-        await ctx.runMutation(internal.lives.recordActivity, {
-          worldId: args.worldId,
-          residentId: player.id,
-          kind: activity.category,
-          text: `开始${locatedActivity}`,
-          createdAt: now,
-        });
+        );
+        if (enqueueResult.status === 'world-not-running') return;
         return;
       }
     }

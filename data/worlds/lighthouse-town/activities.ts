@@ -1,5 +1,7 @@
 import type { TownLandmarkId } from './map';
 import {
+  goods,
+  institutions,
   residentEconomyProfiles,
   type GoodId,
   type InstitutionId,
@@ -21,6 +23,30 @@ export type EconomicAction =
   | { kind: 'work'; institutionId: InstitutionId; output: WorkOutput }
   | { kind: 'purchase'; institutionId: InstitutionId; goodId: GoodId; quantity: 1 }
   | { kind: 'rest' };
+
+export type ActivityInstitutionState = {
+  institutionId: string;
+  cash: number;
+  stock: Partial<Record<GoodId, number>>;
+  serviceCounters?: Record<string, number>;
+  open?: boolean;
+};
+
+export type ResidentActivityState = {
+  hunger: number;
+  energy: number;
+  balance: number;
+  institutions?: readonly ActivityInstitutionState[];
+};
+
+export type ResidentNeed = 'food' | 'rest';
+
+export type FeasibleActivityView = {
+  state: Pick<ResidentActivityState, 'hunger' | 'energy' | 'balance'>;
+  needs: ResidentNeed[];
+  criticalNeeds: ResidentNeed[];
+  activities: ResidentActivity[];
+};
 
 type ResidentActivityTemplate = Omit<ResidentActivity, 'landmarkId'>;
 
@@ -379,4 +405,48 @@ export function pickResidentActivity(
   const activities = activitiesForResident(residentName);
   const index = Math.min(Math.floor(random() * activities.length), activities.length - 1);
   return activities[index];
+}
+
+export function feasibleActivitiesForState(
+  residentName: string,
+  state: ResidentActivityState,
+): FeasibleActivityView {
+  const needs: ResidentNeed[] = [];
+  const criticalNeeds: ResidentNeed[] = [];
+  if (state.hunger <= 30) needs.push('food');
+  if (state.energy <= 30) needs.push('rest');
+  if (state.hunger <= 10) criticalNeeds.push('food');
+  if (state.energy <= 10) criticalNeeds.push('rest');
+  const institutionStates = state.institutions === undefined
+    ? undefined
+    : new Map(state.institutions.map((entry) => [entry.institutionId, entry]));
+  const activities = activitiesForResident(residentName).filter((activity) => {
+    const action = activity.economicAction;
+    if (!action || action.kind === 'rest') return true;
+    const institution = institutions.find((entry) => entry.id === action.institutionId);
+    if (!institution) return false;
+    const runtime = institutionStates?.get(action.institutionId);
+    if (institutionStates && (!runtime || runtime.open === false)) return false;
+    if (action.kind === 'purchase') {
+      const good = goods.find((entry) => entry.id === action.goodId);
+      if (!good || !(institution.goods as readonly string[]).includes(action.goodId)) return false;
+      if (state.balance < good.price * action.quantity) return false;
+      return runtime === undefined || (runtime.stock[action.goodId] ?? 0) >= action.quantity;
+    }
+    const output = action.output;
+    if (output.kind === 'stock') {
+      const current = runtime?.stock[output.item] ?? 0;
+      return (institution.goods as readonly string[]).includes(output.item)
+        && current + output.quantity <= 1_000_000;
+    }
+    const current = runtime?.serviceCounters?.[output.serviceId] ?? 0;
+    return (institution.serviceIds as readonly string[]).includes(output.serviceId)
+      && current + output.quantity <= 1_000_000;
+  });
+  return {
+    state: { hunger: state.hunger, energy: state.energy, balance: state.balance },
+    needs,
+    criticalNeeds,
+    activities,
+  };
 }

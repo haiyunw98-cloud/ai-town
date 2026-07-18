@@ -4,6 +4,9 @@ import type { Id } from './_generated/dataModel';
 import { residentEconomyProfiles } from '../data/worlds/lighthouse-town/economy';
 import {
   appendEconomyLedger,
+  advanceDailyEconomy,
+  advanceDailyEconomyForWorldNow,
+  dispatchDailyEconomyPage,
   initializeTownEconomy,
   MAX_ECONOMY_RECONCILIATION_ATTEMPTS,
   reconcileTownEconomyAfterAgentCreation,
@@ -13,8 +16,10 @@ import {
 } from './townEconomy';
 import {
   applyCompletedActivityRegistrationAcks,
+  chooseResidentActivityWithLocalModel,
   dispatchActivityRegistrationAckWithRecovery,
   enqueueResidentActivityInput,
+  pendingResidentActivitySettlementForResident,
   persistActivitySettlementRetryState,
   processActivityRegistrationAckOutbox,
   recordActivityRegistrationAckFailure,
@@ -53,6 +58,17 @@ class MemoryDb {
         return query;
       },
       collect: () => Promise.resolve(this.matching(table, filters)),
+      paginate: ({ cursor, numItems }: { cursor: string | null; numItems: number }) => {
+        const rows = this.matching(table, filters);
+        const offset = cursor === null ? 0 : Number(cursor.slice('offset:'.length));
+        const page = rows.slice(offset, offset + numItems);
+        const nextOffset = offset + page.length;
+        return Promise.resolve({
+          page,
+          isDone: nextOffset >= rows.length,
+          continueCursor: `offset:${nextOffset}`,
+        });
+      },
       take: (count: number) => Promise.resolve(this.matching(table, filters).slice(0, count)),
       order: (direction: 'asc' | 'desc') => {
         order = direction;
@@ -232,10 +248,14 @@ async function expectInvalidAckTerminal(
 const worldId = 'worlds:test' as Id<'worlds'>;
 const now = Date.parse('2026-07-19T09:30:00+08:00');
 
-function seedRuntimeResidents(db: MemoryDb, profiles = residentEconomyProfiles) {
+function seedRuntimeResidents(
+  db: MemoryDb,
+  profiles = residentEconomyProfiles,
+  targetWorldId = worldId,
+) {
   profiles.forEach((profile) => {
     const index = residentEconomyProfiles.findIndex((entry) => entry.id === profile.id);
-    addRuntimeResident(db, profile.name, `p:${index}`);
+    addRuntimeResident(db, profile.name, `p:${index}`, {}, targetWorldId);
   });
 }
 
@@ -244,12 +264,13 @@ function addRuntimeResident(
   name: string,
   playerId: string,
   options: { human?: string; agent?: boolean } = {},
+  targetWorldId = worldId,
 ) {
-  db.seed('playerDescriptions', { worldId, playerId, name });
-  let world = db.table('worlds').find((row) => row._id === worldId);
+  db.seed('playerDescriptions', { worldId: targetWorldId, playerId, name });
+  let world = db.table('worlds').find((row) => row._id === targetWorldId);
   if (!world) {
     world = db.seed('worlds', {
-      _id: worldId,
+      _id: targetWorldId,
       nextId: 0,
       players: [],
       agents: [],
@@ -268,9 +289,13 @@ function addRuntimeResident(
   }
 }
 
-function seedWorldStatus(db: MemoryDb, status: 'running' | 'stoppedByDeveloper' | 'inactive') {
+function seedWorldStatus(
+  db: MemoryDb,
+  status: 'running' | 'stoppedByDeveloper' | 'inactive',
+  targetWorldId = worldId,
+) {
   db.seed('worldStatus', {
-    worldId,
+    worldId: targetWorldId,
     status,
     isDefault: true,
     engineId: 'engines:test',
@@ -285,6 +310,7 @@ describe('town economy persistence', () => {
     expect(schema).toContain('townInstitutions: defineTable');
     expect(schema).toContain('economyLedger: defineTable');
     expect(schema).toContain('activityRegistrationAcks: defineTable');
+    expect(schema).toContain(".index('worldTime', ['worldId', 'dayKey'])");
     expect(schema).toContain(".index('input', ['worldId', 'inputId'])");
     expect(schema).toContain(".index('resident', ['worldId', 'residentId'])");
     expect(schema).toContain(".index('institution', ['worldId', 'institutionId'])");
@@ -557,6 +583,242 @@ describe('town economy persistence', () => {
       }
     }
     expect(db.table('economyLedger')).toHaveLength(0);
+  });
+
+  test('advances each running Shanghai day once and catches up after a delayed tick', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    seedRuntimeResidents(fixture.db);
+    await initializeTownEconomy(fixture.ctx, worldId, now);
+    const firstNextDay = Date.parse('2026-07-20T00:01:00+08:00');
+
+    expect(await advanceDailyEconomy(fixture.ctx, firstNextDay)).toEqual({
+      advancedWorlds: 1,
+      advancedInstitutions: 9,
+    });
+    expect(await advanceDailyEconomy(fixture.ctx, firstNextDay + 8 * 60 * 60 * 1_000)).toEqual({
+      advancedWorlds: 0,
+      advancedInstitutions: 0,
+    });
+    expect(fixture.db.table('economyLedger').filter((row) => row.kind === 'restock'))
+      .toHaveLength(9);
+    expect(fixture.db.table('residentEconomy')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ todayIncome: 0, todayExpense: 0, dayKey: '2026-07-20' }),
+    ]));
+
+    const delayedTick = Date.parse('2026-07-23T17:00:00+08:00');
+    expect(await advanceDailyEconomy(fixture.ctx, delayedTick)).toEqual({
+      advancedWorlds: 1,
+      advancedInstitutions: 9,
+    });
+    expect(fixture.db.table('economyLedger').filter((row) => row.kind === 'restock'))
+      .toHaveLength(18);
+    expect(new Set(fixture.db.table('townInstitutions').map((row) => row.dayKey)))
+      .toEqual(new Set(['2026-07-23']));
+  });
+
+  test('never rolls daily economy backward when an older midnight tick arrives after a newer day', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    seedRuntimeResidents(fixture.db);
+    await initializeTownEconomy(fixture.ctx, worldId, now);
+    const newerTick = Date.parse('2026-07-20T00:01:00+08:00');
+    const olderTick = Date.parse('2026-07-19T23:59:00+08:00');
+    expect(await advanceDailyEconomy(fixture.ctx, newerTick)).toEqual({
+      advancedWorlds: 1,
+      advancedInstitutions: 9,
+    });
+    const afterNewerTick = {
+      residents: structuredClone(fixture.db.table('residentEconomy')),
+      institutions: structuredClone(fixture.db.table('townInstitutions')),
+      ledger: structuredClone(fixture.db.table('economyLedger')),
+      markers: structuredClone(fixture.db.table('dailyEconomyDays')),
+    };
+
+    expect(await advanceDailyEconomy(fixture.ctx, olderTick)).toEqual({
+      advancedWorlds: 0,
+      advancedInstitutions: 0,
+    });
+    expect(fixture.db.table('residentEconomy')).toEqual(afterNewerTick.residents);
+    expect(fixture.db.table('townInstitutions')).toEqual(afterNewerTick.institutions);
+    expect(fixture.db.table('economyLedger')).toEqual(afterNewerTick.ledger);
+    expect(fixture.db.table('dailyEconomyDays')).toEqual(afterNewerTick.markers);
+    expect(afterNewerTick.markers.map((marker) => marker.dayKey)).toEqual(['2026-07-20']);
+  });
+
+  test('stale per-world tick does not repair missing economy state before returning', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    seedRuntimeResidents(fixture.db);
+    await initializeTownEconomy(fixture.ctx, worldId, now);
+    const newerTick = Date.parse('2026-07-20T00:01:00+08:00');
+    const olderTick = Date.parse('2026-07-19T23:59:00+08:00');
+    expect(await advanceDailyEconomyForWorldNow(fixture.ctx, {
+      worldId,
+      now: newerTick,
+    })).toEqual({ status: 'advanced', advancedInstitutions: 9 });
+    fixture.db.table('residentEconomy').splice(0, 1);
+    const beforeStaleTick = fixture.db.snapshot();
+
+    expect(await advanceDailyEconomyForWorldNow(fixture.ctx, {
+      worldId,
+      now: olderTick,
+    })).toEqual({ status: 'stale', advancedInstitutions: 0 });
+    expect(fixture.db.snapshot()).toEqual(beforeStaleTick);
+  });
+
+  test('uses an independent daily marker instead of institution counter day keys', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    seedRuntimeResidents(fixture.db);
+    await initializeTownEconomy(fixture.ctx, worldId, now);
+
+    expect(new Set(fixture.db.table('townInstitutions').map((row) => row.dayKey)))
+      .toEqual(new Set(['2026-07-19']));
+    expect(await advanceDailyEconomy(fixture.ctx, now)).toEqual({
+      advancedWorlds: 1,
+      advancedInstitutions: 9,
+    });
+    expect(fixture.db.table('economyLedger').filter((row) => row.kind === 'restock'))
+      .toHaveLength(9);
+    expect(fixture.db.table('townInstitutions')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ cash: 118, todayExpense: 2 }),
+    ]));
+  });
+
+  test('does not advance or restock a paused world', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'inactive');
+    seedRuntimeResidents(fixture.db);
+    await initializeTownEconomy(fixture.ctx, worldId, now);
+    const before = fixture.db.snapshot();
+
+    expect(await advanceDailyEconomy(
+      fixture.ctx,
+      Date.parse('2026-07-20T00:01:00+08:00'),
+    )).toEqual({ advancedWorlds: 0, advancedInstitutions: 0 });
+    expect(fixture.db.snapshot()).toEqual(before);
+  });
+
+  test('dispatches sixty-five running worlds over bounded status pages and skips paused worlds', async () => {
+    const fixture = makeContext();
+    const runningWorldIds = Array.from(
+      { length: 65 },
+      (_, index) => `worlds:page:${index}` as Id<'worlds'>,
+    );
+    for (const runningWorldId of runningWorldIds) {
+      seedWorldStatus(fixture.db, 'running', runningWorldId);
+    }
+    const pausedWorldId = 'worlds:page:paused' as Id<'worlds'>;
+    seedWorldStatus(fixture.db, 'inactive', pausedWorldId);
+
+    const scheduledWorldIds: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    while (true) {
+      const callOffset = fixture.scheduler.calls.length;
+      const result = await dispatchDailyEconomyPage(fixture.ctx, { cursor, now });
+      pages += 1;
+      const calls = fixture.scheduler.calls.slice(callOffset);
+      scheduledWorldIds.push(...calls.flatMap((call) =>
+        typeof call.args.worldId === 'string' ? [call.args.worldId] : [],
+      ));
+      if (result.done) break;
+      const continuation = calls.find((call) => typeof call.args.cursor === 'string');
+      expect(continuation).toBeDefined();
+      cursor = continuation!.args.cursor as string;
+    }
+
+    expect(pages).toBe(3);
+    expect(scheduledWorldIds).toEqual(runningWorldIds);
+    expect(scheduledWorldIds).not.toContain(pausedWorldId);
+  });
+
+  test('isolates a corrupt running world while a healthy world advances and a paused world skips', async () => {
+    const fixture = makeContext();
+    const corruptWorldId = 'worlds:corrupt' as Id<'worlds'>;
+    const healthyWorldId = 'worlds:healthy' as Id<'worlds'>;
+    const pausedWorldId = 'worlds:paused' as Id<'worlds'>;
+    for (const runningWorldId of [corruptWorldId, healthyWorldId]) {
+      seedWorldStatus(fixture.db, 'running', runningWorldId);
+      seedRuntimeResidents(fixture.db, residentEconomyProfiles, runningWorldId);
+      await initializeTownEconomy(fixture.ctx, runningWorldId, now);
+    }
+    seedWorldStatus(fixture.db, 'inactive', pausedWorldId);
+    const corruptInstitution = fixture.db.table('townInstitutions').find(
+      (row) => row.worldId === corruptWorldId,
+    )!;
+    corruptInstitution.stockJson = '{malformed';
+    const nextDay = Date.parse('2026-07-20T00:01:00+08:00');
+
+    expect(await dispatchDailyEconomyPage(fixture.ctx, { cursor: null, now: nextDay }))
+      .toEqual({ scheduledWorlds: 2, done: true });
+    await expect(advanceDailyEconomyForWorldNow(fixture.ctx, {
+      worldId: corruptWorldId,
+      now: nextDay,
+    })).rejects.toThrow(/stockJson/iu);
+    expect(await advanceDailyEconomyForWorldNow(fixture.ctx, {
+      worldId: healthyWorldId,
+      now: nextDay,
+    })).toEqual({ status: 'advanced', advancedInstitutions: 9 });
+    expect(await advanceDailyEconomyForWorldNow(fixture.ctx, {
+      worldId: pausedWorldId,
+      now: nextDay,
+    })).toEqual({ status: 'world-not-running', advancedInstitutions: 0 });
+    expect(fixture.db.table('economyLedger').filter(
+      (row) => row.worldId === healthyWorldId && row.kind === 'restock',
+    )).toHaveLength(9);
+    expect(fixture.db.table('dailyEconomyDays').filter(
+      (row) => row.worldId === healthyWorldId && row.dayKey === '2026-07-20',
+    )).toHaveLength(1);
+  });
+
+  test('charges only available institution cash and records the actual operating cost', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    seedRuntimeResidents(fixture.db);
+    await initializeTownEconomy(fixture.ctx, worldId, now);
+    const teaHouse = fixture.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'tea-house',
+    )!;
+    teaHouse.cash = 1;
+
+    await advanceDailyEconomy(fixture.ctx, Date.parse('2026-07-20T00:01:00+08:00'));
+
+    expect(teaHouse).toEqual(expect.objectContaining({ cash: 0, todayExpense: 1 }));
+    expect(fixture.db.table('economyLedger')).toContainEqual(expect.objectContaining({
+      kind: 'restock',
+      institutionId: 'tea-house',
+      amount: 1,
+      dayKey: '2026-07-20',
+    }));
+  });
+
+  test('restores configured goods to their caps without inventing service output', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    seedRuntimeResidents(fixture.db);
+    await initializeTownEconomy(fixture.ctx, worldId, now);
+    const workshop = fixture.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'workshop',
+    )!;
+    const academy = fixture.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'academy',
+    )!;
+    workshop.stockJson = JSON.stringify({ 'craft-service': 2 });
+    workshop.serviceCountersJson = JSON.stringify({ repair: 7, 'lantern-making': 8 });
+    academy.serviceCountersJson = JSON.stringify({ teaching: 11 });
+
+    await advanceDailyEconomy(fixture.ctx, Date.parse('2026-07-20T00:01:00+08:00'));
+
+    expect(workshop.stockJson).toBe(JSON.stringify({ 'craft-service': 99 }));
+    expect(workshop.serviceCountersJson).toBe(
+      JSON.stringify({ repair: 7, 'lantern-making': 8 }),
+    );
+    expect(academy.serviceCountersJson).toBe(JSON.stringify({ teaching: 11 }));
+    expect(fixture.db.table('economyLedger').filter(
+      (row) => row.kind === 'restock' && row.institutionId === 'academy',
+    )).toHaveLength(1);
   });
 
   test('appends one immutable factual ledger row per stable idempotency key', async () => {
@@ -957,6 +1219,8 @@ describe('town economy persistence', () => {
     expect(await settleActivity(ctx, args)).toEqual({ status: 'already-settled' });
     expect(db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
       balance: 166,
+      hunger: 99,
+      energy: 99,
       todayIncome: 16,
     }));
     const teaHouse = db.table('townInstitutions').find(
@@ -968,6 +1232,51 @@ describe('town economy persistence', () => {
     }));
     expect(db.table('economyLedger')).toHaveLength(1);
     expect(db.table('lifeEvents')).toHaveLength(2);
+  });
+
+  test('advances the day before work settlement and leaves a later cron idempotent', async () => {
+    const fixture = settlementContext({ dailyAdvanced: false });
+    const args = workSettlementArgs();
+
+    expect(await settleActivity(fixture.ctx, args)).toMatchObject({ status: 'settled', amount: 16 });
+    const teaHouse = fixture.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'tea-house',
+    );
+    expect(teaHouse).toEqual(expect.objectContaining({
+      cash: 102,
+      todayExpense: 18,
+      dayKey: '2026-07-19',
+    }));
+    expect(fixture.db.table('economyLedger').filter((row) => row.kind === 'restock'))
+      .toHaveLength(9);
+    const beforeCron = fixture.db.snapshot();
+    expect(await advanceDailyEconomy(fixture.ctx, now)).toEqual({
+      advancedWorlds: 0,
+      advancedInstitutions: 0,
+    });
+    expect(fixture.db.snapshot()).toEqual(beforeCron);
+  });
+
+  test('advances the day before purchase settlement and preserves today flow', async () => {
+    const fixture = settlementContext({ position: { x: 8, y: 24 }, dailyAdvanced: false });
+    const args = purchaseSettlementArgs();
+    seedActivityStart(fixture.db, args.operationId, args.activityText);
+
+    expect(await settleActivity(fixture.ctx, args)).toMatchObject({ status: 'settled', amount: 6 });
+    const restaurant = fixture.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'restaurant',
+    );
+    expect(restaurant).toEqual(expect.objectContaining({
+      cash: 124,
+      todayIncome: 6,
+      todayExpense: 2,
+      visitorCount: 1,
+    }));
+    expect(fixture.db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
+      todayExpense: 6,
+    }));
+    expect(fixture.db.table('economyLedger').filter((row) => row.kind === 'restock'))
+      .toHaveLength(9);
   });
 
   test('returns the immutable completed outcome after the resident changes activity', async () => {
@@ -1122,6 +1431,27 @@ describe('town economy persistence', () => {
     }));
   });
 
+  test('applies one common need decay before purchase benefit with boundary clamps', async () => {
+    const fixture = settlementContext({ position: { x: 8, y: 24 } });
+    fixture.db.seed('residentEconomy', validResidentRow({
+      residentId: 'p:2',
+      profileId: 'tang-guo',
+      balance: 150,
+      initialBalance: 150,
+      hunger: 10,
+      energy: 0,
+      initializationSourceKey: 'economy-definition:resident:tang-guo:v1',
+    }));
+    const args = purchaseSettlementArgs();
+    seedActivityStart(fixture.db, args.operationId, args.activityText);
+
+    expect(await settleActivity(fixture.ctx, args)).toMatchObject({ status: 'settled' });
+    expect(fixture.db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
+      hunger: 34,
+      energy: 0,
+    }));
+  });
+
   test('fails before mutation when derived daily counters reach their exact bounds', async () => {
     const fixture = settlementContext();
     fixture.db.seed('residentEconomy', validResidentRow({
@@ -1187,8 +1517,168 @@ describe('town economy persistence', () => {
     seedActivityStart(fixture.db, args.operationId, args.activityText);
     expect(await settleActivity(fixture.ctx, args)).toMatchObject({ status: 'settled' });
     expect(await settleActivity(fixture.ctx, args)).toEqual({ status: 'already-settled' });
-    expect(account).toEqual(expect.objectContaining({ energy: 65 }));
+    expect(account).toEqual(expect.objectContaining({ hunger: 99, energy: 64 }));
     expect(fixture.db.table('economyLedger')).toHaveLength(0);
+  });
+
+  test('clamps common work need decay at zero', async () => {
+    const fixture = settlementContext();
+    fixture.db.seed('residentEconomy', validResidentRow({
+      residentId: 'p:2',
+      profileId: 'tang-guo',
+      balance: 150,
+      initialBalance: 150,
+      hunger: 0,
+      energy: 0,
+      initializationSourceKey: 'economy-definition:resident:tang-guo:v1',
+    }));
+
+    expect(await settleActivity(fixture.ctx, workSettlementArgs()))
+      .toMatchObject({ status: 'settled' });
+    expect(fixture.db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
+      hunger: 0,
+      energy: 0,
+    }));
+  });
+
+  test('records nonfinancial activity only after an engine activation acknowledgement', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    addRuntimeResident(fixture.db, '唐果', 'p:2');
+    const queued = await enqueueResidentActivityInput(fixture.ctx, {
+      worldId,
+      residentId: 'p:2',
+      agentId: 'a:2',
+      operationId: 'o:social:delayed',
+      activityText: '在听雨茶庄：和邻居聊聊今日见闻',
+      activityDuration: 60_000,
+      landmarkId: 'tea-house',
+      category: 'social',
+      startedAt: now,
+      destination: { x: 5, y: 20 },
+      emoji: '🫖',
+    });
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+    const registration = fixture.db.table('activityRegistrations')[0];
+    await applyCompletedActivityRegistrationAcks(fixture.ctx, worldId, [{
+      inputId: queued.inputId as Id<'inputs'>,
+      returnValue: {
+        kind: 'ok',
+        value: { activityRegistration: {
+          registrationId: registration._id,
+          operationId: registration.operationId,
+          agentId: registration.agentId,
+          residentId: registration.residentId,
+          status: 'activated',
+          activatedAt: now + 5_000,
+          activityUntil: now + 65_000,
+        } },
+      },
+    }]);
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+    const outbox = fixture.db.table('activityRegistrationAcks')[0];
+    expect(await processActivityRegistrationAckOutbox(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+    })).toEqual({ status: 'activated' });
+    expect(fixture.db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      sourceKey: 'activity:o:social:delayed:start',
+      phase: 'start',
+      kind: 'social',
+    }));
+    expect(await pendingResidentActivitySettlementForResident(fixture.ctx, {
+      worldId,
+      residentId: 'p:2',
+      activityText: '在听雨茶庄：和邻居聊聊今日见闻',
+      activityUntil: now + 65_000,
+    })).toBeNull();
+  });
+
+  test('does not send an acknowledged leisure start into economic settlement recovery', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    addRuntimeResident(fixture.db, '唐果', 'p:2');
+    const activityText = '在旧水码头：听一会儿河上桨声';
+    const queued = await enqueueResidentActivityInput(fixture.ctx, {
+      worldId,
+      residentId: 'p:2',
+      agentId: 'a:2',
+      operationId: 'o:leisure:activated',
+      activityText,
+      activityDuration: 60_000,
+      landmarkId: 'old-dock',
+      category: 'leisure',
+      startedAt: now,
+      destination: { x: 5, y: 20 },
+    });
+    const registration = fixture.db.table('activityRegistrations')[0];
+    await applyCompletedActivityRegistrationAcks(fixture.ctx, worldId, [{
+      inputId: queued.inputId as Id<'inputs'>,
+      returnValue: {
+        kind: 'ok',
+        value: { activityRegistration: {
+          registrationId: registration._id,
+          operationId: registration.operationId,
+          agentId: registration.agentId,
+          residentId: registration.residentId,
+          status: 'activated',
+          activatedAt: now,
+          activityUntil: now + 60_000,
+        } },
+      },
+    }]);
+    const outbox = fixture.db.table('activityRegistrationAcks')[0];
+    await processActivityRegistrationAckOutbox(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+    });
+
+    expect(await pendingResidentActivitySettlementForResident(fixture.ctx, {
+      worldId,
+      residentId: 'p:2',
+      activityText,
+      activityUntil: now + 60_000,
+    })).toBeNull();
+    expect(fixture.scheduler.calls.filter(
+      (call) => call.args.operationId === 'o:leisure:activated',
+    )).toHaveLength(0);
+  });
+
+  test('never records a replaced nonfinancial intent as fact', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    addRuntimeResident(fixture.db, '唐果', 'p:2');
+    const queued = await enqueueResidentActivityInput(fixture.ctx, {
+      worldId,
+      residentId: 'p:2',
+      agentId: 'a:2',
+      operationId: 'o:leisure:replaced',
+      activityText: '在旧水码头：听一会儿河上桨声',
+      activityDuration: 60_000,
+      landmarkId: 'old-dock',
+      category: 'leisure',
+      startedAt: now,
+      destination: { x: 5, y: 20 },
+    });
+    const registration = fixture.db.table('activityRegistrations')[0];
+    await applyCompletedActivityRegistrationAcks(fixture.ctx, worldId, [{
+      inputId: queued.inputId as Id<'inputs'>,
+      returnValue: {
+        kind: 'ok',
+        value: { activityRegistration: {
+          registrationId: registration._id,
+          operationId: registration.operationId,
+          agentId: registration.agentId,
+          residentId: registration.residentId,
+          status: 'rejected',
+          acknowledgedAt: now + 5_000,
+          reason: 'operation-replaced',
+        } },
+      },
+    }]);
+    const outbox = fixture.db.table('activityRegistrationAcks')[0];
+    expect(await processActivityRegistrationAckOutbox(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+    })).toEqual({ status: 'abandoned' });
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
   });
 
   test('fails closed when a settled operation id is reused for different facts', async () => {
@@ -1283,6 +1773,67 @@ describe('town economy persistence', () => {
     expect(delayed.db.table('residentEconomy')).toHaveLength(1);
   });
 
+  test('rejects enqueue atomically when the world pauses during deferred local completion', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    let signalCompletionStarted!: () => void;
+    let releaseCompletion!: () => void;
+    const completionStarted = new Promise<void>((resolve) => {
+      signalCompletionStarted = resolve;
+    });
+    const completionReleased = new Promise<void>((resolve) => {
+      releaseCompletion = resolve;
+    });
+    const choice = {
+      needs: [],
+      criticalNeeds: [],
+      state: { hunger: 100, energy: 100, balance: 100 },
+      activities: [{
+        description: '整理茶叶',
+        emoji: '🍵',
+        duration: 60_000,
+        category: 'work' as const,
+        landmarkId: 'tea-house' as const,
+        economicAction: {
+          kind: 'work' as const,
+          institutionId: 'tea-house' as const,
+          output: { kind: 'stock' as const, item: 'tea' as const, quantity: 1 },
+        },
+      }],
+    };
+    const choosing = chooseResidentActivityWithLocalModel('唐果', choice, {
+      isWorldRunning: async () => fixture.db.table('worldStatus')[0]?.status === 'running',
+      complete: async () => {
+        signalCompletionStarted();
+        await completionReleased;
+        return { content: '0', retries: 0, ms: 1 };
+      },
+    });
+    await completionStarted;
+    fixture.db.table('worldStatus')[0].status = 'inactive';
+    releaseCompletion();
+    const selected = await choosing;
+    expect(selected).toBe(choice.activities[0]);
+
+    expect(await enqueueResidentActivityInput(fixture.ctx, {
+      worldId,
+      residentId: 'p:2',
+      agentId: 'a:2',
+      operationId: 'o:paused-during-completion',
+      activityText: '在听雨茶庄：整理茶叶',
+      activityDuration: selected!.duration + 60_000,
+      landmarkId: selected!.landmarkId,
+      category: selected!.category,
+      economicAction: selected!.economicAction,
+      startedAt: now,
+      destination: { x: 5, y: 20 },
+      emoji: selected!.emoji,
+    })).toEqual({ status: 'world-not-running' });
+    expect(fixture.db.table('activityRegistrations')).toHaveLength(0);
+    expect(fixture.db.table('inputs')).toHaveLength(0);
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+  });
+
   test('validates structured activity semantics and registers start plus schedule exactly once', async () => {
     const base = workSettlementArgs();
     expect(() => validateActivityRegistration(base, now - 1)).not.toThrow();
@@ -1307,7 +1858,7 @@ describe('town economy persistence', () => {
     }, now - 1)).toThrow(/Unknown town landmark/u);
 
     const fixture = makeContext();
-    seedWorldStatus(fixture.db, 'stoppedByDeveloper');
+    seedWorldStatus(fixture.db, 'running');
     addRuntimeResident(fixture.db, '唐果', 'p:2');
     const registration = {
       worldId: base.worldId,
@@ -1349,6 +1900,7 @@ describe('town economy persistence', () => {
       .toBe(storedRegistration._id);
 
     // A paused engine keeps the atomically queued input and intent without polling or expiry.
+    fixture.db.table('worldStatus')[0].status = 'stoppedByDeveloper';
     const player = (fixture.db.table('worlds')[0].players as Array<Record<string, unknown>>)[0];
     player.position = { x: 5, y: 20 };
     expect(fixture.db.table('activityRegistrations')[0].state).toBe('intent');
@@ -1710,11 +2262,19 @@ type SettlementOverrides = {
   position?: { x: number; y: number };
   status?: 'running' | 'stoppedByDeveloper';
   startingBalance?: number;
+  dailyAdvanced?: boolean;
 };
 
 function settlementContext(overrides: SettlementOverrides = {}) {
   const fixture = makeContext();
   seedWorldStatus(fixture.db, overrides.status ?? 'running');
+  if (overrides.dailyAdvanced !== false) {
+    fixture.db.seed('dailyEconomyDays', {
+      worldId,
+      dayKey: shanghaiEconomyDayKey(overrides.now ?? now),
+      advancedAt: overrides.now ?? now,
+    });
+  }
   addSettlementResident(
     fixture.db,
     overrides.position ?? { x: 5, y: 20 },

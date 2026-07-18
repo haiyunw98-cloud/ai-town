@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import {
   ACTIVITY_CATEGORIES,
   activitiesForResident,
+  feasibleActivitiesForState,
   pickResidentActivity,
   residentActivities,
 } from './activities';
@@ -87,7 +88,8 @@ describe('Lighthouse Town resident activities', () => {
     expect(agent).toContain('const playerDescription = game.playerDescriptions.get(player.id)');
     expect(agent).toContain('residentName: playerDescription.name');
     expect(operations).toContain('residentName: v.string()');
-    expect(operations).toContain('pickResidentActivity(args.residentName)');
+    expect(operations).toContain('feasibleActivitiesForState(args.residentName, residentState)');
+    expect(operations).toContain('chooseResidentActivityWithLocalModel');
     expect(operations).toContain('destination: landmark.destination');
     expect(operations).toContain('在${landmark.name}');
     expect(operations).toContain('enqueueResidentActivity');
@@ -95,5 +97,51 @@ describe('Lighthouse Town resident activities', () => {
     expect(operations).toContain('sourceKey: `activity:${registration.operationId}:start`');
     expect(operations).toContain("result.status !== 'destination-not-reached'");
     expect(agent).not.toContain('doingActivity && (conversation || player.pathfinding)');
+  });
+
+  test('keeps multiple feasible choices and exposes ordinary needs as model context', () => {
+    const view = feasibleActivitiesForState('唐果', {
+      hunger: 20,
+      energy: 90,
+      balance: 40,
+    });
+
+    expect(view.needs).toContain('food');
+    expect(view.activities.map((entry) => entry.category)).toEqual(
+      expect.arrayContaining(['food', 'work', 'social']),
+    );
+    expect(view.activities.length).toBeGreaterThan(2);
+  });
+
+  test('filters food purchases that cannot settle for funds or stock', () => {
+    expect(feasibleActivitiesForState('唐果', {
+      hunger: 10,
+      energy: 80,
+      balance: 0,
+    }).activities.some((entry) => entry.category === 'food')).toBe(false);
+
+    expect(feasibleActivitiesForState('唐果', {
+      hunger: 10,
+      energy: 80,
+      balance: 40,
+      institutions: [{
+        institutionId: 'restaurant',
+        cash: 120,
+        stock: { meal: 0 },
+      }],
+    }).activities.some((entry) => entry.category === 'food')).toBe(false);
+  });
+
+  test('retains both food and rest when both needs are critical', () => {
+    const view = feasibleActivitiesForState('唐果', {
+      hunger: 5,
+      energy: 5,
+      balance: 40,
+    });
+
+    expect(view.criticalNeeds).toEqual(['food', 'rest']);
+    expect(view.activities.map((entry) => entry.category)).toEqual(
+      expect.arrayContaining(['food', 'care']),
+    );
   });
 });

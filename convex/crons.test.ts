@@ -73,6 +73,14 @@ class VacuumDb {
     return Promise.resolve();
   }
 
+  get(id: string) {
+    for (const rows of this.rows.values()) {
+      const row = rows.find((candidate) => candidate._id === id);
+      if (row) return Promise.resolve(row);
+    }
+    return Promise.resolve(null);
+  }
+
   table(name: string) {
     const rows = this.rows.get(name) ?? [];
     this.rows.set(name, rows);
@@ -260,6 +268,53 @@ describe('activity registration vacuum', () => {
       'o:no-outcome', 'o:boundary', 'o:intent', 'o:unsafe-abandoned',
     ]));
     expect(db.table('lifeEvents').map((row) => row.text)).toContain('事实永久保留');
+  });
+
+  test('reclaims old acknowledged nonfinancial registration and input but keeps its start fact', async () => {
+    const db = new VacuumDb();
+    const scheduler = new VacuumScheduler();
+    const ctx = { db, scheduler } as unknown as MutationCtx;
+    const before = now - ACTIVITY_REGISTRATION_RETENTION_MS;
+    const operationId = 'o:social:historical';
+    const input = db.seed('inputs', {
+      name: 'finishDoSomething',
+      args: { activityRegistrationId: 'placeholder' },
+    });
+    input._creationTime = before - 1;
+    const stored = db.seed('activityRegistrations', registration(operationId, {
+      inputId: input._id,
+      activityText: '在听雨茶庄：和邻居聊聊今日见闻',
+      category: 'social',
+      economicActionJson: undefined,
+      deliveryState: 'processed',
+      activatedAt: before - 1_000,
+      activityUntil: before + 59_000,
+      updatedAt: before - 1_000,
+    }));
+    ((input as Row).args as Record<string, unknown>).activityRegistrationId = stored._id;
+    db.seed('lifeEvents', {
+      worldId,
+      residentId: (stored as Row).residentId,
+      kind: 'social',
+      text: `开始${String((stored as Row).activityText)}`,
+      createdAt: (stored as Row).activatedAt,
+      sourceKey: `activity:${operationId}:start`,
+      operationId,
+      phase: 'start',
+      category: 'social',
+      landmarkId: (stored as Row).landmarkId,
+      activityUntil: (stored as Row).activityUntil,
+    });
+
+    expect(await vacuumActivityRegistrationPage(ctx, {
+      state: 'activated', before, cursor: null,
+    })).toEqual({ deleted: 1, done: true });
+    expect(db.table('activityRegistrations')).toHaveLength(0);
+    expect(db.table('inputs')).toHaveLength(0);
+    expect(db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      sourceKey: `activity:${operationId}:start`,
+      text: `开始${String((stored as Row).activityText)}`,
+    }));
   });
 
   test('paginates old terminal registrations without deleting paused intents', async () => {
