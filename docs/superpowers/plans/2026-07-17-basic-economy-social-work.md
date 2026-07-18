@@ -6,6 +6,8 @@
 
 **Architecture:** Static definitions provide initial residents, jobs, institutions, goods and prices. Convex tables store mutable accounts, institution stock, immutable ledger rows and pairwise relationship dimensions. Activity completion schedules an idempotent settlement that verifies location before changing money or stock; conversation and cooperation boundaries write similarly idempotent relationship changes. UI dossiers and landmark cards query dynamic state with static profiles only as initialization fallback.
 
+**Autonomy constraint:** Profiles, needs and starting relationships are initial conditions, not scripts. The local resident model chooses among currently feasible work, rest, consumption, cooperation, trade and social actions. Deterministic rules may reject impossible or unsafe actions and settle their consequences, but must not force one ordinary action or preselect who can become friends, partners or business collaborators. Every realized choice and consequence is recorded; unrealized model intentions are not reported as facts.
+
 **Tech Stack:** TypeScript, Convex schema/mutations/queries/scheduler, existing AI Town activity engine, React, Jest.
 
 ---
@@ -133,9 +135,10 @@ test('pays fixed cumulative daily event rewards', () => {
   expect(eventReward({ participated: true, finalist: true, champion: true })).toBe(80);
 });
 
-test('prioritizes food and rest before optional activity', () => {
-  expect(chooseNeed({ hunger: 15, energy: 80, balance: 20 })).toBe('food');
-  expect(chooseNeed({ hunger: 70, energy: 15, balance: 20 })).toBe('rest');
+test('exposes urgent needs without choosing an ordinary action for the resident', () => {
+  expect(availableNeeds({ hunger: 15, energy: 80, balance: 20 })).toContain('food');
+  expect(availableNeeds({ hunger: 70, energy: 15, balance: 20 })).toContain('rest');
+  expect(availableNeeds({ hunger: 70, energy: 80, balance: 20 })).toEqual(['normal']);
 });
 ```
 
@@ -163,10 +166,11 @@ export function eventReward(input: { participated: boolean; finalist: boolean; c
   return (input.participated ? 10 : 0) + (input.finalist ? 20 : 0) + (input.champion ? 50 : 0);
 }
 
-export function chooseNeed(input: { hunger: number; energy: number; balance: number }) {
-  if (input.hunger < 30 && input.balance >= 4) return 'food' as const;
-  if (input.energy < 30) return 'rest' as const;
-  return 'normal' as const;
+export function availableNeeds(input: { hunger: number; energy: number; balance: number }) {
+  const needs: Array<'food' | 'rest' | 'normal'> = [];
+  if (input.hunger < 30 && input.balance >= 4) needs.push('food');
+  if (input.energy < 30) needs.push('rest');
+  return needs.length ? needs : ['normal'];
 }
 ```
 
@@ -317,7 +321,7 @@ git add data/worlds/lighthouse-town/activities.ts data/worlds/lighthouse-town/ac
 git commit -m "feat: settle real work and consumption activities"
 ```
 
-### Task 5: Add daily restock and needs-aware activity choice
+### Task 5: Add daily restock and autonomy-aware feasible activity choice
 
 **Files:**
 - Modify: `convex/townEconomy.ts`
@@ -337,9 +341,10 @@ test('restocks once per Shanghai day and never while paused', async () => {
   expect(await ledgerKindCount(ctx, 'restock')).toBe(9);
 });
 
-test('chooses food or rest before random activity when needs are low', () => {
-  expect(selectActivityForState('唐果', { hunger: 20, energy: 90, balance: 40 }).category).toBe('food');
-  expect(selectActivityForState('唐果', { hunger: 80, energy: 20, balance: 40 }).category).toBe('care');
+test('keeps multiple feasible choices and exposes needs as model context', () => {
+  const view = feasibleActivitiesForState('唐果', { hunger: 20, energy: 90, balance: 40 });
+  expect(view.needs).toContain('food');
+  expect(view.activities.map((entry) => entry.category)).toEqual(expect.arrayContaining(['food', 'work', 'social']));
 });
 ```
 
@@ -351,7 +356,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement idempotent daily advance and state-aware selection**
 
-Add a 60-second cron calling `advanceDailyEconomy`. On the first running check for a new Shanghai day, reset daily income/expense/visitor counts, charge a fixed two-gold institution cost, and restore configured stock up to its cap with one ledger row per institution. Expose an internal resident-state query and pass it to `selectActivityForState`; food below hunger 30 and rest below energy 30 take priority. Decrease hunger and energy by one on each successful settlement, clamped to 0–100.
+Add a 60-second cron calling `advanceDailyEconomy`. On the first running check for a new Shanghai day, reset daily income/expense/visitor counts, charge a fixed two-gold institution cost, and restore configured stock up to its cap with one ledger row per institution. Expose an internal resident-state query and build a finite set of feasible actions plus needs context for the local resident model. Normal needs never force a single action; only impossible actions (for example an unaffordable purchase or closed institution) are removed. Critical health/safety thresholds may trigger a bounded fallback. Decrease hunger and energy by one on each successful settlement, clamped to 0–100.
 
 - [ ] **Step 4: Run focused tests**
 
@@ -394,9 +399,11 @@ test('applies conversation changes once with a daily pair cap', async () => {
   expect((await relation(ctx, first, second)).friendship).toBe(initialFriendship + 1);
 });
 
-test('does not create romance for an ineligible pair', async () => {
-  await recordRelationEvent(ctx, { ...careFixture(), attractionDelta: 5 });
-  expect((await relation(ctx, ineligibleA, ineligibleB)).attraction).toBe(initialAttraction);
+test('allows adult relationships to emerge only from reciprocal evidence', async () => {
+  await recordRelationEvent(ctx, { ...careFixture(), attractionDelta: 1, reciprocal: false });
+  expect((await relation(ctx, first, second)).attraction).toBe(initialAttraction);
+  await recordRelationEvent(ctx, { ...careFixture('c:2'), attractionDelta: 1, reciprocal: true });
+  expect((await relation(ctx, first, second)).attraction).toBe(initialAttraction + 1);
 });
 ```
 
@@ -422,7 +429,7 @@ relationshipChanges: defineTable({
 }).index('idempotencyKey', ['worldId', 'idempotencyKey']).index('pairTime', ['worldId', 'residentA', 'residentB', 'createdAt']),
 ```
 
-Always sort pair IDs before lookup. Initialize the 36 pairs from static profile scores; dimensions without a configured signal start at 40 friendship, 40 trust, 0 attraction and 20 business. Conversation archive adds friendship +1, capped at +3 per pair/day. Cooperation adds friendship/trust +1, trade adds business +1, care adds friendship +2/trust +1, and an explicit rule event may record dispute -2. Only pairs marked `crush` or `dating` in static data can receive attraction changes. Call conversation settlement after `rememberConversation`; use `conversation:<worldId>:<conversationId>:pair` so the two agents cannot double-record it.
+Always sort pair IDs before lookup. Initialize the 36 adult resident pairs from static profile scores; dimensions without a configured signal start at 40 friendship, 40 trust, 0 attraction and 20 business. Static hooks are starting context, never permanent eligibility gates. Conversation alone records contact but does not automatically improve a relationship. Cooperation, trade, care, reciprocal affection and explicit disputes create small evidence-based changes, with pair/day caps and all values clamped to 0–100. Attraction may emerge for any adult pair only from reciprocal, explicit interaction evidence; no model narration by itself changes it. Call conversation settlement after `rememberConversation`; use `conversation:<worldId>:<conversationId>:pair` so the two agents cannot double-record it.
 
 - [ ] **Step 4: Run relationship tests**
 
