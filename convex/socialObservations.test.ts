@@ -365,6 +365,11 @@ describe('social observation structured model boundary', () => {
     ['emoji alias', '当日记录显示，🙂可能参与互动。'],
     ['unpaired numeric alias', '当日记录显示，007可能参与互动。'],
     ['measurement-unit alias', '当日记录显示，米家可能参与互动。'],
+    ['quoted numeric household alias', '当日记录显示，“007家”可能参与互动。'],
+    ['quoted percentage alias', '当日记录显示，“50%”可能参与互动。'],
+    ['numeric household subject', '当日记录显示，007家可能参与互动。'],
+    ['resident numeric household subject', '当日记录显示，居民007家可能参与互动。'],
+    ['invented statistical number', '当日记录显示，互动集中度为77%。'],
     ['new place', '现有记录显示，月光酒馆可能承担了机构活动。'],
     ['unknown place without a configured suffix', '当日记录显示，望月台可能承担活动。'],
     ['new event', '当日记录显示，七夕庆典可能形成公共活动。'],
@@ -475,14 +480,19 @@ describe('social observation structured model boundary', () => {
     });
   });
 
-  test.each(['50%', '50％', '2组']) (
-    'accepts numeric analysis paired with the measurement unit in %s',
-    async (measurement) => {
+  test.each([
+    '当日记录显示，互动集中度为50%。',
+    '当日记录显示，互动集中度为50％。',
+    '当日记录显示，记录到2组互动。',
+    '当日记录显示，居民占50%。',
+  ]) (
+    'accepts numeric analysis in a statistical or count context: %s',
+    async (claim) => {
       const output = {
         ...validModelResult,
         findings: [{
           ...validModelResult.findings[0],
-          claim: `当日记录显示，居民互动可能集中在${measurement}。`,
+          claim,
         }, ...validModelResult.findings.slice(1)],
       };
 

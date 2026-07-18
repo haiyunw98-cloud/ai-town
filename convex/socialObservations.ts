@@ -57,9 +57,19 @@ const CAUTIOUS_CLAIM = /记录显示|现有记录|当前记录|当日记录|可�
 const SAFE_ANALYSIS_PUNCTUATION = new Set(Array.from('，。；、：！？（）“”‘’《》'));
 const NUMERIC_MEASUREMENT = /^(?:[0-9０-９]+(?:[.．][0-9０-９]+)?)(?:%|％|分钟|小时|公里|条|次|人|组|项|个|类|天|日|年|月|秒|米|元|份|场|户|家|岁)/u;
 const NUMERIC_MEASUREMENTS = /(?:[0-9０-９]+(?:[.．][0-9０-９]+)?)(?:%|％|分钟|小时|公里|条|次|人|组|项|个|类|天|日|年|月|秒|米|元|份|场|户|家|岁)/gu;
+const NUMERIC_VALUES = /[0-9０-９]+(?:[.．][0-9０-９]+)?/gu;
+const NUMERIC_VALUE_START = /^[0-9０-９]+(?:[.．][0-9０-９]+)?/u;
 const NUMERIC_CHARACTER = /^[0-9０-９]$/u;
 const HAN_CHARACTER = /^\p{Script=Han}$/u;
 const SPACE_SEPARATOR = /^\p{Zs}$/u;
+const MEASUREMENT_CONTEXT_BEFORE = /(?:集中度为|比例为|占比为|记录到|记录有|共有|合计|达到|为|占|超过|少于|多于|约)\p{Zs}*$/u;
+const MEASUREMENT_CONTEXT_AFTER = /^\p{Zs}*(?:记录|互动|活动|居民|机构|样本|比例|占比|集中度|分布)/u;
+const MEASUREMENT_ACTION_AFTER = /^\p{Zs}*[”’》]?\p{Zs}*(?:可能|或许|未必|参与|承担|出现|影响|反映|呈现|活动|互动)/u;
+const ANALYSIS_QUOTE_PAIRS = [
+  ['“', '”'],
+  ['‘', '’'],
+  ['《', '》'],
+] as const;
 const SAFE_ANALYSIS_TOKENS = new Set([
   '当日记录显示', '现有记录显示', '当前记录显示', '从现有记录看',
   '在已记录范围内', '当日可见记录', '当日可见', '可见记录', '当日记录',
@@ -69,7 +79,8 @@ const SAFE_ANALYSIS_TOKENS = new Set([
   '活动分布', '记录密度', '可见分布', '局部结构', '不同结构',
   '跨日基线', '统计方法', '公共记录', '后续记录', '后续比较', '继续记录',
   '未出现互动', '持续观察', '同时出现', '少数组合', '仅覆盖', '只覆盖',
-  '样本不足', '数据缺失', '无法判断', '不一定',
+  '样本不足', '数据缺失', '无法判断', '不一定', '互动集中度', '集中度',
+  '记录到',
   '居民', '互动', '活动', '机构', '分析', '记录', '结果', '变化',
   '可能', '或许', '尚需', '倾向', '迹象', '未必', '暂可',
   '集中', '较集中', '较多', '承担', '参与', '存在', '代表',
@@ -77,7 +88,7 @@ const SAFE_ANALYSIS_TOKENS = new Set([
   '不足', '缺失', '不均',
   '部分', '范围', '结构', '分布', '模式', '消息', '时段',
   '可见', '现有', '当前', '当日', '后续', '其他', '原有', '公共',
-  '在', '中', '的', '与', '或', '但', '其', '了',
+  '为', '占', '在', '中', '的', '与', '或', '但', '其', '了',
 ]);
 const KNOWN_ENTITY_SUFFIXES = [
   '镇公所', '机关坊', '酒馆', '茶馆', '会馆', '广场', '书院', '药庐',
@@ -106,6 +117,7 @@ export type SocialObservationPrompt = {
   prompt: string;
   visibleEvidenceIds: ReadonlySet<string>;
   knownEntityTokens: ReadonlySet<string>;
+  visibleNumericValues: ReadonlySet<string>;
 };
 
 export function buildSocialObservationPrompt(bundle: SocialEvidenceBundle): SocialObservationPrompt {
@@ -128,6 +140,7 @@ export function buildSocialObservationPrompt(bundle: SocialEvidenceBundle): Soci
     prompt: `${promptStart}\n${serialized}\n${promptEnd}`,
     visibleEvidenceIds: new Set(payload.evidence.map((entry) => entry.evidenceId)),
     knownEntityTokens: extractKnownEntityTokens(payload.evidence),
+    visibleNumericValues: extractVisibleNumericValues(payload.evidence),
   };
 }
 
@@ -177,6 +190,7 @@ export async function requestSocialObservation(
     completion.content,
     prompt.visibleEvidenceIds,
     prompt.knownEntityTokens,
+    prompt.visibleNumericValues,
   );
   if (!modelResult) return fallbackSocialObservation(bundle, '输出无效');
   return { source: 'model', ...modelResult };
@@ -199,6 +213,7 @@ function parseModelResult(
   content: string,
   visibleEvidenceIds: ReadonlySet<string>,
   knownEntityTokens: ReadonlySet<string>,
+  visibleNumericValues: ReadonlySet<string>,
 ) {
   if (countCharacters(content) > MAX_RESPONSE_JSON_CHARACTERS) return undefined;
   let value: unknown;
@@ -233,7 +248,9 @@ function parseModelResult(
   ];
   if (
     countCharacters(allText.join('')) > MAX_ANALYSIS_CHARACTERS
-    || allText.some((text) => !isSafeAnalysisText(text, knownEntityTokens))
+    || allText.some((text) =>
+      !isSafeAnalysisText(text, knownEntityTokens, visibleNumericValues)
+    )
   ) return undefined;
   return {
     findings: findings.map(cloneFinding),
@@ -266,13 +283,18 @@ function parseFinding(
   };
 }
 
-function isSafeAnalysisText(value: string, knownEntityTokens: ReadonlySet<string>) {
+function isSafeAnalysisText(
+  value: string,
+  knownEntityTokens: ReadonlySet<string>,
+  visibleNumericValues: ReadonlySet<string>,
+) {
   if (
     !value.trim()
     || UNSAFE_FORMAT.test(value)
     || LATIN_TEXT.test(value)
     || FORBIDDEN_ANALYSIS.test(value)
     || !hasOnlyAllowedAnalysisCharacters(value)
+    || !hasOnlyStatisticalMeasurements(value, visibleNumericValues)
     || hasUnhedgedInfluence(value)
   ) return false;
   const lexicalText = value.replace(NUMERIC_MEASUREMENTS, '');
@@ -301,6 +323,34 @@ function hasOnlyAllowedAnalysisCharacters(value: string) {
       continue;
     }
     return false;
+  }
+  return true;
+}
+
+function hasOnlyStatisticalMeasurements(
+  value: string,
+  visibleNumericValues: ReadonlySet<string>,
+) {
+  for (const match of value.matchAll(NUMERIC_MEASUREMENTS)) {
+    const measurementIndex = match.index ?? 0;
+    const before = value.slice(0, measurementIndex);
+    const after = value.slice(measurementIndex + match[0].length);
+    const insideQuotes = ANALYSIS_QUOTE_PAIRS.some(([opening, closing]) =>
+      before.lastIndexOf(opening) > before.lastIndexOf(closing)
+      && after.includes(closing)
+    );
+    const hasContextBefore = MEASUREMENT_CONTEXT_BEFORE.test(before);
+    const hasContextAfter = MEASUREMENT_CONTEXT_AFTER.test(after);
+    const numericValue = match[0].match(NUMERIC_VALUE_START)?.[0];
+    if (
+      insideQuotes
+      || !numericValue
+      || !visibleNumericValues.has(normalizeNumericValue(numericValue))
+    ) return false;
+    if (MEASUREMENT_ACTION_AFTER.test(after) && !(hasContextBefore && hasContextAfter)) {
+      return false;
+    }
+    if (!hasContextBefore && !hasContextAfter) return false;
   }
   return true;
 }
@@ -504,6 +554,24 @@ function extractKnownEntityTokens(evidence: readonly PromptEvidence[]) {
     }
   }
   return tokens;
+}
+
+function extractVisibleNumericValues(evidence: readonly PromptEvidence[]) {
+  return new Set(evidence.flatMap((entry) =>
+    [...entry.statement.matchAll(NUMERIC_VALUES)].map((match) =>
+      normalizeNumericValue(match[0])
+    )
+  ));
+}
+
+function normalizeNumericValue(value: string) {
+  return Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0)!;
+    if (codePoint >= 0xff10 && codePoint <= 0xff19) {
+      return String(codePoint - 0xff10);
+    }
+    return character === '．' ? '.' : character;
+  }).join('');
 }
 
 function isSegmentableHanRun(run: string, candidateTokens: readonly string[]) {
