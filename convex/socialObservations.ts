@@ -52,8 +52,14 @@ const defaultDependencies: SocialObservationDependencies = {
 
 const UNSAFE_FORMAT = /[\u0000-\u001f\u007f`<>*_|#\[\]]/u;
 const LATIN_TEXT = /[A-Za-z]/u;
-const FORBIDDEN_ANALYSIS = /心理诊断|精神病|抑郁症|焦虑症|人格障碍|自闭症|偏执|道德败坏|恶意|邪恶|自私|懒惰|必然|一定会|已经证明|足以证明|证明了|证实了|毫无疑问|显然|肯定|注定|由于|从而|进而|以致|促成|带动|令|使得|促使|致使|归因|导致|造成|引发|带来|推动|使(?!用)|决定了|源于|因为[^。；]{0,80}所以|因此/u;
+const FORBIDDEN_ANALYSIS = /心理诊断|精神病|抑郁症|焦虑症|人格障碍|自闭症|偏执|道德败坏|恶意|邪恶|自私|懒惰|必然|一定会|已经证明|足以证明|证明了|证实了|毫无疑问|显然|肯定|注定|由于|从而|进而|以致|促成|带动|令|使得|促使|致使|归因|导致|造成|引发|带来|推动|来自|使(?!用)|决定了|源于|因为[^。；]{0,80}所以|因此/u;
 const CAUTIOUS_CLAIM = /记录显示|现有记录|当前记录|当日记录|可见|可能|或许|尚需|倾向|迹象|在已记录范围内|从现有记录看|未必|暂可/u;
+const SAFE_ANALYSIS_PUNCTUATION = new Set(Array.from('，。；、：！？（）“”‘’《》'));
+const NUMERIC_MEASUREMENT = /^(?:[0-9０-９]+(?:[.．][0-9０-９]+)?)(?:%|％|分钟|小时|公里|条|次|人|组|项|个|类|天|日|年|月|秒|米|元|份|场|户|家|岁)/u;
+const NUMERIC_MEASUREMENTS = /(?:[0-9０-９]+(?:[.．][0-9０-９]+)?)(?:%|％|分钟|小时|公里|条|次|人|组|项|个|类|天|日|年|月|秒|米|元|份|场|户|家|岁)/gu;
+const NUMERIC_CHARACTER = /^[0-9０-９]$/u;
+const HAN_CHARACTER = /^\p{Script=Han}$/u;
+const SPACE_SEPARATOR = /^\p{Zs}$/u;
 const SAFE_ANALYSIS_TOKENS = new Set([
   '当日记录显示', '现有记录显示', '当前记录显示', '从现有记录看',
   '在已记录范围内', '当日可见记录', '当日可见', '可见记录', '当日记录',
@@ -62,11 +68,13 @@ const SAFE_ANALYSIS_TOKENS = new Set([
   '邻近变化', '原有活动安排', '机构活动', '机构使用分布', '互动分布',
   '活动分布', '记录密度', '可见分布', '局部结构', '不同结构',
   '跨日基线', '统计方法', '公共记录', '后续记录', '后续比较', '继续记录',
-  '未出现互动', '持续观察', '少数组合', '仅覆盖', '只覆盖',
+  '未出现互动', '持续观察', '同时出现', '少数组合', '仅覆盖', '只覆盖',
+  '样本不足', '数据缺失', '无法判断', '不一定',
   '居民', '互动', '活动', '机构', '分析', '记录', '结果', '变化',
   '可能', '或许', '尚需', '倾向', '迹象', '未必', '暂可',
-  '集中', '较集中', '较多', '承担', '参与', '存在', '代表', '来自',
-  '影响', '反映', '呈现', '出现', '比较', '覆盖', '没有', '不均',
+  '集中', '较集中', '较多', '承担', '参与', '存在', '代表',
+  '影响', '反映', '呈现', '出现', '观察', '是否', '比较', '覆盖', '没有',
+  '不足', '缺失', '不均',
   '部分', '范围', '结构', '分布', '模式', '消息', '时段',
   '可见', '现有', '当前', '当日', '后续', '其他', '原有', '公共',
   '在', '中', '的', '与', '或', '但', '其', '了',
@@ -264,11 +272,57 @@ function isSafeAnalysisText(value: string, knownEntityTokens: ReadonlySet<string
     || UNSAFE_FORMAT.test(value)
     || LATIN_TEXT.test(value)
     || FORBIDDEN_ANALYSIS.test(value)
+    || !hasOnlyAllowedAnalysisCharacters(value)
+    || hasUnhedgedInfluence(value)
   ) return false;
-  const hanRuns = value.match(/\p{Script=Han}+/gu) ?? [];
+  const lexicalText = value.replace(NUMERIC_MEASUREMENTS, '');
+  const hanRuns = lexicalText.match(/\p{Script=Han}+/gu) ?? [];
   if (hanRuns.length === 0) return false;
   const tokens = [...SAFE_ANALYSIS_TOKENS, ...knownEntityTokens];
   return hanRuns.every((run) => isSegmentableHanRun(run, tokens));
+}
+
+function hasOnlyAllowedAnalysisCharacters(value: string) {
+  let offset = 0;
+  while (offset < value.length) {
+    const character = String.fromCodePoint(value.codePointAt(offset)!);
+    if (NUMERIC_CHARACTER.test(character)) {
+      const measurement = value.slice(offset).match(NUMERIC_MEASUREMENT)?.[0];
+      if (!measurement) return false;
+      offset += measurement.length;
+      continue;
+    }
+    if (
+      HAN_CHARACTER.test(character)
+      || SPACE_SEPARATOR.test(character)
+      || SAFE_ANALYSIS_PUNCTUATION.has(character)
+    ) {
+      offset += character.length;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+function hasUnhedgedInfluence(value: string) {
+  let influenceIndex = value.indexOf('影响');
+  while (influenceIndex >= 0) {
+    const before = value.slice(0, influenceIndex);
+    const clauseStart = Math.max(
+      before.lastIndexOf('，'),
+      before.lastIndexOf('。'),
+      before.lastIndexOf('；'),
+      before.lastIndexOf('！'),
+      before.lastIndexOf('？'),
+    );
+    const localBefore = before.slice(clauseStart + 1);
+    const hasModalBefore = /(?:可能|或许|未必|不一定)[^，。；！？]{0,8}$/u.test(localBefore);
+    const asksWhether = /(?:尚需|无法判断)[^，。；！？]{0,20}是否[^，。；！？]{0,8}$/u.test(localBefore);
+    if (!hasModalBefore && !asksWhether) return true;
+    influenceIndex = value.indexOf('影响', influenceIndex + '影响'.length);
+  }
+  return false;
 }
 
 function parseEvidenceBundle(evidenceJson: string): SocialEvidenceBundle {
@@ -424,6 +478,8 @@ function escapePromptJson(value: string) {
 
 function extractKnownEntityTokens(evidence: readonly PromptEvidence[]) {
   const tokens = new Set<string>();
+  // Personal names are intentionally excluded; only suffix-bounded places,
+  // institutions and events can become visible-evidence vocabulary.
   for (const entry of evidence) {
     for (const run of entry.statement.match(/\p{Script=Han}+/gu) ?? []) {
       for (const suffix of KNOWN_ENTITY_SUFFIXES) {

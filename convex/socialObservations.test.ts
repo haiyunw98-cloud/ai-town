@@ -86,10 +86,10 @@ const validModelResult = {
       alternativeExplanation: '使用次数未必代表活动持续时间。',
     },
     {
-      claim: '当日可见观察者消息，但其影响尚需持续观察。',
+      claim: '当日可见观察者消息，尚需观察是否影响居民互动。',
       evidenceIds: ['E003'],
       confidence: '低',
-      alternativeExplanation: '邻近变化可能来自原有活动安排。',
+      alternativeExplanation: '邻近变化可能与原有活动安排同时出现。',
     },
   ],
   limitations: ['分析仅覆盖当日可见记录。', '没有跨日基线。'],
@@ -358,6 +358,13 @@ describe('social observation structured model boundary', () => {
     ['unlisted short alias', '当日记录显示，阿强可能参与互动。'],
     ['unlisted literary name', '当日记录显示，林黛玉可能参与互动。'],
     ['Latin alias', '当日记录显示，Xavier可能参与互动。'],
+    ['Cyrillic alias', '当日记录显示，Алексей可能参与互动。'],
+    ['Katakana alias', '当日记录显示，タロウ可能参与互动。'],
+    ['Arabic alias', '当日记录显示，علي可能参与互动。'],
+    ['Greek alias', '当日记录显示，Ω可能参与互动。'],
+    ['emoji alias', '当日记录显示，🙂可能参与互动。'],
+    ['unpaired numeric alias', '当日记录显示，007可能参与互动。'],
+    ['measurement-unit alias', '当日记录显示，米家可能参与互动。'],
     ['new place', '现有记录显示，月光酒馆可能承担了机构活动。'],
     ['unknown place without a configured suffix', '当日记录显示，望月台可能承担活动。'],
     ['new event', '当日记录显示，七夕庆典可能形成公共活动。'],
@@ -373,6 +380,10 @@ describe('social observation structured model boundary', () => {
     ['underscore emphasis', '当日记录显示，_互动_可能集中。'],
     ['hash marker', '当日记录显示，#互动可能集中。'],
     ['HTML comment', '当日记录显示，<!--注入-->互动可能集中。'],
+    ['strikethrough tildes', '当日记录显示，~~互动~~可能集中。'],
+    ['next-line control', '当日记录显示，互动\u0085可能集中。'],
+    ['zero-width format control', '当日记录显示，互动\u200d可能集中。'],
+    ['combining mark', '当日记录显示，互动\u0301可能集中。'],
     ['pipe table', '当日记录显示，互动可能集中。|证据|结论|'],
     ['reference link', '当日记录显示，[互动][evidence]可能集中。'],
   ])('rejects unsafe claim content: %s', async (_name, claim) => {
@@ -428,6 +439,73 @@ describe('social observation structured model boundary', () => {
     };
     const result = await requestSocialObservation(evidenceJson(), completion(output));
     expectExactFallback(result, '输出无效');
+  });
+
+  test.each([
+    '观察者消息影响居民互动。',
+    '居民互动来自观察者消息。',
+  ])('rejects deterministic influence wording %s', async (claim) => {
+    const output = {
+      ...validModelResult,
+      findings: [{ ...validModelResult.findings[0], claim: `当日记录显示，${claim}` }, ...validModelResult.findings.slice(1)],
+    };
+    const result = await requestSocialObservation(evidenceJson(), completion(output));
+    expectExactFallback(result, '输出无效');
+  });
+
+  test.each([
+    '统计方法可能影响结果。',
+    '统计方法或许影响结果。',
+    '统计方法未必影响结果。',
+    '统计方法不一定影响结果。',
+    '尚需观察统计方法是否影响结果。',
+    '无法判断统计方法是否影响结果。',
+  ])('accepts locally qualified influence wording %s', async (claim) => {
+    const output = {
+      ...validModelResult,
+      findings: [{
+        ...validModelResult.findings[0],
+        claim: `当日记录显示，${claim}`,
+      }, ...validModelResult.findings.slice(1)],
+    };
+
+    await expect(requestSocialObservation(evidenceJson(), completion(output))).resolves.toEqual({
+      source: 'model',
+      ...output,
+    });
+  });
+
+  test.each(['50%', '50％', '2组']) (
+    'accepts numeric analysis paired with the measurement unit in %s',
+    async (measurement) => {
+      const output = {
+        ...validModelResult,
+        findings: [{
+          ...validModelResult.findings[0],
+          claim: `当日记录显示，居民互动可能集中在${measurement}。`,
+        }, ...validModelResult.findings.slice(1)],
+      };
+
+      await expect(requestSocialObservation(evidenceJson(), completion(output))).resolves.toEqual({
+        source: 'model',
+        ...output,
+      });
+    },
+  );
+
+  test('accepts a non-control Unicode space separator', async () => {
+    const output = {
+      ...validModelResult,
+      findings: [{
+        ...validModelResult.findings[0],
+        claim: '当日记录显示，统计方法可能\u00a0影响结果。',
+      }, ...validModelResult.findings.slice(1)],
+    };
+
+    await expect(requestSocialObservation(evidenceJson(), completion(output))).resolves.toEqual({
+      source: 'model',
+      ...output,
+    });
   });
 
   test('accepts generic cautious analysis fully segmentable from the safe lexicon', async () => {
@@ -489,6 +567,21 @@ describe('social observation structured model boundary', () => {
 
     expectExactFallback(result, '输出无效', withPerson);
   });
+
+  test.each(['样本不足。', '数据缺失。', '不足。', '缺失。'])(
+    'accepts the controlled generic limitation %s',
+    async (limitation) => {
+      const output = {
+        ...validModelResult,
+        limitations: [validModelResult.limitations[0], limitation],
+      };
+
+      await expect(requestSocialObservation(evidenceJson(), completion(output))).resolves.toEqual({
+        source: 'model',
+        ...output,
+      });
+    },
+  );
 
   test.each([
     ['malformed JSON', '{"findings":'],
