@@ -36,7 +36,12 @@ function isValidState(state: EconomyState): boolean {
 }
 
 function rejected(state: EconomyState): SettlementResult {
-  return { ok: false, ...state };
+  return {
+    ok: false,
+    residentBalance: state.residentBalance,
+    institutionCash: state.institutionCash,
+    stock: state.stock,
+  };
 }
 
 export function settleWork(state: EconomyState, input: WorkInput): SettlementResult {

@@ -86,6 +86,18 @@ describe('settleWork', () => {
       stock: MAX_STOCK,
     });
   });
+
+  test('cannot inherit a stale success flag when rejecting a chained settlement', () => {
+    const first = settleWork(
+      { residentBalance: 100, institutionCash: 200, stock: 4 },
+      { pay: 12, output: 2 },
+    );
+    expect(first.ok).toBe(true);
+    expect(settleWork(first, { pay: Number.MAX_VALUE, output: 2 }).ok).toBe(false);
+    expect(settlePurchase(first, { price: Number.MIN_VALUE, quantity: 1 }).ok).toBe(
+      false,
+    );
+  });
 });
 
 describe('settlePurchase', () => {
