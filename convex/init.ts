@@ -1,6 +1,6 @@
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
-import { DatabaseReader, MutationCtx, mutation } from './_generated/server';
+import { DatabaseReader, internalMutation, MutationCtx, mutation } from './_generated/server';
 import { localizedDescriptions } from '../data/worlds/lighthouse-town/characters';
 import * as map from '../data/worlds/lighthouse-town/map';
 import { insertInput } from './aiTown/insertInput';
@@ -9,6 +9,7 @@ import { createEngine } from './aiTown/main';
 import { ENGINE_ACTION_DURATION } from './constants';
 import { detectMismatchedLLMProvider } from './util/llm';
 import { getWorldLocale } from './util/worldLocale';
+import { initializeTownEconomy } from './townEconomy';
 
 const Descriptions = localizedDescriptions(getWorldLocale());
 
@@ -40,14 +41,26 @@ const init = mutation({
         await insertInput(ctx, worldStatus.worldId, 'createAgent', { descriptionIndex });
       }
       await ctx.scheduler.runAfter(15_000, internal.events.advanceActiveEvents, {});
+      await ctx.scheduler.runAfter(20_000, internal.init.reconcileTownEconomy, {
+        worldId: worldStatus.worldId,
+      });
     }
+    const economy = await initializeTownEconomy(ctx, worldStatus.worldId);
     return {
       worldId: worldStatus.worldId,
       queuedResidents: missingDescriptionIndexes.map((index) => Descriptions[index].name),
+      economy,
     };
   },
 });
 export default init;
+
+// Agent creation is asynchronous. This second idempotent reconciliation fills accounts
+// only after their runtime player IDs and descriptions exist.
+export const reconcileTownEconomy = internalMutation({
+  args: { worldId: v.id('worlds') },
+  handler: async (ctx, args) => initializeTownEconomy(ctx, args.worldId),
+});
 
 async function getOrCreateDefaultWorld(ctx: MutationCtx) {
   const now = Date.now();

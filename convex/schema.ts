@@ -105,6 +105,62 @@ export default defineSchema({
     createdAt: v.number(),
   }).index('resident', ['worldId', 'residentId', 'createdAt']),
 
+  residentEconomy: defineTable({
+    worldId: v.id('worlds'),
+    residentId: playerId,
+    profileId: v.string(),
+    balance: v.number(),
+    hunger: v.number(),
+    energy: v.number(),
+    todayIncome: v.number(),
+    todayExpense: v.number(),
+    dayKey: v.string(),
+    updatedAt: v.number(),
+  })
+    .index('resident', ['worldId', 'residentId'])
+    .index('profile', ['worldId', 'profileId'])
+    .index('world', ['worldId']),
+
+  townInstitutions: defineTable({
+    worldId: v.id('worlds'),
+    institutionId: v.string(),
+    cash: v.number(),
+    stockJson: v.string(),
+    serviceCountersJson: v.string(),
+    todayIncome: v.number(),
+    todayExpense: v.number(),
+    visitorCount: v.number(),
+    dayKey: v.string(),
+    updatedAt: v.number(),
+  })
+    .index('institution', ['worldId', 'institutionId'])
+    .index('world', ['worldId']),
+
+  // Append-only factual journal. Code writes through appendEconomyLedger, whose
+  // stable idempotency key preserves the first observed settlement.
+  economyLedger: defineTable({
+    worldId: v.id('worlds'),
+    idempotencyKey: v.string(),
+    dayKey: v.string(),
+    residentId: v.optional(playerId),
+    institutionId: v.optional(v.string()),
+    kind: v.union(
+      v.literal('work'),
+      v.literal('purchase'),
+      v.literal('restock'),
+      v.literal('event-reward'),
+      v.literal('event-service'),
+    ),
+    amount: v.number(),
+    item: v.optional(v.string()),
+    quantity: v.optional(v.number()),
+    sourceKey: v.string(),
+    text: v.string(),
+    createdAt: v.number(),
+  })
+    .index('idempotencyKey', ['worldId', 'idempotencyKey'])
+    .index('day', ['worldId', 'dayKey', 'createdAt']),
+
   ...agentTables,
   ...aiTownTables,
   ...engineTables,
