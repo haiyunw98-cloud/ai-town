@@ -4,6 +4,9 @@ export type EconomyState = {
   stock: number;
 };
 
+export const MAX_MONEY = 1_000_000_000;
+export const MAX_STOCK = 1_000_000;
+
 type WorkInput = {
   pay: number;
   output: number;
@@ -14,71 +17,86 @@ type PurchaseInput = {
   quantity: number;
 };
 
-type PurchaseResult =
+type SettlementResult =
   | (EconomyState & { ok: true })
   | (EconomyState & { ok: false });
 
 export type NeedAction = 'food' | 'rest' | 'normal';
 
-function nonNegativeFinite(value: number): number {
-  return Number.isFinite(value) ? Math.max(0, value) : 0;
+function isWholeAmount(value: number, maximum: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
 
-function sanitizeState(state: EconomyState): EconomyState {
-  return {
-    residentBalance: nonNegativeFinite(state.residentBalance),
-    institutionCash: nonNegativeFinite(state.institutionCash),
-    stock: Math.floor(nonNegativeFinite(state.stock)),
-  };
+function isValidState(state: EconomyState): boolean {
+  return (
+    isWholeAmount(state.residentBalance, MAX_MONEY) &&
+    isWholeAmount(state.institutionCash, MAX_MONEY) &&
+    isWholeAmount(state.stock, MAX_STOCK)
+  );
 }
 
-function isNonNegativeFinite(value: number): boolean {
-  return Number.isFinite(value) && value >= 0;
+function rejected(state: EconomyState): SettlementResult {
+  return { ok: false, ...state };
 }
 
-export function settleWork(state: EconomyState, input: WorkInput): EconomyState {
-  const safeState = sanitizeState(state);
+export function settleWork(state: EconomyState, input: WorkInput): SettlementResult {
   if (
-    !isNonNegativeFinite(input.pay) ||
-    !Number.isSafeInteger(input.output) ||
-    input.output < 0
+    !isValidState(state) ||
+    !isWholeAmount(input.pay, MAX_MONEY) ||
+    !isWholeAmount(input.output, MAX_STOCK)
   ) {
-    return safeState;
+    return rejected(state);
   }
 
-  const paid = Math.min(safeState.institutionCash, input.pay);
-  return {
-    residentBalance: safeState.residentBalance + paid,
-    institutionCash: safeState.institutionCash - paid,
-    stock: safeState.stock + input.output,
-  };
-}
-
-export function settlePurchase(state: EconomyState, input: PurchaseInput): PurchaseResult {
-  const safeState = sanitizeState(state);
+  const paid = Math.min(state.institutionCash, input.pay);
+  const residentBalance = state.residentBalance + paid;
+  const institutionCash = state.institutionCash - paid;
+  const stock = state.stock + input.output;
   if (
-    !Number.isFinite(input.price) ||
-    input.price <= 0 ||
-    !Number.isSafeInteger(input.quantity) ||
-    input.quantity <= 0
+    !isWholeAmount(residentBalance, MAX_MONEY) ||
+    !isWholeAmount(institutionCash, MAX_MONEY) ||
+    !isWholeAmount(stock, MAX_STOCK)
   ) {
-    return { ok: false, ...safeState };
-  }
-
-  const total = input.price * input.quantity;
-  if (
-    !Number.isFinite(total) ||
-    safeState.residentBalance < total ||
-    safeState.stock < input.quantity
-  ) {
-    return { ok: false, ...safeState };
+    return rejected(state);
   }
 
   return {
     ok: true,
-    residentBalance: safeState.residentBalance - total,
-    institutionCash: safeState.institutionCash + total,
-    stock: safeState.stock - input.quantity,
+    residentBalance,
+    institutionCash,
+    stock,
+  };
+}
+
+export function settlePurchase(state: EconomyState, input: PurchaseInput): SettlementResult {
+  if (
+    !isValidState(state) ||
+    !isWholeAmount(input.price, MAX_MONEY) ||
+    input.price <= 0 ||
+    !isWholeAmount(input.quantity, MAX_STOCK) ||
+    input.quantity <= 0
+  ) {
+    return rejected(state);
+  }
+
+  const total = input.price * input.quantity;
+  const residentBalance = state.residentBalance - total;
+  const institutionCash = state.institutionCash + total;
+  const stock = state.stock - input.quantity;
+  if (
+    !isWholeAmount(total, MAX_MONEY) ||
+    !isWholeAmount(residentBalance, MAX_MONEY) ||
+    !isWholeAmount(institutionCash, MAX_MONEY) ||
+    !isWholeAmount(stock, MAX_STOCK)
+  ) {
+    return rejected(state);
+  }
+
+  return {
+    ok: true,
+    residentBalance,
+    institutionCash,
+    stock,
   };
 }
 
@@ -87,21 +105,9 @@ export function eventReward(input: {
   finalist: boolean;
   champion: boolean;
 }): number {
-  return (input.participated ? 10 : 0) + (input.finalist ? 20 : 0) + (input.champion ? 50 : 0);
-}
-
-export function chooseNeed(input: {
-  hunger: number;
-  energy: number;
-  balance: number;
-}): NeedAction {
-  if (input.hunger < 30 && input.balance >= 4) {
-    return 'food';
-  }
-  if (input.energy < 30) {
-    return 'rest';
-  }
-  return 'normal';
+  if (input.champion) return 80;
+  if (input.finalist) return 30;
+  return input.participated ? 10 : 0;
 }
 
 export function eligibleNeedActions(input: {
@@ -109,12 +115,12 @@ export function eligibleNeedActions(input: {
   energy: number;
   balance: number;
 }): NeedAction[] {
-  const canAffordFood = Number.isFinite(input.balance) && input.balance >= 4;
-  if (input.hunger < 30 && canAffordFood) {
-    return ['food'];
-  }
+  const canAffordFood = isWholeAmount(input.balance, MAX_MONEY) && input.balance >= 4;
+  const critical: NeedAction[] = [];
+  if (input.hunger < 30 && canAffordFood) critical.push('food');
   if (input.energy < 30) {
-    return ['rest'];
+    critical.push('rest');
   }
+  if (critical.length > 0) return critical;
   return canAffordFood ? ['food', 'rest', 'normal'] : ['rest', 'normal'];
 }
