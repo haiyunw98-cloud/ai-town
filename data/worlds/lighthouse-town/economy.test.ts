@@ -1,5 +1,5 @@
 import { lighthouseCharacters } from './characters';
-import { goods, institutions, residentEconomyProfiles } from './economy';
+import { goods, institutions, residentEconomyProfiles, services } from './economy';
 import { townLandmarks } from './map';
 
 describe('灯塔镇经济基础定义', () => {
@@ -33,19 +33,55 @@ describe('灯塔镇经济基础定义', () => {
     expect(goods.every((entry) => entry.price > 0 && entry.price <= 20)).toBe(true);
   });
 
-  test('居民工资、余额和产出均为明确且有界的可结算数据', () => {
+  test('居民补偿、余额和产出均为明确且有界的可结算数据', () => {
+    const serviceIds = services.map((service) => service.id);
     for (const profile of residentEconomyProfiles) {
       expect(profile.startingBalance).toBeGreaterThanOrEqual(80);
       expect(profile.startingBalance).toBeLessThanOrEqual(160);
-      expect(profile.workPay).toBeGreaterThanOrEqual(8);
-      expect(profile.workPay).toBeLessThanOrEqual(16);
+      expect(profile.compensation.amount).toBeGreaterThanOrEqual(8);
+      expect(profile.compensation.amount).toBeLessThanOrEqual(16);
+      expect(profile.compensation.cashCapped).toBe(true);
       expect(profile.workOutput.quantity).toBeGreaterThan(0);
-      expect(['meal', 'tea', 'medicine', 'daily-goods', 'craft-service', 'service']).toContain(
-        profile.workOutput.item,
-      );
-      expect(institutions.some((institution) => institution.id === profile.institutionId)).toBe(true);
+      expect(Number.isFinite(profile.workOutput.quantity)).toBe(true);
+      expect(profile.workOutput.quantity).toBeLessThanOrEqual(5);
+
+      const institution = institutions.find((entry) => entry.id === profile.institutionId);
+      expect(institution).toBeDefined();
+      if (profile.workOutput.kind === 'stock') {
+        expect(institution?.goods).toContain(profile.workOutput.item);
+      } else {
+        expect(serviceIds).toContain(profile.workOutput.serviceId);
+        expect(institution?.serviceIds).toContain(profile.workOutput.serviceId);
+      }
       expect(['employee', 'self-employed']).toContain(profile.employment);
     }
+  });
+
+  test('雇员领取工资，自营者只做现金受限的支取或合作分成', () => {
+    for (const profile of residentEconomyProfiles) {
+      if (profile.employment === 'employee') {
+        expect(profile.compensation.kind).toBe('wage');
+      } else {
+        expect(['owner-draw', 'contract-share']).toContain(profile.compensation.kind);
+      }
+    }
+
+    const guChao = residentEconomyProfiles.find((profile) => profile.id === 'gu-chao');
+    expect(guChao?.compensation.kind).toBe('contract-share');
+    expect(guChao?.workplaceNote).toMatch(/共享工位.*独立接单.*不是.*雇员/u);
+  });
+
+  test('服务定义使用独立计数目标，不冒充商品库存', () => {
+    expect(new Set(services.map((service) => service.id)).size).toBe(services.length);
+    expect(services.every((service) => service.counterName.endsWith('完成次数'))).toBe(true);
+    expect(residentEconomyProfiles.some((profile) => profile.workOutput.kind === 'service')).toBe(
+      true,
+    );
+    expect(
+      residentEconomyProfiles
+        .filter((profile) => profile.workOutput.kind === 'service')
+        .every((profile) => !('item' in profile.workOutput)),
+    ).toBe(true);
   });
 
   test('职业与机构保持江南小镇日常语境而非谜题工作', () => {
