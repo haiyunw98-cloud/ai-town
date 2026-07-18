@@ -5,12 +5,12 @@ import {
   TOPIC_DETAILS,
   validateResidentReply,
 } from './conversationPolicy';
-import type { ReplyContext, TopicCategory, TopicDetail } from './conversationPolicy';
+import type { ReplyContext, TopicCategory } from './conversationPolicy';
 import * as conversationPolicy from './conversationPolicy';
 
 const length = (value: string) => Array.from(value).length;
 
-const topicDetails = Object.values(TOPIC_DETAILS).flat() as TopicDetail[];
+const topicDetails = Object.values(TOPIC_DETAILS).flat();
 
 describe('selectConversationTopic', () => {
   test('allocates the exact rolling 60/25/15 category budget over 100 choices', () => {
@@ -172,6 +172,20 @@ describe('legacy story isolation', () => {
       expect(containsLegacyStory(`Residents finished their work beside the ${term}.`)).toBe(false);
     },
   );
+
+  test.each([
+    'The account anomaly was corrected.',
+    'A model anomaly was resolved.',
+    'This math puzzle has been solved.',
+    'The community treasure hunt starts today.',
+  ])('allows ordinary English text that shares a generic word: %s', (text) => {
+    expect(containsLegacyStory(text)).toBe(false);
+    expect(validateResidentReply(text, {
+      kind: 'continue',
+      topic: 'local-news',
+      observerAskedAboutSea: false,
+    })).toEqual({ accepted: true, text });
+  });
 
   test('filters matching memories without mutation and preserves order and identity', () => {
     const first = Object.freeze({ description: '我在市场买了青菜。', id: 1 });

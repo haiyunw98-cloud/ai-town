@@ -157,6 +157,7 @@ function buildEvidenceSources(
   messages: readonly DailyMessage[],
   lifeEvents: readonly LifeEvent[],
   publicLogs: readonly PublicLog[],
+  semanticMessageText: ReadonlyMap<DailyMessage, string> = new Map(),
 ): EvidenceSources {
   return {
     message: assignAuditSources(messages, (message) => ({
@@ -168,7 +169,7 @@ function buildEvidenceSources(
         normalizeText(message.text),
       ].join('\u0000'),
       createdAt: message.createdAt,
-      text: normalizeText(message.text),
+      text: normalizeText(semanticMessageText.get(message) ?? message.text),
     })),
     life: assignAuditSources(lifeEvents, (event) => ({
       baseKey: `life:${event.createdAt}:${safeKeyPart(event.residentId)}:${safeKeyPart(event.kind)}`,
@@ -233,26 +234,56 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function isExplicitCompletedInstitutionUse(value: string, institutionName: string) {
-  const text = normalizeText(value);
-  if (!text.includes(institutionName)) return false;
-  if (/没有|没(?:有)?(?:去|到|在|用|进入|参观)|未(?:去|到|在|用|进入|参观)|不(?:去|到|在|用|进入|参观)/u.test(text)) {
-    return false;
-  }
-  if (/打算|计划|明天|准备(?:去|前往|到|在|使用|进入|参观)/u.test(text)) return false;
-  if (/比|类似|如同|像(?:是)?/u.test(text)) return false;
-  if (
-    text.includes(`“${institutionName}”`)
-    || text.includes(`‘${institutionName}’`)
-    || text.includes(`"${institutionName}"`)
-    || text.includes(`'${institutionName}'`)
-  ) return false;
+const ASSERTION_BLOCKER = /不|未|没有|没|并非|绝非|尚未|从未|拒绝|否认|如果|假如|计划|打算|准备|明天|将要|想|希望|可能/u;
+const REPORTED_OR_EXAMPLE = /例如|比如|举例|例子|听说|据说|(?:他|她|他们|她们|居民|邻居|对方|有人)(?:说|称|表示|声称|提到)|报道称|消息称/u;
 
+function stripQuotedText(value: string) {
+  const openingToClosing: Record<string, string> = {
+    '“': '”',
+    '‘': '’',
+    '「': '」',
+    '『': '』',
+    '"': '"',
+    "'": "'",
+  };
+  let closingQuote: string | undefined;
+  let result = '';
+  for (const character of value) {
+    if (closingQuote) {
+      if (character === closingQuote) closingQuote = undefined;
+      continue;
+    }
+    const closing = openingToClosing[character];
+    if (closing) {
+      closingQuote = closing;
+      continue;
+    }
+    result += character;
+  }
+  return result.trim();
+}
+
+function assertedClauses(value: string) {
+  return splitConversationClauses(normalizeText(value))
+    .map(stripQuotedText)
+    .filter((clause) => clause.length > 0)
+    .filter((clause) => !ASSERTION_BLOCKER.test(clause) && !REPORTED_OR_EXAMPLE.test(clause));
+}
+
+function isExplicitCompletedInstitutionUse(value: string, institutionName: string) {
   const name = escapeRegex(institutionName);
-  const completedAction = '工作|整理|采购|换药|问诊|坐诊|授课|用餐|商谈|办理|维修|送货|卸货|购买|售卖|结算|活动';
-  return new RegExp(`在${name}[^。！？]{0,40}(?:${completedAction})`, 'u').test(text)
-    || new RegExp(`(?:去了|到访了?|进入了?|参观了?|使用了?|到达)${name}`, 'u').test(text)
-    || new RegExp(`${name}[^。！？]{0,40}(?:完成|办理|开展)(?:${completedAction})`, 'u').test(text);
+  const action = '工作|整理|营业|坐诊|上课|采购|购买|销售|卖货|用餐|吃饭|休息|拜访|探望|办理|修理|送货|换药|开会|学习';
+  const movement = `(?:去(?:了)?|到(?:了)?|进入(?:了)?|抵达(?:了)?|来到(?:了)?|回到(?:了)?|走进(?:了)?)${name}`;
+  const actionAtInstitution = `(?:在|于)${name}[^。！？]{0,40}(?:${action})`;
+  const institutionAfterAction = `(?:${action})[^。！？]{0,40}(?:在|于)${name}(?:[^。！？]{0,12}(?:完成|进行))?`;
+  return assertedClauses(value).some((clause) =>
+    clause.includes(institutionName)
+      && (
+        new RegExp(movement, 'u').test(clause)
+        || new RegExp(actionAtInstitution, 'u').test(clause)
+        || new RegExp(institutionAfterAction, 'u').test(clause)
+      ),
+  );
 }
 
 function buildResidentIndex(
@@ -300,10 +331,6 @@ function buildNetworkDraft(
   const residentIndex = buildResidentIndex(snapshot, messages, sources);
   const messagesByConversation = new Map<string, DailyMessage[]>();
   for (const message of messages) {
-    if (
-      message.observerIntervention
-      || residentIndex.observerControlledIds.has(message.authorId)
-    ) continue;
     const group = messagesByConversation.get(message.conversationId) ?? [];
     group.push(message);
     messagesByConversation.set(message.conversationId, group);
@@ -315,22 +342,17 @@ function buildNetworkDraft(
   for (const [, group] of [...messagesByConversation.entries()].sort(
     ([left], [right]) => compareText(left, right),
   )) {
-    const authorIds = new Set(group.map((message) => `id:${normalizeText(message.authorId)}`));
-    if (authorIds.size === 2) {
-      const [left, right] = [...authorIds].sort();
-      const pairKey = `${left}\u0000${right}`;
-      pairCounts.set(pairKey, (pairCounts.get(pairKey) ?? 0) + group.length);
-      interactingResidents.add(left);
-      interactingResidents.add(right);
-      for (const message of group) {
-        networkSources.push(sourceFor(sources.message, message));
-      }
-      continue;
-    }
-    if (authorIds.size < 3) continue;
     for (let index = 1; index < group.length; index += 1) {
-      const previous = `id:${normalizeText(group[index - 1].authorId)}`;
-      const current = `id:${normalizeText(group[index].authorId)}`;
+      const previousMessage = group[index - 1];
+      const currentMessage = group[index];
+      if (
+        previousMessage.observerIntervention
+        || currentMessage.observerIntervention
+        || residentIndex.observerControlledIds.has(previousMessage.authorId)
+        || residentIndex.observerControlledIds.has(currentMessage.authorId)
+      ) continue;
+      const previous = `id:${normalizeText(previousMessage.authorId)}`;
+      const current = `id:${normalizeText(currentMessage.authorId)}`;
       if (previous === current) continue;
       const [left, right] = previous < current ? [previous, current] : [current, previous];
       const pairKey = `${left}\u0000${right}`;
@@ -338,8 +360,8 @@ function buildNetworkDraft(
       interactingResidents.add(left);
       interactingResidents.add(right);
       networkSources.push(
-        sourceFor(sources.message, group[index - 1]),
-        sourceFor(sources.message, group[index]),
+        sourceFor(sources.message, previousMessage),
+        sourceFor(sources.message, currentMessage),
       );
     }
   }
@@ -369,14 +391,14 @@ function buildNetworkDraft(
     coveredMessages.map((message) => message.createdAt),
     pairCounts.size,
   );
-  const statement = `当日记录到居民互动对 ${pairCounts.size} 组，可归属互动回合 ${totalPairInteractions} 条，互动集中度 ${concentration}%，未记录到居民间互动 ${withoutInteraction} 人。`;
+  const statement = `当日记录到居民互动对 ${pairCounts.size} 组，可归属互动回合 ${totalPairInteractions} 条（均为相邻跨居民转接），互动集中度 ${concentration}%，未记录到居民间互动 ${withoutInteraction} 人。`;
 
   return {
     category: 'interaction-network',
     statement,
     sourceKeys: uniqueSourceKeys(networkSources),
     confidence: coverage.confidence,
-    limitations: ['互动对仅依据当日带时间戳消息及可映射参与者统计。'],
+    limitations: ['互动对仅依据同一会话中按时间排序的相邻跨居民消息转接统计；观察者消息保留为转接边界。'],
     findingClaim: totalPairInteractions > 0
       ? `当日可见互动包含 ${pairCounts.size} 组居民对和 ${totalPairInteractions} 条可归属互动回合，最高频互动对占 ${concentration}%。`
       : '当日快照未记录到可归属居民对的互动回合。',
@@ -489,12 +511,9 @@ function buildRelationshipDraft(
   const matchingResidents = new Set<string>();
   for (const record of records) {
     let matched = false;
-    const clauses = splitConversationClauses(record.source.text);
+    const clauses = assertedClauses(record.source.text);
     for (const kind of Object.keys(explicitSignalPatterns) as Array<keyof typeof counts>) {
-      const explicitlyAffirmed = clauses.some((clause) =>
-        !/没有|没能|未曾|并未|不再|不是|无(?:法)?/u.test(clause)
-          && explicitSignalPatterns[kind].test(clause),
-      );
+      const explicitlyAffirmed = clauses.some((clause) => explicitSignalPatterns[kind].test(clause));
       if (!explicitlyAffirmed) continue;
       counts[kind] += 1;
       matched = true;
@@ -517,7 +536,7 @@ function buildRelationshipDraft(
     statement: `当日文本中的明确迹象：友情 ${counts.friendship} 条、亲密 ${counts.intimacy} 条、合作 ${counts.cooperation} 条、照护 ${counts.care} 条、交易 ${counts.trade} 条、分歧 ${counts.dispute} 条。`,
     sourceKeys: uniqueSourceKeys(matchingSources),
     confidence: coverage.confidence,
-    limitations: ['只计数非否定语句中的明确词语，同一记录可包含多类迹象。'],
+    limitations: ['只计数逐分句确认的当前或过往明确词语；否定、条件、计划、可能性、引语和转述不计入，同一记录可包含多类迹象。'],
     findingClaim: total > 0
       ? `当日明确文本迹象中，友情 ${counts.friendship} 条、亲密 ${counts.intimacy} 条、合作 ${counts.cooperation} 条、照护 ${counts.care} 条、交易 ${counts.trade} 条、分歧 ${counts.dispute} 条。`
       : '当日快照未记录到明确的友情、亲密、合作、照护、交易或分歧迹象。',
@@ -664,12 +683,14 @@ export function buildSocialEvidence(
   now = Date.now(),
 ): SocialEvidenceBundle {
   const messages = snapshot.dailyMessages
-    .filter((message) => isCurrentDay(message.createdAt, now))
-    .map((message) => ({
-      ...message,
-      text: filterLegacyExperimentClauses(message.text),
-    }))
-    .filter((message) => message.text.length > 0);
+    .filter((message) => isCurrentDay(message.createdAt, now));
+  const semanticMessageText = new Map(messages.map((message) => [
+    message,
+    filterLegacyExperimentClauses(message.text),
+  ]));
+  const semanticMessages = messages.filter(
+    (message) => (semanticMessageText.get(message) ?? '').length > 0,
+  );
   const lifeEvents = (snapshot.dailyLifeEvents ?? [])
     .filter((event) => isCurrentDay(event.createdAt, now))
     .map((event) => ({
@@ -684,7 +705,7 @@ export function buildSocialEvidence(
       text: filterLegacyExperimentClauses(log.text),
     }))
     .filter((log) => log.text.length > 0);
-  const sources = buildEvidenceSources(messages, lifeEvents, publicLogs);
+  const sources = buildEvidenceSources(messages, lifeEvents, publicLogs, semanticMessageText);
   messages.sort((left, right) =>
     compareSource(sourceFor(sources.message, left), sourceFor(sources.message, right))
   );
@@ -713,9 +734,9 @@ export function buildSocialEvidence(
     buildNetworkDraft(snapshot, messages, sources),
     buildActivityDraft(lifeEvents, sources),
     buildInstitutionDraft(lifeEvents, sources),
-    buildRelationshipDraft(messages, lifeEvents, sources),
+    buildRelationshipDraft(semanticMessages, lifeEvents, sources),
     buildObserverDraft(messages, lifeEvents, publicLogs, sources),
-    buildPublicLifeDraft(messages, lifeEvents, publicLogs, sources),
+    buildPublicLifeDraft(semanticMessages, lifeEvents, publicLogs, sources),
   ];
   for (const draft of drafts) {
     if (draft.sourceKeys.length === 0) draft.sourceKeys = [coverageSourceKey];
@@ -762,7 +783,7 @@ export function buildSocialEvidence(
     ],
     methodNotes: [
       LEGACY_EXPERIMENT_NOTE,
-      '证据编号在确定性排序后单调分配；sourceKeys 对应输入快照记录，空类目使用 snapshot-day 日期覆盖键。',
+      '证据编号在确定性排序后单调分配；sourceKeys 对应输入快照记录；空类目使用 snapshot-day 覆盖边界键，它不是原始记录键。',
       '置信度与规则发现排序依据不同居民、不同来源、时间跨度和覆盖类别，不按重复命中次数加权。',
       '只描述当日可见结构，不作人物心理或单次事件效果判断。',
     ],

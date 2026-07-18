@@ -17,9 +17,6 @@ const LEGACY_CHINESE_TERMS = [
   '线索交汇',
   '雾潮',
   '灯塔导航',
-  '异变',
-  '谜团',
-  '谜题',
   '河道线索',
   '花木线索',
   '机关线索',
@@ -32,29 +29,38 @@ const LEGACY_ENGLISH_PATTERNS = [
   /\bsea[\s/-]+(?:beacons?|navigation|navigational|voyage|route|waves?|breeze)\b/u,
   /\bnavigation[\s/-]+at[\s/-]+sea\b/u,
   /\blighthouse[\s/-]+(?:myster(?:y|ies)|navigation|navigational)\b/u,
-  /\banomal(?:y|ies|ous)\b/u,
+  /\b(?:lighthouse|town)\b[^.!?]{0,40}\banomal(?:y|ies|ous)\b/u,
+  /\banomal(?:y|ies|ous)\b[^.!?]{0,40}\b(?:lighthouse|town)\b/u,
+  /\banomal(?:y|ies|ous)[\s/-]+story\b/u,
+  /^\s*(?:an?\s+)?anomal(?:y|ies|ous)(?:\s+story)?[.!?]?\s*$/u,
   /\blost[\s/-]+(?:sea[\s/-]+)?route\b/u,
   /\bnight[\s/-]+sailing\b/u,
   /\bfog[\s/-]+tide\b/u,
 ] as const;
 
+const LEGACY_CHINESE_CONTEXT_PATTERNS = [
+  /(?:灯塔|机关)[^。！？]{0,12}(?:谜团|谜题|之谜|谜)/u,
+  /(?:小镇|灯塔)[^。！？]{0,20}异变/u,
+  /异变[^。！？]{0,20}(?:小镇|灯塔)/u,
+] as const;
+
 const ARCHIVED_EVENT_PATTERNS = [
   /(?:百万金贝|一百万金贝)/u,
-  /寻宝(?:赛|比赛|竞赛)/u,
+  /(?:往届|上一届|旧(?:的)?|历史|已结束|已经结束|结束的|已完成|已经完成|完成的)[^。！？]{0,30}寻宝(?:赛|比赛|竞赛)/u,
+  /寻宝(?:赛|比赛|竞赛)[^。！？]{0,30}(?:往届|上一届|旧(?:的)?|历史|已结束|已经结束|结束|已完成|已经完成|完成)/u,
   /\bmillion[\s-]+(?:gold(?:en)?[\s-]+)?shells?\b/iu,
-  /\btreasure[\s-]+(?:hunt|contest)\b/iu,
+  /\b(?:previous|prior|past|archived|completed|finished|ended)\b[^.!?]{0,40}\btreasure[\s-]+(?:hunt|contest)\b/iu,
+  /\btreasure[\s-]+(?:hunt|contest)\b[^.!?]{0,40}\b(?:previous|prior|past|archived|completed|finished|ended)\b/iu,
   /\b(?:lighthouse[\s-]+town[\s-]+)?million[\s-]+gold(?:en)?[\s-]+shell(?:s)?[\s-]+treasure[\s-]+hunt(?:[\s-]+(?:race|competition))?\b/iu,
 ] as const;
 
 const AUTONOMOUS_MEMORY_FORBIDDEN_PATTERNS = [
   /海洋/u,
   /灯塔谜团/u,
-  /异变/u,
   /心理诊断/u,
   /未说出口的感情/u,
   /\boceans?\b/iu,
   /\blighthouse[\s-]+myster(?:y|ies)\b/iu,
-  /\banomal(?:y|ies|ous)\b/iu,
   /\bpsychological[\s-]+diagnos(?:is|es|tic)\b/iu,
   /\bunspoken[\s-]+feelings?\b/iu,
 ] as const;
@@ -62,6 +68,7 @@ const AUTONOMOUS_MEMORY_FORBIDDEN_PATTERNS = [
 export function containsLegacyStory(value: string): boolean {
   const normalized = value.normalize('NFKC').toLocaleLowerCase('en-US');
   return LEGACY_CHINESE_TERMS.some((term) => normalized.includes(term))
+    || LEGACY_CHINESE_CONTEXT_PATTERNS.some((pattern) => pattern.test(normalized))
     || LEGACY_ENGLISH_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 

@@ -210,7 +210,7 @@ describe('social evidence builder', () => {
     const result = buildSocialEvidence(snapshot, now);
 
     expect(JSON.stringify(result)).not.toMatch(/小镇异变|灯火装置|河道线索|花木线索/u);
-    expect(JSON.stringify(result)).not.toContain('message:message:legacy');
+    expect(JSON.stringify(result)).toContain('message:message:legacy#001');
     expect(result.methodNotes).toContain('已排除旧实验条件诱发的谜团内容');
   });
 
@@ -261,7 +261,7 @@ describe('social evidence builder', () => {
     expect(result.evidence.every((entry) => entry.confidence === '低')).toBe(true);
   });
 
-  test('weights a two-resident pair by all resident turns instead of one conversation', () => {
+  test('uses adjacent cross-speaker transitions for a two-resident conversation', () => {
     const messages = [
       ...Array.from({ length: 100 }, (_, index) => residentMessage(index, 'resident:a')),
       residentMessage(100, 'resident:b'),
@@ -278,7 +278,27 @@ describe('social evidence builder', () => {
     });
 
     expect(evidenceFor(snapshot, 'interaction-network').statement).toMatch(
-      /居民互动对 1 组.*互动回合 101 条.*互动集中度 100%/u,
+      /居民互动对 1 组.*互动回合 1 条.*互动集中度 100%/u,
+    );
+  });
+
+  test('counts every adjacent cross-speaker transition for alternating resident turns', () => {
+    const authors = ['resident:a', 'resident:b', 'resident:a', 'resident:b'];
+    const snapshot = fixtureBroadcastSnapshot({
+      conversations: [],
+      residentActivity: authors.slice(0, 2).map((residentId) => ({
+        residentId,
+        displayName: residentId,
+        status: '',
+        detail: '',
+      })),
+      dailyMessages: authors.map((authorId, index) => residentMessage(index, authorId)),
+      dailyLifeEvents: [],
+      logs: [],
+    });
+
+    expect(evidenceFor(snapshot, 'interaction-network').statement).toMatch(
+      /居民互动对 1 组.*互动回合 3 条.*互动集中度 100%/u,
     );
   });
 
@@ -330,8 +350,64 @@ describe('social evidence builder', () => {
     });
 
     expect(evidenceFor(snapshot, 'interaction-network').statement).toMatch(
-      /居民互动对 1 组.*互动回合 2 条.*未记录到居民间互动 1 人/u,
+      /居民互动对 0 组.*互动回合 0 条.*未记录到居民间互动 3 人/u,
     );
+  });
+
+  test('keeps a legacy resident turn as a network barrier and participant', () => {
+    const messages = [
+      { ...residentMessage(0, 'resident:a'), text: '完成普通工作。' },
+      { ...residentMessage(1, 'resident:b'), text: '灯塔谜团与异常闪光。' },
+      { ...residentMessage(2, 'resident:c'), text: '完成普通休息。' },
+    ];
+    const snapshot = fixtureBroadcastSnapshot({
+      conversations: [],
+      residentActivity: ['resident:a', 'resident:b', 'resident:c'].map((residentId) => ({
+        residentId,
+        displayName: residentId,
+        status: '',
+        detail: '',
+      })),
+      dailyMessages: messages,
+      dailyLifeEvents: [],
+      logs: [],
+    });
+    const network = evidenceFor(snapshot, 'interaction-network');
+
+    expect(network.statement).toMatch(
+      /居民互动对 2 组.*互动回合 2 条.*互动集中度 50%.*未记录到居民间互动 0 人/u,
+    );
+    expect(network.sourceKeys).toContain('message:network:1#001');
+    expect(JSON.stringify(buildSocialEvidence(snapshot, now))).not.toMatch(/灯塔谜团|异常闪光/u);
+  });
+
+  test('keeps legacy observer metadata while preventing an observer bridge', () => {
+    const snapshot = fixtureBroadcastSnapshot({
+      conversations: [],
+      residentActivity: [
+        { residentId: 'resident:a', displayName: '甲', status: '', detail: '' },
+        { residentId: 'resident:b', displayName: '乙', status: '', detail: '' },
+      ],
+      dailyMessages: [
+        residentMessage(0, 'resident:a'),
+        {
+          ...residentMessage(1, 'human:1'),
+          authorName: '观察者',
+          observerIntervention: true,
+          text: '请调查灯塔谜团与异常闪光。',
+        },
+        residentMessage(2, 'resident:b'),
+      ],
+      dailyLifeEvents: [],
+      logs: [],
+    });
+
+    expect(evidenceFor(snapshot, 'interaction-network').statement).toMatch(
+      /居民互动对 0 组.*互动回合 0 条/u,
+    );
+    const observer = evidenceFor(snapshot, 'observer-intervention');
+    expect(observer.statement).toMatch(/观察者消息 1 条/u);
+    expect(observer.sourceKeys).toContain('message:network:1#001');
   });
 
   test('assigns distinct deterministic audit keys to colliding life records', () => {
@@ -446,6 +522,83 @@ describe('social evidence builder', () => {
     expect(institution.sourceKeys).toHaveLength(1);
   });
 
+  test('evaluates institution assertions clause by clause', () => {
+    const institution = evidenceFor(fixtureBroadcastSnapshot({
+      dailyLifeEvents: [{
+        residentId: 'resident:a', displayName: '甲', kind: 'work',
+        text: '没有去晨雾集市，但在听雨茶庄整理订单。',
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyMessages: [],
+      logs: [],
+    }), 'institution-use');
+
+    expect(institution.statement).toMatch(/听雨茶庄 1 次/u);
+    expect(institution.statement).not.toMatch(/晨雾集市 [1-9]\d* 次/u);
+  });
+
+  test.each([
+    '如果在听雨茶庄工作就好了。',
+    '拒绝在听雨茶庄工作。',
+    '他说“在听雨茶庄工作”。',
+    '例如“在听雨茶庄工作”。',
+    '「在听雨茶庄工作」',
+    '居民说在听雨茶庄工作。',
+  ])('rejects non-asserted institution use: %s', (text) => {
+    const institution = evidenceFor(fixtureBroadcastSnapshot({
+      dailyLifeEvents: [{
+        residentId: 'resident:a', displayName: '甲', kind: 'work', text,
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyMessages: [],
+      logs: [],
+    }), 'institution-use');
+
+    expect(institution.statement).not.toMatch(/听雨茶庄 [1-9]\d* 次/u);
+  });
+
+  test.each([
+    '去了听雨茶庄。',
+    '到了听雨茶庄。',
+    '进入听雨茶庄。',
+    '抵达听雨茶庄。',
+    '来到听雨茶庄。',
+    '回到听雨茶庄。',
+    '走进听雨茶庄。',
+    '在听雨茶庄工作。',
+    '在听雨茶庄整理订单。',
+    '在听雨茶庄营业。',
+    '在听雨茶庄坐诊。',
+    '在听雨茶庄上课。',
+    '在听雨茶庄采购。',
+    '在听雨茶庄购买物品。',
+    '在听雨茶庄销售商品。',
+    '在听雨茶庄卖货。',
+    '在听雨茶庄用餐。',
+    '在听雨茶庄吃饭。',
+    '在听雨茶庄休息。',
+    '在听雨茶庄拜访朋友。',
+    '在听雨茶庄探望朋友。',
+    '在听雨茶庄办理事务。',
+    '在听雨茶庄修理物品。',
+    '在听雨茶庄送货。',
+    '在听雨茶庄换药。',
+    '在听雨茶庄开会。',
+    '在听雨茶庄学习。',
+    '整理工作在听雨茶庄完成。',
+  ])('counts explicit current or completed institution action: %s', (text) => {
+    const institution = evidenceFor(fixtureBroadcastSnapshot({
+      dailyLifeEvents: [{
+        residentId: 'resident:a', displayName: '甲', kind: 'work', text,
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyMessages: [],
+      logs: [],
+    }), 'institution-use');
+
+    expect(institution.statement).toMatch(/听雨茶庄 1 次/u);
+  });
+
   test('counts explicit friendship and intimacy while rejecting negated relationship signals', () => {
     const snapshot = fixtureBroadcastSnapshot({
       conversations: [],
@@ -460,6 +613,51 @@ describe('social evidence builder', () => {
 
     expect(evidenceFor(snapshot, 'relationship-signal').statement).toMatch(
       /友情 1 条.*亲密 1 条.*合作 1 条.*照护 1 条.*交易 0 条.*分歧 0 条/u,
+    );
+  });
+
+  test.each([
+    '未合作。',
+    '不交易。',
+    '绝非朋友。',
+    '尚未交易。',
+    '否认我们是朋友。',
+    '不反对合作。',
+    '明天合作。',
+    '如果合作就好了。',
+    '想交易。',
+    '希望约会。',
+    '可能有分歧。',
+    '他说“我们是朋友”。',
+    '例如“双方合作”。',
+    '「我们是朋友」',
+    '居民说我们是朋友。',
+  ])('rejects non-asserted relationship signal: %s', (text) => {
+    const relationship = evidenceFor(fixtureBroadcastSnapshot({
+      conversations: [],
+      dailyMessages: [{ ...residentMessage(0, 'resident:a'), text }],
+      dailyLifeEvents: [],
+      logs: [],
+    }), 'relationship-signal');
+
+    expect(relationship.statement).toMatch(
+      /友情 0 条.*亲密 0 条.*合作 0 条.*照护 0 条.*交易 0 条.*分歧 0 条/u,
+    );
+  });
+
+  test('counts conservative current and past relationship assertions', () => {
+    const relationship = evidenceFor(fixtureBroadcastSnapshot({
+      conversations: [],
+      dailyMessages: [{
+        ...residentMessage(0, 'resident:a'),
+        text: '我们已经是朋友。我们约会了。我们合作完成工作。我照顾过邻居。双方完成交易。我们发生分歧。',
+      }],
+      dailyLifeEvents: [],
+      logs: [],
+    }), 'relationship-signal');
+
+    expect(relationship.statement).toMatch(
+      /友情 1 条.*亲密 1 条.*合作 1 条.*照护 1 条.*交易 1 条.*分歧 1 条/u,
     );
   });
 
@@ -570,6 +768,7 @@ describe('social evidence builder', () => {
     expect(result.ruleFindings.flatMap((finding) => finding.evidenceIds).every(
       (evidenceId) => evidenceById.get(evidenceId)?.sourceKeys.includes('snapshot-day:2026-07-17'),
     )).toBe(true);
+    expect(result.methodNotes.join('')).toMatch(/snapshot-day.*覆盖边界.*不是原始记录/u);
   });
 
   test('ranks narrow observed evidence ahead of synthetic absence coverage', () => {
