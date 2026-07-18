@@ -91,7 +91,7 @@ export const institutions = [
 ] as const;
 ```
 
-Define all nine resident profiles with `id`, `name`, `occupation`, `institutionId`, `employment: 'employee' | 'self-employed'`, `startingBalance` between 80–160, `workPay` between 8–16, `workOutput` and one `GoodId | 'service'`. Use the existing character IDs as resident IDs.
+Define all nine resident profiles with `id`, `name`, `occupation`, `institutionId`, `employment: 'employee' | 'self-employed'`, `startingBalance` between 80–160, `compensation` (`wage`, `owner-draw`, or `contract-share`) between 8–16 with institution-cash capping, and a discriminated stock-or-service `workOutput`. Use the existing character IDs as resident IDs. Every service output must have an institution-supported service counter; every stock output must have an institution-supported goods key.
 
 - [ ] **Step 4: Run definitions tests and verify GREEN**
 
