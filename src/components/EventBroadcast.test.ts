@@ -1155,6 +1155,7 @@ describe('event broadcast view model', () => {
     expect(source).toContain('人物、关系、地点、活动与原始对话');
     expect(source).toContain('useAction(api.socialObservations.generate)');
     expect(source).toContain('useSyncExternalStore(');
+    expect(source).toContain('generate: generateSocialObservation');
     expect(source).toContain('exportFactualReport({ snapshot, locale, exportNow: Date.now() })');
     expect(source).toContain('socialReportStore.run({');
     expect(source).toContain('<button onClick={exportFacts}>{reportActions.factualLabel}</button>');

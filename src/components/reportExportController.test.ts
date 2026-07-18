@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { buildDailyReport, type BroadcastSnapshot } from './eventBroadcastView';
+import { buildSocialEvidence } from './socialEvidence';
 import {
   createSocialReportExportStore,
   downloadMarkdown,
@@ -35,11 +36,13 @@ describe('town report export controller', () => {
     expect(download).toHaveBeenCalledWith(prepared.body, prepared.filename);
   });
 
-  test('exports a valid local narrative through the complete social report chain', async () => {
-    const generate = jest.fn((_args: { digest: string }) =>
+  test('sends one same-snapshot evidence bundle and temporarily renders structured output as fallback', async () => {
+    const generate = jest.fn((_args: { evidenceJson: string }) =>
       Promise.resolve({
         source: 'model' as const,
-        narrative: '记录显示，居民合作仍需持续观察。',
+        findings: buildSocialEvidence(snapshot, exportNow).ruleFindings,
+        limitations: buildSocialEvidence(snapshot, exportNow).limitations,
+        followUps: buildSocialEvidence(snapshot, exportNow).followUps,
       }),
     );
     const download = jest.fn();
@@ -55,9 +58,12 @@ describe('town report export controller', () => {
     ).resolves.toBe(true);
 
     expect(generate).toHaveBeenCalledTimes(1);
-    expect(typeof generate.mock.calls[0][0].digest).toBe('string');
+    expect(generate.mock.calls[0][0]).toEqual({
+      evidenceJson: JSON.stringify(buildSocialEvidence(snapshot, exportNow)),
+    });
+    expect(generate.mock.calls[0][0]).not.toHaveProperty('digest');
     expect(download).toHaveBeenCalledWith(
-      expect.stringContaining('记录显示，居民合作仍需持续观察。'),
+      expect.stringContaining('本次未使用模型扩写'),
       '灯塔镇社会观察日志-2026-07-17.md',
     );
   });
@@ -83,6 +89,44 @@ describe('town report export controller', () => {
       expect.stringContaining('本次未使用模型扩写'),
       '灯塔镇社会观察日志-2026-07-17.md',
     );
+  });
+
+  test('keeps a hostile high-volume evidence request bounded and valid JSON', async () => {
+    const largeSnapshot: BroadcastSnapshot = {
+      ...snapshot,
+      residentActivity: [
+        { residentId: 'resident:a', displayName: '甲', status: '', detail: '' },
+        { residentId: 'resident:b', displayName: '乙', status: '', detail: '' },
+      ],
+      dailyMessages: Array.from({ length: 500 }, (_, index) => ({
+        messageId: `${String(index)}:${'x'.repeat(300)}`,
+        conversationId: 'conversation:large',
+        authorId: index % 2 === 0 ? 'resident:a' : 'resident:b',
+        authorName: index % 2 === 0 ? '甲' : '乙',
+        text: '普通互动记录。',
+        createdAt: exportNow + index,
+        observerIntervention: false,
+      })),
+    };
+    let sent = '';
+    const generate = jest.fn(({ evidenceJson }: { evidenceJson: string }) => {
+      sent = evidenceJson;
+      return Promise.resolve({ source: 'fallback' });
+    });
+
+    await createSocialReportExportStore().run({
+      snapshot: largeSnapshot,
+      locale: 'zh-CN',
+      exportNow,
+      generate,
+      download: jest.fn(),
+    });
+
+    expect(Array.from(sent).length).toBeLessThanOrEqual(20_000);
+    const parsed = JSON.parse(sent) as ReturnType<typeof buildSocialEvidence>;
+    expect(parsed.ruleFindings).toEqual(buildSocialEvidence(largeSnapshot, exportNow).ruleFindings);
+    expect(parsed.evidence.every((entry) => entry.sourceKeys.length >= 1)).toBe(true);
+    expect(parsed.evidence.every((entry) => entry.sourceKeys.length <= 8)).toBe(true);
   });
 
   test('creates, clicks, removes and revokes one Markdown download', async () => {

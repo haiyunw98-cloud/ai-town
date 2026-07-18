@@ -6,10 +6,10 @@ import {
   type BroadcastSnapshot,
 } from './eventBroadcastView';
 import {
-  buildSocialObservationDigest,
   buildSocialObservationFacts,
   buildSocialObservationReport,
 } from './socialObservationReport';
+import { buildSocialEvidence } from './socialEvidence';
 
 type MarkdownAnchor = {
   href: string;
@@ -31,7 +31,8 @@ export type PreparedReport = {
 };
 
 type Download = (body: string, filename: string) => void;
-type GenerateSocialObservation = (args: { digest: string }) => Promise<unknown>;
+type GenerateSocialObservation = (args: { evidenceJson: string }) => Promise<unknown>;
+const MAX_EVIDENCE_JSON_CHARACTERS = 20_000;
 
 export type SocialReportExportOptions = {
   snapshot: BroadcastSnapshot;
@@ -96,14 +97,48 @@ export function exportFactualReport(options: {
 
 async function performSocialReportExport(options: SocialReportExportOptions) {
   const facts = buildSocialObservationFacts(options.snapshot, options.locale, options.exportNow);
+  const evidenceBundle = buildSocialEvidence(options.snapshot, options.exportNow);
   const result = await resolveSocialNarrative(() =>
-    options.generate({ digest: buildSocialObservationDigest(facts) }),
+    options.generate({ evidenceJson: serializeBoundedEvidence(evidenceBundle) }),
   );
   const prepared = {
     body: buildSocialObservationReport(facts, result),
     filename: `灯塔镇社会观察日志-${shanghaiDayKey(options.exportNow)}.md`,
   };
   (options.download ?? downloadMarkdown)(prepared.body, prepared.filename);
+}
+
+function serializeBoundedEvidence(bundle: ReturnType<typeof buildSocialEvidence>) {
+  const normalized = {
+    ...bundle,
+    evidence: bundle.evidence.map((entry) => ({
+      ...entry,
+      sourceKeys: entry.sourceKeys
+        .slice(0, 40)
+        .map((sourceKey) => truncateCharacters(sourceKey, 300)),
+    })),
+  };
+  const serialized = JSON.stringify(normalized);
+  if (countCharacters(serialized) <= MAX_EVIDENCE_JSON_CHARACTERS) return serialized;
+
+  const compact = {
+    ...normalized,
+    evidence: normalized.evidence.map((entry) => ({
+      ...entry,
+      sourceKeys: entry.sourceKeys
+        .slice(0, 8)
+        .map((sourceKey) => truncateCharacters(sourceKey, 160)),
+    })),
+  };
+  return JSON.stringify(compact);
+}
+
+function truncateCharacters(value: string, limit: number) {
+  return Array.from(value).slice(0, limit).join('');
+}
+
+function countCharacters(value: string) {
+  return Array.from(value).length;
 }
 
 export function createSocialReportExportStore(onIdle?: () => void): SocialReportExportStore {
