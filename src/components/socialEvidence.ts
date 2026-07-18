@@ -1,44 +1,21 @@
 import { townLandmarks } from '../../data/worlds/lighthouse-town/map';
 import { splitConversationClauses } from '../../convex/util/conversationText';
 import { filterLegacyExperimentClauses } from '../../convex/util/conversationTextPolicy';
+import type {
+  Confidence,
+  EvidenceCategory,
+  ObservationEvidence,
+  SocialEvidenceBundle,
+} from '../../shared/socialAnalysis';
 import { shanghaiDayKey, type BroadcastSnapshot } from './eventBroadcastView';
 
-export type EvidenceCategory =
-  | 'interaction-network'
-  // Task 1's executable acceptance contract names the aggregate activity metric explicitly.
-  | 'activity-distribution'
-  | 'relationship-signal'
-  | 'labor-commerce'
-  | 'institution-use'
-  | 'public-life'
-  | 'observer-intervention'
-  | 'data-coverage';
-
-export type Confidence = '高' | '中' | '低';
-
-export type ObservationEvidence = {
-  evidenceId: string;
-  category: EvidenceCategory;
-  statement: string;
-  sourceKeys: string[];
-  confidence: Confidence;
-  limitations: string[];
-};
-
-export type AnalysisFinding = {
-  claim: string;
-  evidenceIds: string[];
-  confidence: Confidence;
-  alternativeExplanation: string;
-};
-
-export type SocialEvidenceBundle = {
-  evidence: ObservationEvidence[];
-  ruleFindings: AnalysisFinding[];
-  limitations: string[];
-  followUps: string[];
-  methodNotes: string[];
-};
+export type {
+  AnalysisFinding,
+  Confidence,
+  EvidenceCategory,
+  ObservationEvidence,
+  SocialEvidenceBundle,
+} from '../../shared/socialAnalysis';
 
 type DailyMessage = BroadcastSnapshot['dailyMessages'][number];
 type LifeEvent = NonNullable<BroadcastSnapshot['dailyLifeEvents']>[number];
