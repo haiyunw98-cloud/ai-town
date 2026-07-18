@@ -581,6 +581,12 @@ describe('social evidence builder', () => {
     '例如“在听雨茶庄工作”。',
     '「在听雨茶庄工作」',
     '居民说在听雨茶庄工作。',
+    '甲在听雨茶庄吗？',
+    '甲是否在听雨茶庄喝茶。',
+    '甲在听雨茶庄喝茶呢。',
+    '建议在听雨茶庄开会。',
+    '提议在听雨茶庄开会。',
+    '在听雨茶庄开会的建议被否决。',
   ])('rejects non-asserted institution use: %s', (text) => {
     const institution = evidenceFor(fixtureBroadcastSnapshot({
       dailyLifeEvents: [{
@@ -592,6 +598,27 @@ describe('social evidence builder', () => {
     }), 'institution-use');
 
     expect(institution.statement).not.toMatch(/听雨茶庄 [1-9]\d* 次/u);
+  });
+
+  test.each([
+    '在晨雾集市附近摆摊卖鱼。',
+    '在晨雾集市门口摆摊卖鱼。',
+    '在晨雾集市旁边摆摊卖鱼。',
+    '在晨雾集市周边摆摊卖鱼。',
+    '在晨雾集市外面摆摊卖鱼。',
+    '路过晨雾集市。',
+    '经过晨雾集市。',
+  ])('rejects proximity or pass-by text as institution use: %s', (text) => {
+    const institution = evidenceFor(fixtureBroadcastSnapshot({
+      dailyLifeEvents: [{
+        residentId: 'resident:a', displayName: '甲', kind: 'travel', text,
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyMessages: [],
+      logs: [],
+    }), 'institution-use');
+
+    expect(institution.statement).not.toMatch(/晨雾集市 [1-9]\d* 次/u);
   });
 
   test.each([
@@ -674,6 +701,9 @@ describe('social evidence builder', () => {
     '居民说我们是朋友。',
     '唐果说我们是朋友。',
     '沈砚表示双方合作。',
+    '我们是朋友吗？双方合作了吗？',
+    '我们是否是朋友。',
+    '双方合作了呢。',
   ])('rejects non-asserted relationship signal: %s', (text) => {
     const relationship = evidenceFor(fixtureBroadcastSnapshot({
       conversations: [],

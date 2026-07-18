@@ -234,10 +234,12 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const INSTITUTION_ASSERTION_BLOCKER = /不|未|没有|没|并非|绝非|尚未|从未|拒绝|否认|如果|假如|计划|打算|准备|明天|将要|想|希望|可能/u;
+const INSTITUTION_ASSERTION_BLOCKER = /不|未|没有|没|并非|绝非|尚未|从未|拒绝|否认|如果|假如|计划|打算|准备|明天|将要|想|希望|可能|建议|提议|倡议|提案|被否决/u;
 const RELATIONSHIP_MODAL_BLOCKER = /如果|假如|计划|打算|准备|明天|将要|想|希望|可能/u;
 const RELATIONSHIP_NEGATING_PREFIX = /(?:并非|绝非|尚未|从未|并无|毫无|否认|拒绝|没有|未|不|没|无)[^。！？!?；;，,]{0,8}$/u;
 const REPORTED_OR_EXAMPLE = /例如|比如|举例|例子|听说|据说|[\p{Script=Han}]{2,8}(?:说|称|表示|声称|提到)|报道称|消息称/u;
+const NON_ASSERTION_RECORD = /[?？]|是否/u;
+const NON_ASSERTION_CLAUSE_END = /(?:吗|呢)$/u;
 
 function stripQuotedText(value: string) {
   const openingToClosing: Record<string, string> = {
@@ -266,10 +268,12 @@ function stripQuotedText(value: string) {
 }
 
 function candidateAssertionClauses(value: string) {
-  return splitConversationClauses(normalizeText(value))
+  const normalized = normalizeText(value);
+  if (NON_ASSERTION_RECORD.test(normalized)) return [];
+  return splitConversationClauses(normalized)
     .flatMap((clause) => clause.split(/但是|不过|然而|但|却/u))
     .map(stripQuotedText)
-    .filter((clause) => clause.length > 0);
+    .filter((clause) => clause.length > 0 && !NON_ASSERTION_CLAUSE_END.test(clause));
 }
 
 function assertedInstitutionClauses(value: string) {
@@ -296,16 +300,15 @@ function hasAffirmedRelationshipSignal(clause: string, pattern: RegExp) {
 
 function isExplicitCompletedInstitutionUse(value: string, institutionName: string) {
   const name = escapeRegex(institutionName);
-  const action = '工作|整理|营业|坐诊|上课|采购|购买|销售|卖货|用餐|吃饭|休息|拜访|探望|办理|修理|送货|换药|开会|学习';
-  const movement = `(?:去(?:了)?|到(?:了)?|进入(?:了)?|抵达(?:了)?|来到(?:了)?|回到(?:了)?|走进(?:了)?)${name}`;
-  const presentLocation = `在${name}(?:$|[^。！？])`;
-  const actionAtInstitution = `(?:在|于)${name}[^。！？]{0,40}(?:${action})`;
-  const institutionAfterAction = `(?:${action})[^。！？]{0,40}(?:在|于)${name}(?:[^。！？]{0,12}(?:完成|进行))?`;
+  const action = '摆摊|卖鱼|喝茶|备课|摆渡|排节气日程|工作|整理|营业|坐诊|上课|采购|购买|销售|卖货|用餐|吃饭|休息|拜访|探望|办理|修理|送货|换药|开会|学习';
+  const outside = '(?!(?:的)?(?:附近|门口|旁边|周边|外面))';
+  const movement = `(?:去(?:了)?|到(?:了)?|进入(?:了)?|抵达(?:了)?|来到(?:了)?|回到(?:了)?|走进(?:了)?)${name}${outside}`;
+  const actionAtInstitution = `(?:在|于)${name}${outside}[^。！？]{0,40}(?:${action})`;
+  const institutionAfterAction = `(?:${action})[^。！？]{0,40}(?:在|于)${name}${outside}(?:[^。！？]{0,12}(?:完成|进行))?`;
   return assertedInstitutionClauses(value).some((clause) =>
     clause.includes(institutionName)
       && (
         new RegExp(movement, 'u').test(clause)
-        || new RegExp(presentLocation, 'u').test(clause)
         || new RegExp(actionAtInstitution, 'u').test(clause)
         || new RegExp(institutionAfterAction, 'u').test(clause)
       ),
