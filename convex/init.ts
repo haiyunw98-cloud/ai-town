@@ -9,7 +9,10 @@ import { createEngine } from './aiTown/main';
 import { ENGINE_ACTION_DURATION } from './constants';
 import { detectMismatchedLLMProvider } from './util/llm';
 import { getWorldLocale } from './util/worldLocale';
-import { initializeTownEconomy } from './townEconomy';
+import {
+  initializeTownEconomy,
+  reconcileTownEconomyAfterAgentCreation,
+} from './townEconomy';
 
 const Descriptions = localizedDescriptions(getWorldLocale());
 
@@ -41,11 +44,17 @@ const init = mutation({
         await insertInput(ctx, worldStatus.worldId, 'createAgent', { descriptionIndex });
       }
       await ctx.scheduler.runAfter(15_000, internal.events.advanceActiveEvents, {});
-      await ctx.scheduler.runAfter(20_000, internal.init.reconcileTownEconomy, {
-        worldId: worldStatus.worldId,
-      });
     }
     const economy = await initializeTownEconomy(ctx, worldStatus.worldId);
+    if (
+      economy.residentCount < Descriptions.length
+      && economy.conflictingResidentNames.length === 0
+    ) {
+      await ctx.scheduler.runAfter(20_000, internal.init.reconcileTownEconomy, {
+        worldId: worldStatus.worldId,
+        attempt: 0,
+      });
+    }
     return {
       worldId: worldStatus.worldId,
       queuedResidents: missingDescriptionIndexes.map((index) => Descriptions[index].name),
@@ -58,8 +67,8 @@ export default init;
 // Agent creation is asynchronous. This second idempotent reconciliation fills accounts
 // only after their runtime player IDs and descriptions exist.
 export const reconcileTownEconomy = internalMutation({
-  args: { worldId: v.id('worlds') },
-  handler: async (ctx, args) => initializeTownEconomy(ctx, args.worldId),
+  args: { worldId: v.id('worlds'), attempt: v.number() },
+  handler: async (ctx, args) => reconcileTownEconomyAfterAgentCreation(ctx, args),
 });
 
 async function getOrCreateDefaultWorld(ctx: MutationCtx) {
