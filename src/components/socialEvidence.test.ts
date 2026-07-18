@@ -556,6 +556,40 @@ describe('social evidence builder', () => {
     expect(institution.statement).toContain(`${landmark} 1 次`);
   });
 
+  test.each([
+    ['在镇公所：正在历史高塔核对参观登记与维修清单。', '镇公所'],
+    ['在听雨茶庄：在临桥茶馆招呼客人并盘点今日茶叶。', '听雨茶庄'],
+    ['在苏氏机关坊：在机关工坊拆检水车传动件。', '苏氏机关坊'],
+    ['在河鲜食肆：就着清茶慢慢吃一块桂花糕。', '河鲜食肆'],
+    ['在旧水码头：找墨七核对老码头与水路的旧称。', '旧水码头'],
+    ['在时和卦馆：静坐整理今日见闻。', '时和卦馆'],
+  ])('counts authoritative production activity prefix: %s', (text, landmark) => {
+    const institution = evidenceFor(fixtureBroadcastSnapshot({
+      dailyLifeEvents: [{
+        residentId: 'resident:a', displayName: '甲', kind: 'work', text,
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyMessages: [],
+      logs: [],
+    }), 'institution-use');
+
+    expect(institution.statement).toContain(`${landmark} 1 次`);
+  });
+
+  test('does not treat an embedded production-like prefix as authoritative', () => {
+    const institution = evidenceFor(fixtureBroadcastSnapshot({
+      dailyLifeEvents: [{
+        residentId: 'resident:a', displayName: '甲', kind: 'work',
+        text: '记录写着在镇公所：正在历史高塔核对清单。',
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyMessages: [],
+      logs: [],
+    }), 'institution-use');
+
+    expect(institution.statement).not.toMatch(/镇公所 [1-9]\d* 次/u);
+  });
+
   test.each(['但', '但是', '不过', '然而', '却'])(
     'treats %s as an institution assertion boundary',
     (boundary) => {
@@ -583,6 +617,7 @@ describe('social evidence builder', () => {
     '居民说在听雨茶庄工作。',
     '甲在听雨茶庄吗？',
     '甲是否在听雨茶庄喝茶。',
+    '在听雨茶庄：是否开会。',
     '甲在听雨茶庄喝茶呢。',
     '建议在听雨茶庄开会。',
     '提议在听雨茶庄开会。',
@@ -598,6 +633,20 @@ describe('social evidence builder', () => {
     }), 'institution-use');
 
     expect(institution.statement).not.toMatch(/听雨茶庄 [1-9]\d* 次/u);
+  });
+
+  test('keeps an institution assertion after a question sentence', () => {
+    const institution = evidenceFor(fixtureBroadcastSnapshot({
+      dailyLifeEvents: [{
+        residentId: 'resident:a', displayName: '甲', kind: 'work',
+        text: '你去听雨茶庄吗？我在听雨茶庄工作。',
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyMessages: [],
+      logs: [],
+    }), 'institution-use');
+
+    expect(institution.statement).toContain('听雨茶庄 1 次');
   });
 
   test.each([
@@ -701,6 +750,11 @@ describe('social evidence builder', () => {
     '居民说我们是朋友。',
     '唐果说我们是朋友。',
     '沈砚表示双方合作。',
+    '建议双方合作。',
+    '提议我们交易。',
+    '倡议共同合作。',
+    '提案要求双方交易。',
+    '请求我们合作。',
     '我们是朋友吗？双方合作了吗？',
     '我们是否是朋友。',
     '双方合作了呢。',
@@ -756,6 +810,20 @@ describe('social evidence builder', () => {
     }), 'relationship-signal');
 
     expect(relationship.statement).toMatch(/合作 1 条.*交易 0 条/u);
+  });
+
+  test('keeps a relationship assertion after a question sentence', () => {
+    const relationship = evidenceFor(fixtureBroadcastSnapshot({
+      conversations: [],
+      dailyMessages: [{
+        ...residentMessage(0, 'resident:a'),
+        text: '我们是朋友吗？双方已经合作完成工作。',
+      }],
+      dailyLifeEvents: [],
+      logs: [],
+    }), 'relationship-signal');
+
+    expect(relationship.statement).toMatch(/友情 0 条.*合作 1 条/u);
   });
 
   test('reports distinct visible activity before and after observer intervention', () => {
