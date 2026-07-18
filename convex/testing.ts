@@ -97,6 +97,11 @@ export const resume = mutation({
     );
     await ctx.db.patch(worldStatus._id, { status: 'running' });
     await startEngine(ctx, worldStatus.worldId);
+    await ctx.scheduler.runAfter(
+      0,
+      internal.aiTown.agentOperations.wakeOutstandingActivitySettlementsMutation,
+      { worldId: worldStatus.worldId },
+    );
   },
 });
 

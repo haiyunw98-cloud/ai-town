@@ -1,5 +1,11 @@
 import { ConvexError, v } from 'convex/values';
-import { DatabaseReader, MutationCtx, internalAction, mutation, query } from '../_generated/server';
+import {
+  DatabaseReader,
+  MutationCtx,
+  internalAction,
+  internalMutation,
+  query,
+} from '../_generated/server';
 import { insertInput } from './insertInput';
 import { Game } from './game';
 import { internal } from '../_generated/api';
@@ -115,11 +121,12 @@ export const runStep = internalAction({
       });
     } catch (e: unknown) {
       if (e instanceof ConvexError) {
-        if (e.data.kind === 'engineNotRunning') {
+        const kind = (e.data as { kind?: unknown }).kind;
+        if (kind === 'engineNotRunning') {
           console.debug(`Engine is not running: ${e.message}`);
           return;
         }
-        if (e.data.kind === 'generationNumber') {
+        if (kind === 'generationNumber') {
           console.debug(`Generation number mismatch: ${e.message}`);
           return;
         }
@@ -129,14 +136,14 @@ export const runStep = internalAction({
   },
 });
 
-export const sendInput = mutation({
+export const sendInput = internalMutation({
   args: {
     worldId: v.id('worlds'),
     name: v.string(),
     args: v.any(),
   },
   handler: async (ctx, args) => {
-    return await insertInput(ctx, args.worldId, args.name as any, args.args);
+    return await insertInput(ctx, args.worldId, args.name as never, args.args as never);
   },
 });
 

@@ -1,11 +1,14 @@
 import { cronJobs } from 'convex/server';
 import { DELETE_BATCH_SIZE, IDLE_WORLD_TIMEOUT, VACUUM_MAX_AGE } from './constants';
 import { internal } from './_generated/api';
-import { internalMutation } from './_generated/server';
+import { internalMutation, MutationCtx } from './_generated/server';
 import { TableNames } from './_generated/dataModel';
 import { v } from 'convex/values';
 
 const crons = cronJobs();
+
+export const ACTIVITY_REGISTRATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const ACTIVITY_REGISTRATION_ACK_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 crons.interval(
   'stop inactive worlds',
@@ -41,7 +44,7 @@ const TablesToVacuum: TableNames[] = [
 
 export const vacuumOldEntries = internalMutation({
   args: {},
-  handler: async (ctx, args) => {
+  handler: async (ctx, _args) => {
     const before = Date.now() - VACUUM_MAX_AGE;
     for (const tableName of TablesToVacuum) {
       console.log(`Checking ${tableName}...`);
@@ -59,8 +62,146 @@ export const vacuumOldEntries = internalMutation({
         });
       }
     }
+    const beforeAck = Date.now() - ACTIVITY_REGISTRATION_ACK_RETENTION_MS;
+    for (const status of ['processed', 'dead-letter'] as const) {
+      await ctx.scheduler.runAfter(0, internal.crons.vacuumActivityRegistrationAcks, {
+        status,
+        before: beforeAck,
+        cursor: null,
+      });
+    }
+    const beforeRegistration = Date.now() - ACTIVITY_REGISTRATION_RETENTION_MS;
+    for (const state of ['activated', 'abandoned'] as const) {
+      await ctx.scheduler.runAfter(0, internal.crons.vacuumActivityRegistrations, {
+        state,
+        before: beforeRegistration,
+        cursor: null,
+      });
+    }
   },
 });
+
+export const vacuumActivityRegistrationAcks = internalMutation({
+  args: {
+    status: v.union(v.literal('processed'), v.literal('dead-letter')),
+    before: v.number(),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: vacuumActivityRegistrationAckPage,
+});
+
+export async function vacuumActivityRegistrationAckPage(
+  ctx: Pick<MutationCtx, 'db' | 'scheduler'>,
+  args: {
+    status: 'processed' | 'dead-letter';
+    before: number;
+    cursor: string | null;
+  },
+) {
+  const results = await ctx.db
+    .query('activityRegistrationAcks')
+    .withIndex('statusUpdatedAt', (q) =>
+      q.eq('status', args.status).lt('updatedAt', args.before),
+    )
+    .paginate({ cursor: args.cursor, numItems: DELETE_BATCH_SIZE });
+  for (const outbox of results.page) {
+    await ctx.db.delete(outbox._id);
+  }
+  if (!results.isDone) {
+    await ctx.scheduler.runAfter(0, internal.crons.vacuumActivityRegistrationAcks, {
+      ...args,
+      cursor: results.continueCursor,
+    });
+  }
+  return { deleted: results.page.length, done: results.isDone };
+}
+
+export const vacuumActivityRegistrations = internalMutation({
+  args: {
+    state: v.union(v.literal('activated'), v.literal('abandoned')),
+    before: v.number(),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: vacuumActivityRegistrationPage,
+});
+
+export async function vacuumActivityRegistrationPage(
+  ctx: Pick<MutationCtx, 'db' | 'scheduler'>,
+  args: {
+    state: 'activated' | 'abandoned';
+    before: number;
+    cursor: string | null;
+  },
+) {
+  const results = await ctx.db
+    .query('activityRegistrations')
+    .withIndex('stateUpdatedAt', (q) =>
+      q.eq('state', args.state).lt('updatedAt', args.before),
+    )
+    .paginate({ cursor: args.cursor, numItems: DELETE_BATCH_SIZE });
+  let deleted = 0;
+  for (const registration of results.page) {
+    let safeToDelete = registration.state === 'abandoned'
+      && (
+        registration.abandonReason === 'operation-replaced'
+        || registration.abandonReason === 'engine-input-error'
+        || registration.abandonReason === 'ack-processing-failed'
+      );
+    if (registration.state === 'activated') {
+      const [complete, failed] = await Promise.all(['complete', 'failed'].map((phase) =>
+        ctx.db
+          .query('lifeEvents')
+          .withIndex('sourceKey', (q) =>
+            q.eq('worldId', registration.worldId)
+              .eq('sourceKey', `activity:${registration.operationId}:${phase}`),
+          )
+          .unique(),
+      ));
+      safeToDelete = !!complete || !!failed;
+    }
+    if (safeToDelete) {
+      await ctx.db.delete(registration._id);
+      deleted += 1;
+    }
+  }
+  if (!results.isDone) {
+    await ctx.scheduler.runAfter(0, internal.crons.vacuumActivityRegistrations, {
+      ...args,
+      cursor: results.continueCursor,
+    });
+  }
+  return { deleted, done: results.isDone };
+}
+
+export async function vacuumInputPage(
+  ctx: Pick<MutationCtx, 'db' | 'scheduler'>,
+  args: { before: number; cursor: string | null; soFar: number },
+) {
+  const results = await ctx.db
+    .query('inputs')
+    .withIndex('by_creation_time', (q) => q.lt('_creationTime', args.before))
+    .paginate({ cursor: args.cursor, numItems: DELETE_BATCH_SIZE });
+  let deleted = 0;
+  for (const input of results.page) {
+    const registration = await ctx.db
+      .query('activityRegistrations')
+      .withIndex('inputId', (q) => q.eq('inputId', input._id))
+      .unique();
+    if (!registration || registration.state === 'abandoned') {
+      await ctx.db.delete(input._id);
+      deleted += 1;
+    }
+  }
+  if (!results.isDone) {
+    await ctx.scheduler.runAfter(0, internal.crons.vacuumTable, {
+      tableName: 'inputs',
+      before: args.before,
+      cursor: results.continueCursor,
+      soFar: args.soFar + deleted,
+    });
+  }
+  return { deleted, done: results.isDone };
+}
 
 export const vacuumTable = internalMutation({
   args: {
@@ -70,6 +211,9 @@ export const vacuumTable = internalMutation({
     soFar: v.number(),
   },
   handler: async (ctx, { tableName, before, cursor, soFar }) => {
+    if (tableName === 'inputs') {
+      return vacuumInputPage(ctx, { before, cursor, soFar });
+    }
     const results = await ctx.db
       .query(tableName as TableNames)
       .withIndex('by_creation_time', (q) => q.lt('_creationTime', before))

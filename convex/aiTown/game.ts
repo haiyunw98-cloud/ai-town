@@ -11,7 +11,10 @@ import { World, serializedWorld } from './world';
 import { WorldMap, serializedWorldMap } from './worldMap';
 import { PlayerDescription, serializedPlayerDescription } from './playerDescription';
 import { Location, locationFields, playerLocation } from './location';
-import { runAgentOperation } from './agentOperations';
+import {
+  applyCompletedActivityRegistrationAcks,
+  runAgentOperation,
+} from './agentOperations';
 import { GameId, IdTypes, allocGameId } from './ids';
 import { InputArgs, InputNames, inputs } from './inputs';
 import {
@@ -159,6 +162,9 @@ export class Game extends AbstractGame {
     if (!handler) {
       throw new Error(`Invalid input: ${name}`);
     }
+    // The indexed input registry preserves the Name/Args relationship, but TypeScript
+    // widens the selected handler to the full input-handler union at this lookup boundary.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     return handler(this, now, args as any);
   }
 
@@ -367,5 +373,10 @@ export const saveWorld = internalMutation({
   handler: async (ctx, args) => {
     await applyEngineUpdate(ctx, args.engineId, args.engineUpdate);
     await Game.saveDiff(ctx, args.worldId, args.worldDiff);
+    await applyCompletedActivityRegistrationAcks(
+      ctx,
+      args.worldId,
+      args.engineUpdate.completedInputs,
+    );
   },
 });

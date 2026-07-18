@@ -11,6 +11,7 @@ import {
 import { playerId } from './aiTown/ids';
 import { kickEngine, startEngine, stopEngine } from './aiTown/main';
 import { engineInsertInput } from './engine/abstractGame';
+import { internal } from './_generated/api';
 
 export const defaultWorldStatus = query({
   handler: async (ctx) => {
@@ -52,6 +53,11 @@ export const heartbeatWorld = mutation({
       console.log(`Restarting inactive world ${worldStatus._id}...`);
       await ctx.db.patch(worldStatus._id, { status: 'running' });
       await startEngine(ctx, worldStatus.worldId);
+      await ctx.scheduler.runAfter(
+        0,
+        internal.aiTown.agentOperations.wakeOutstandingActivitySettlementsMutation,
+        { worldId: worldStatus.worldId },
+      );
     }
   },
 });
@@ -98,7 +104,7 @@ export const userStatus = query({
   args: {
     worldId: v.id('worlds'),
   },
-  handler: async (ctx, args) => {
+  handler: (_ctx, _args) => {
     // const identity = await ctx.auth.getUserIdentity();
     // if (!identity) {
     //   return null;
@@ -175,9 +181,26 @@ export const sendWorldInput = mutation({
     // if (!identity) {
     //   throw new Error(`Not logged in`);
     // }
-    return await engineInsertInput(ctx, args.engineId, args.name as any, args.args);
+    const name = validatePublicWorldInputName(args.name);
+    return await engineInsertInput(ctx, args.engineId, name, args.args as never);
   },
 });
+
+const PUBLIC_WORLD_INPUT_NAMES = new Set([
+  'moveTo',
+  'startConversation',
+  'startTyping',
+  'acceptInvite',
+  'rejectInvite',
+  'leaveConversation',
+]);
+
+export function validatePublicWorldInputName(name: string) {
+  if (!PUBLIC_WORLD_INPUT_NAMES.has(name)) {
+    throw new Error(`World input is not allowed from the public API: ${name}`);
+  }
+  return name;
+}
 
 export const worldState = query({
   args: {

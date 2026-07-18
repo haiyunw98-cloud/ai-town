@@ -6,6 +6,7 @@ import {
   residentActivities,
 } from './activities';
 import { townLandmarks } from './map';
+import { institutions, residentEconomyProfiles } from './economy';
 
 const residentNames = ['林澜', '沈砚', '唐果', '墨七', '苏萤', '白露', '顾潮', '阿满', '玄微先生'];
 const forbiddenAutonomousStory = /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮|航标|夜航/u;
@@ -26,8 +27,7 @@ describe('Lighthouse Town resident activities', () => {
         expect(activity.emoji).toBeTruthy();
         expect(activity.duration).toBeGreaterThan(0);
         expect(
-          (townLandmarks as unknown as ReadonlyArray<Record<string, any>>)
-            .some((landmark) => landmark.id === (activity as any).landmarkId),
+          townLandmarks.some((landmark) => landmark.id === activity.landmarkId),
         ).toBe(true);
       }
     }
@@ -51,6 +51,32 @@ describe('Lighthouse Town resident activities', () => {
     expect(JSON.stringify(descriptions)).not.toMatch(forbiddenAutonomousStory);
   });
 
+  test('offers every resident autonomous work purchase and rest choices with structured facts', () => {
+    for (const profile of residentEconomyProfiles) {
+      const activities = activitiesForResident(profile.name);
+      const work = activities.find((entry) => entry.economicAction?.kind === 'work');
+      const purchase = activities.find((entry) => entry.economicAction?.kind === 'purchase');
+      const rest = activities.find((entry) => entry.economicAction?.kind === 'rest');
+      expect(work?.economicAction).toEqual({
+        kind: 'work',
+        institutionId: profile.institutionId,
+        output: profile.workOutput,
+      });
+      expect(work?.landmarkId).toBe(profile.institutionId);
+      expect(rest).toBeDefined();
+      expect(purchase?.economicAction?.kind).toBe('purchase');
+      if (purchase?.economicAction?.kind === 'purchase') {
+        const purchaseAction = purchase.economicAction;
+        const institution = institutions.find(
+          (entry) => entry.id === purchaseAction.institutionId,
+        );
+        expect(institution?.goods).toContain(purchaseAction.goodId);
+        expect(purchase.landmarkId).toBe(institution?.landmarkId);
+      }
+      expect(new Set(activities.map((entry) => entry.category)).size).toBeGreaterThan(3);
+    }
+  });
+
   test('passes the player description name through the agent activity operation', () => {
     const agent = readFileSync(new URL('../../../convex/aiTown/agent.ts', import.meta.url), 'utf8');
     const operations = readFileSync(
@@ -64,6 +90,10 @@ describe('Lighthouse Town resident activities', () => {
     expect(operations).toContain('pickResidentActivity(args.residentName)');
     expect(operations).toContain('destination: landmark.destination');
     expect(operations).toContain('在${landmark.name}');
+    expect(operations).toContain('enqueueResidentActivity');
+    expect(operations).toContain("phase: 'start'");
+    expect(operations).toContain('sourceKey: `activity:${registration.operationId}:start`');
+    expect(operations).toContain("result.status !== 'destination-not-reached'");
     expect(agent).not.toContain('doingActivity && (conversation || player.pathfinding)');
   });
 });

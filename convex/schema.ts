@@ -2,7 +2,7 @@ import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { agentTables } from './agent/schema';
 import { aiTownTables } from './aiTown/schema';
-import { conversationId, playerId } from './aiTown/ids';
+import { agentId, conversationId, playerId } from './aiTown/ids';
 import { engineTables } from './engine/schema';
 
 export default defineSchema({
@@ -103,7 +103,86 @@ export default defineSchema({
     kind: v.string(),
     text: v.string(),
     createdAt: v.number(),
-  }).index('resident', ['worldId', 'residentId', 'createdAt']),
+    sourceKey: v.optional(v.string()),
+    operationId: v.optional(v.string()),
+    phase: v.optional(v.union(
+      v.literal('start'),
+      v.literal('complete'),
+      v.literal('failed'),
+    )),
+    category: v.optional(v.string()),
+    landmarkId: v.optional(v.string()),
+    economicActionJson: v.optional(v.string()),
+    activityUntil: v.optional(v.number()),
+    failureReason: v.optional(v.string()),
+  })
+    .index('resident', ['worldId', 'residentId', 'createdAt'])
+    .index('sourceKey', ['worldId', 'sourceKey'])
+    .index('worldTime', ['worldId', 'createdAt']),
+
+  activityRegistrations: defineTable({
+    worldId: v.id('worlds'),
+    residentId: playerId,
+    agentId,
+    operationId: v.string(),
+    activityText: v.string(),
+    activityDuration: v.number(),
+    activityUntil: v.optional(v.number()),
+    activatedAt: v.optional(v.number()),
+    inputId: v.optional(v.id('inputs')),
+    landmarkId: v.string(),
+    category: v.string(),
+    economicActionJson: v.string(),
+    startedAt: v.number(),
+    state: v.union(v.literal('intent'), v.literal('activated'), v.literal('abandoned')),
+    deliveryState: v.union(
+      v.literal('queued'),
+      v.literal('processing'),
+      v.literal('processed'),
+      v.literal('failed'),
+    ),
+    abandonReason: v.optional(v.union(
+      v.literal('operation-replaced'),
+      v.literal('engine-input-error'),
+      v.literal('ack-processing-failed'),
+    )),
+    recoveryAttempts: v.number(),
+    settlementArrivalGraceStartedAt: v.optional(v.number()),
+    settlementArrivalRecoveryDeadline: v.optional(v.number()),
+    settlementLastAttemptAt: v.optional(v.number()),
+    settlementPauseRetryCount: v.optional(v.number()),
+    settlementWakeScheduledAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index('operation', ['worldId', 'operationId'])
+    .index('inputId', ['inputId'])
+    .index('worldState', ['worldId', 'state', 'updatedAt'])
+    .index('stateUpdatedAt', ['state', 'updatedAt']),
+
+  activityRegistrationAcks: defineTable({
+    worldId: v.id('worlds'),
+    inputId: v.id('inputs'),
+    registrationId: v.id('activityRegistrations'),
+    ackKind: v.union(
+      v.literal('activated'),
+      v.literal('rejected'),
+      v.literal('engine-error'),
+      v.literal('invalid-ack'),
+    ),
+    payloadJson: v.string(),
+    status: v.union(
+      v.literal('pending'),
+      v.literal('retrying'),
+      v.literal('processed'),
+      v.literal('dead-letter'),
+    ),
+    attempts: v.number(),
+    errorCode: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('input', ['worldId', 'inputId'])
+    .index('statusUpdatedAt', ['status', 'updatedAt']),
 
   residentEconomy: defineTable({
     worldId: v.id('worlds'),
@@ -161,6 +240,11 @@ export default defineSchema({
     ),
     amount: v.number(),
     expectedAmount: v.optional(v.number()),
+    compensationKind: v.optional(v.union(
+      v.literal('wage'),
+      v.literal('owner-draw'),
+      v.literal('contract-share'),
+    )),
     item: v.optional(v.string()),
     quantity: v.optional(v.number()),
     sourceKey: v.string(),

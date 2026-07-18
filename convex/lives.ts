@@ -1,5 +1,5 @@
 import { v } from 'convex/values';
-import { internalMutation, query } from './_generated/server';
+import { internalMutation, query, type MutationCtx } from './_generated/server';
 import { playerId } from './aiTown/ids';
 import {
   getLifeProfileById,
@@ -7,6 +7,7 @@ import {
   type LifeStats,
 } from '../data/worlds/lighthouse-town/lives';
 import { lighthouseCharacters } from '../data/worlds/lighthouse-town/characters';
+import type { Id } from './_generated/dataModel';
 
 type LiveSignals = {
   isTalking: boolean;
@@ -40,6 +41,52 @@ export function deriveLiveStats(baseStats: LifeStats, signals: LiveSignals) {
   return { stats, situation };
 }
 
+export type ActivityFact = {
+  worldId: Id<'worlds'>;
+  residentId: string;
+  kind: string;
+  text: string;
+  createdAt: number;
+  sourceKey?: string;
+  operationId?: string;
+  phase?: 'start' | 'complete' | 'failed';
+  category?: string;
+  landmarkId?: string;
+  economicActionJson?: string;
+  activityUntil?: number;
+  failureReason?: string;
+};
+
+export async function recordActivityFact(ctx: Pick<MutationCtx, 'db'>, args: ActivityFact) {
+  if (args.sourceKey) {
+    const existing = await ctx.db
+      .query('lifeEvents')
+      .withIndex('sourceKey', (q) =>
+        q.eq('worldId', args.worldId).eq('sourceKey', args.sourceKey),
+      )
+      .unique();
+    if (existing) {
+      const equivalent = Object.entries(args).every(
+        ([key, value]) => existing[key as keyof typeof existing] === value,
+      );
+      if (equivalent) return existing._id;
+      throw new Error(`life event source collision: ${args.sourceKey}`);
+    }
+    return ctx.db.insert('lifeEvents', args);
+  }
+  const latest = await ctx.db
+    .query('lifeEvents')
+    .withIndex('resident', (q) =>
+      q.eq('worldId', args.worldId).eq('residentId', args.residentId),
+    )
+    .order('desc')
+    .first();
+  if (latest?.text === args.text && latest.createdAt > args.createdAt - 30_000) {
+    return latest._id;
+  }
+  return ctx.db.insert('lifeEvents', args);
+}
+
 export const recordActivity = internalMutation({
   args: {
     worldId: v.id('worlds'),
@@ -47,20 +94,20 @@ export const recordActivity = internalMutation({
     kind: v.string(),
     text: v.string(),
     createdAt: v.number(),
+    sourceKey: v.optional(v.string()),
+    operationId: v.optional(v.string()),
+    phase: v.optional(v.union(
+      v.literal('start'),
+      v.literal('complete'),
+      v.literal('failed'),
+    )),
+    category: v.optional(v.string()),
+    landmarkId: v.optional(v.string()),
+    economicActionJson: v.optional(v.string()),
+    activityUntil: v.optional(v.number()),
+    failureReason: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    const latest = await ctx.db
-      .query('lifeEvents')
-      .withIndex('resident', (q) =>
-        q.eq('worldId', args.worldId).eq('residentId', args.residentId),
-      )
-      .order('desc')
-      .first();
-    if (latest?.text === args.text && latest.createdAt > args.createdAt - 30_000) {
-      return latest._id;
-    }
-    return await ctx.db.insert('lifeEvents', args);
-  },
+  handler: recordActivityFact,
 });
 
 export const residentDossier = query({

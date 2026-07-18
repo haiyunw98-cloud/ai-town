@@ -58,6 +58,8 @@ export const agentInputs = {
       destination: v.optional(point),
       invitee: v.optional(v.id('players')),
       activity: v.optional(activity),
+      activityDuration: v.optional(v.number()),
+      activityRegistrationId: v.optional(v.id('activityRegistrations')),
     },
     handler: (game, now, args) => {
       const agentId = parseGameId('agents', args.agentId);
@@ -65,11 +67,27 @@ export const agentInputs = {
       if (!agent) {
         throw new Error(`Couldn't find agent: ${agentId}`);
       }
+      if ((args.activityDuration === undefined) !== (args.activityRegistrationId === undefined)) {
+        throw new Error('Registered activity input requires its server registration ID');
+      }
       if (
         !agent.inProgressOperation ||
         agent.inProgressOperation.operationId !== args.operationId
       ) {
         console.debug(`Agent ${agentId} didn't have ${args.operationId} in progress`);
+        if (args.activityDuration !== undefined && args.activityRegistrationId !== undefined) {
+          return {
+            activityRegistration: {
+              operationId: args.operationId,
+              registrationId: args.activityRegistrationId,
+              agentId: agent.id,
+              residentId: agent.playerId,
+              status: 'rejected',
+              acknowledgedAt: now,
+              reason: 'operation-replaced',
+            },
+          };
+        }
         return null;
       }
       delete agent.inProgressOperation;
@@ -87,6 +105,27 @@ export const agentInputs = {
         movePlayer(game, now, player, args.destination);
       }
       if (args.activity) {
+        if (args.activityDuration !== undefined && args.activityRegistrationId !== undefined) {
+          if (
+            !Number.isSafeInteger(args.activityDuration)
+            || args.activityDuration <= 0
+            || args.activityDuration > 86_400_000
+          ) {
+            throw new Error('Registered activity duration must be a positive bounded integer');
+          }
+          player.activity = { ...args.activity, until: now + args.activityDuration };
+          return {
+            activityRegistration: {
+              operationId: args.operationId,
+              registrationId: args.activityRegistrationId,
+              agentId: agent.id,
+              residentId: agent.playerId,
+              status: 'activated',
+              activatedAt: now,
+              activityUntil: player.activity.until,
+            },
+          };
+        }
         player.activity = args.activity;
       }
       return null;

@@ -8,7 +8,18 @@ import {
   MAX_ECONOMY_RECONCILIATION_ATTEMPTS,
   reconcileTownEconomyAfterAgentCreation,
   shanghaiEconomyDayKey,
+  settleActivity,
+  validateActivityRegistration,
 } from './townEconomy';
+import {
+  applyCompletedActivityRegistrationAcks,
+  dispatchActivityRegistrationAckWithRecovery,
+  enqueueResidentActivityInput,
+  persistActivitySettlementRetryState,
+  processActivityRegistrationAckOutbox,
+  recordActivityRegistrationAckFailure,
+  wakeOutstandingActivitySettlements,
+} from './aiTown/agentOperations';
 import { MAX_MONEY, MAX_STOCK } from './townEconomyRules';
 
 type StoredRow = Record<string, unknown> & { _id: string; _creationTime: number };
@@ -29,6 +40,7 @@ class MemoryDb {
 
   query(table: string) {
     const filters: Array<[string, unknown]> = [];
+    let order: 'asc' | 'desc' = 'asc';
     const query = {
       withIndex: (_index: string, apply: (builder: { eq: (field: string, value: unknown) => unknown }) => unknown) => {
         const indexBuilder = {
@@ -41,6 +53,15 @@ class MemoryDb {
         return query;
       },
       collect: () => Promise.resolve(this.matching(table, filters)),
+      take: (count: number) => Promise.resolve(this.matching(table, filters).slice(0, count)),
+      order: (direction: 'asc' | 'desc') => {
+        order = direction;
+        return query;
+      },
+      first: () => {
+        const rows = this.matching(table, filters);
+        return Promise.resolve((order === 'desc' ? rows.at(-1) : rows[0]) ?? null);
+      },
       unique: () => {
         const rows = this.matching(table, filters);
         if (rows.length > 1) throw new Error(`Expected unique ${table} row`);
@@ -81,6 +102,15 @@ class MemoryDb {
     return created;
   }
 
+  snapshot() {
+    return structuredClone([...this.rows.entries()]);
+  }
+
+  restore(snapshot: Array<[string, StoredRow[]]>) {
+    this.rows.clear();
+    for (const [table, rows] of snapshot) this.rows.set(table, rows);
+  }
+
   private matching(table: string, filters: Array<[string, unknown]>) {
     return this.table(table).filter((row) =>
       filters.every(([field, value]) => row[field] === value),
@@ -90,8 +120,13 @@ class MemoryDb {
 
 class MemoryScheduler {
   readonly calls: Array<{ delay: number; args: Record<string, unknown> }> = [];
+  failNext = false;
 
   runAfter(delay: number, _reference: unknown, args: Record<string, unknown>) {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('scheduler-unavailable'));
+    }
     this.calls.push({ delay, args });
     return Promise.resolve('scheduled:test');
   }
@@ -101,6 +136,97 @@ function makeContext() {
   const db = new MemoryDb();
   const scheduler = new MemoryScheduler();
   return { db, scheduler, ctx: { db, scheduler } as unknown as MutationCtx };
+}
+
+async function runMemoryMutation<T>(
+  fixture: ReturnType<typeof makeContext>,
+  mutation: () => Promise<T>,
+) {
+  const dbSnapshot = fixture.db.snapshot();
+  const schedulerCallCount = fixture.scheduler.calls.length;
+  try {
+    return await mutation();
+  } catch (error) {
+    fixture.db.restore(dbSnapshot);
+    fixture.scheduler.calls.splice(schedulerCallCount);
+    throw error;
+  }
+}
+
+async function makeLinkedActivityFixture(operationId: string) {
+  const fixture = makeContext();
+  seedWorldStatus(fixture.db, 'running');
+  addRuntimeResident(fixture.db, '唐果', 'p:2');
+  const base = workSettlementArgs();
+  const queued = await enqueueResidentActivityInput(fixture.ctx, {
+    worldId,
+    residentId: base.residentId,
+    agentId: 'a:2',
+    operationId,
+    activityText: base.activityText,
+    activityDuration: 60_000,
+    landmarkId: base.landmarkId,
+    category: base.category,
+    economicAction: base.economicAction,
+    startedAt: now,
+    destination: { x: 5, y: 20 },
+  });
+  return {
+    fixture,
+    queued,
+    registration: fixture.db.table('activityRegistrations')[0],
+  };
+}
+
+async function expectInvalidAckTerminal(
+  operationId: string,
+  expectedReason: string,
+  makeReturnValue: (registration: StoredRow) => { kind: string; value?: unknown },
+) {
+  const { fixture, queued, registration } = await makeLinkedActivityFixture(operationId);
+  const completedInput = {
+    inputId: queued.inputId as Id<'inputs'>,
+    returnValue: makeReturnValue(registration),
+  };
+  const persisted = await applyCompletedActivityRegistrationAcks(
+    fixture.ctx,
+    worldId,
+    [completedInput],
+  );
+  expect(persisted[0]?.status).toBe('persisted');
+  const outbox = fixture.db.table('activityRegistrationAcks')[0];
+  expect(outbox).toEqual(expect.objectContaining({
+    ackKind: 'invalid-ack',
+    status: 'pending',
+  }));
+  expect(JSON.parse(outbox.payloadJson as string)).toEqual({ reason: expectedReason });
+  expect(registration).toEqual(expect.objectContaining({
+    state: 'intent',
+    deliveryState: 'processing',
+  }));
+  const scheduledBeforeProcessing = fixture.scheduler.calls.length;
+  expect(await processActivityRegistrationAckOutbox(fixture.ctx, {
+    outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+  })).toEqual({ status: 'dead-letter', reason: 'invalid-ack' });
+  expect(outbox).toEqual(expect.objectContaining({
+    status: 'dead-letter',
+    errorCode: 'ack-processing-failed',
+  }));
+  expect(registration).toEqual(expect.objectContaining({
+    state: 'abandoned',
+    deliveryState: 'failed',
+    abandonReason: 'ack-processing-failed',
+  }));
+  expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+  expect(fixture.db.table('economyLedger')).toHaveLength(0);
+  expect(fixture.scheduler.calls).toHaveLength(scheduledBeforeProcessing);
+  const replay = await applyCompletedActivityRegistrationAcks(
+    fixture.ctx,
+    worldId,
+    [completedInput],
+  );
+  expect(replay[0]?.status).toBe('already-persisted');
+  expect(fixture.scheduler.calls).toHaveLength(scheduledBeforeProcessing);
 }
 
 const worldId = 'worlds:test' as Id<'worlds'>;
@@ -158,6 +284,8 @@ describe('town economy persistence', () => {
     expect(schema).toContain('residentEconomy: defineTable');
     expect(schema).toContain('townInstitutions: defineTable');
     expect(schema).toContain('economyLedger: defineTable');
+    expect(schema).toContain('activityRegistrationAcks: defineTable');
+    expect(schema).toContain(".index('input', ['worldId', 'inputId'])");
     expect(schema).toContain(".index('resident', ['worldId', 'residentId'])");
     expect(schema).toContain(".index('institution', ['worldId', 'institutionId'])");
     expect(schema).toContain(".index('idempotencyKey', ['worldId', 'idempotencyKey'])");
@@ -172,6 +300,8 @@ describe('town economy persistence', () => {
     seedRuntimeResidents(db);
     const resident = db.seed('residentEconomy', validResidentRow());
     const institution = db.seed('townInstitutions', validInstitutionRow());
+    resident._creationTime = now - 1_000;
+    institution._creationTime = now - 1_000;
     for (const field of ['initialBalance', 'initializationSourceKey', 'initializedAt']) {
       delete (resident as Record<string, unknown>)[field];
     }
@@ -187,14 +317,14 @@ describe('town economy persistence', () => {
     expect(resident).toEqual(expect.objectContaining({
       initialBalance: 120,
       initializationSourceKey: 'economy-definition:resident:lin-lan:v1',
-      initializedAt: now,
+      initializedAt: resident._creationTime,
     }));
     expect(institution).toEqual(expect.objectContaining({
       initialCash: 120,
       initialStockJson: JSON.stringify({ tea: 12 }),
       initialServiceCountersJson: '{}',
       initializationSourceKey: 'economy-definition:institution:tea-house:v1',
-      initializedAt: now,
+      initializedAt: institution._creationTime,
     }));
     expect(db.table('residentEconomy')).toHaveLength(9);
     expect(db.table('townInstitutions')).toHaveLength(9);
@@ -444,6 +574,7 @@ describe('town economy persistence', () => {
       item: 'tea',
       quantity: 3,
       expectedAmount: 16,
+      compensationKind: 'owner-draw' as const,
       sourceKey: 'activity:o:4',
       text: '唐果完成一次茶叶备货，实际支取 16 金贝。',
       createdAt: now,
@@ -457,6 +588,9 @@ describe('town economy persistence', () => {
       text: '虚构改写',
     })).rejects.toThrow(/idempotencyKey collision/u);
     expect(db.table('economyLedger')).toHaveLength(1);
+    expect(db.table('economyLedger')[0]).toEqual(expect.objectContaining({
+      compensationKind: 'owner-draw',
+    }));
     expect(db.table('economyLedger')[0]).toEqual(expect.objectContaining(entry));
   });
 
@@ -502,6 +636,7 @@ describe('town economy persistence', () => {
       kind: 'work',
       amount: 0,
       expectedAmount: 16,
+      compensationKind: 'owner-draw',
       item: 'tea',
       quantity: 3,
       sourceKey: 'activity:o:unpaid',
@@ -511,7 +646,48 @@ describe('town economy persistence', () => {
     expect(db.table('economyLedger')[0]).toEqual(expect.objectContaining({
       amount: 0,
       expectedAmount: 16,
+      compensationKind: 'owner-draw' as const,
     }));
+  });
+
+  test('treats an exact pre-expectedAmount legacy work replay as idempotent', async () => {
+    const { db, ctx } = makeContext();
+    seedRuntimeResidents(db);
+    await initializeTownEconomy(ctx, worldId, now);
+    const entry = {
+      worldId,
+      idempotencyKey: 'work:worlds:test:p:2:o:legacy',
+      dayKey: '2026-07-19',
+      residentId: 'p:2',
+      institutionId: 'tea-house',
+      kind: 'work' as const,
+      amount: 16,
+      expectedAmount: 16,
+      compensationKind: 'owner-draw' as const,
+      item: 'tea',
+      quantity: 3,
+      sourceKey: 'activity:o:legacy',
+      text: '完成一次茶叶备货。',
+      createdAt: now,
+    };
+    const {
+      expectedAmount: _legacyMissingExpected,
+      compensationKind: _legacyMissingCompensation,
+      ...legacy
+    } = entry;
+    db.seed('economyLedger', legacy);
+    expect(await appendEconomyLedger(ctx, entry)).toBe(false);
+    expect(db.table('economyLedger')).toHaveLength(1);
+
+    const conflicting = makeContext();
+    seedRuntimeResidents(conflicting.db);
+    await initializeTownEconomy(conflicting.ctx, worldId, now);
+    conflicting.db.seed('economyLedger', {
+      ...legacy,
+      expectedAmount: 15,
+      compensationKind: 'wage',
+    });
+    await expect(appendEconomyLedger(conflicting.ctx, entry)).rejects.toThrow(/collision/u);
   });
 
   test('enforces work ownership and its explicit compensation attempt', async () => {
@@ -527,6 +703,7 @@ describe('town economy persistence', () => {
       kind: 'work' as const,
       amount: 16,
       expectedAmount: 16,
+      compensationKind: 'owner-draw' as const,
       item: 'tea',
       quantity: 3,
       sourceKey: 'activity:o:5',
@@ -549,6 +726,16 @@ describe('town economy persistence', () => {
       idempotencyKey: 'work:missing-attempt',
       expectedAmount: undefined,
     } as never)).rejects.toThrow(/expectedAmount/u);
+    await expect(appendEconomyLedger(ctx, {
+      ...work,
+      idempotencyKey: 'work:missing-compensation-kind',
+      compensationKind: undefined,
+    } as never)).rejects.toThrow(/compensationKind/u);
+    await expect(appendEconomyLedger(ctx, {
+      ...work,
+      idempotencyKey: 'work:wrong-compensation-kind',
+      compensationKind: 'wage' as const,
+    })).rejects.toThrow(/compensationKind/u);
     await expect(appendEconomyLedger(ctx, {
       ...work,
       idempotencyKey: 'work:overpayment',
@@ -762,7 +949,866 @@ describe('town economy persistence', () => {
       createdAt: now,
     } as never)).rejects.toThrow(/unknown ledger kind/iu);
   });
+
+  test('settles completed work once only at the exact active location', async () => {
+    const { db, ctx } = settlementContext();
+    const args = workSettlementArgs();
+    expect(await settleActivity(ctx, args)).toMatchObject({ status: 'settled', amount: 16 });
+    expect(await settleActivity(ctx, args)).toEqual({ status: 'already-settled' });
+    expect(db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
+      balance: 166,
+      todayIncome: 16,
+    }));
+    const teaHouse = db.table('townInstitutions').find(
+      (row) => row.institutionId === 'tea-house',
+    );
+    expect(teaHouse).toEqual(expect.objectContaining({
+      cash: 104,
+      stockJson: JSON.stringify({ tea: 15 }),
+    }));
+    expect(db.table('economyLedger')).toHaveLength(1);
+    expect(db.table('lifeEvents')).toHaveLength(2);
+  });
+
+  test('returns the immutable completed outcome after the resident changes activity', async () => {
+    const fixture = settlementContext();
+    const args = workSettlementArgs();
+    expect(await settleActivity(fixture.ctx, args)).toMatchObject({ status: 'settled' });
+    const player = (fixture.db.table('worlds')[0].players as Array<Record<string, unknown>>)[0];
+    player.activity = {
+      description: '在听雨茶庄：开始另一项日常事务',
+      emoji: '🧹',
+      until: now + 60_000,
+    };
+    expect(await settleActivity(fixture.ctx, args)).toEqual({ status: 'already-settled' });
+    expect(fixture.db.table('economyLedger')).toHaveLength(1);
+  });
+
+  test('rejects an operation history containing both completed and failed outcomes', async () => {
+    const fixture = settlementContext();
+    const args = workSettlementArgs();
+    expect(await settleActivity(fixture.ctx, args)).toMatchObject({ status: 'settled' });
+    fixture.db.seed('lifeEvents', {
+      worldId,
+      residentId: args.residentId,
+      kind: args.category,
+      text: `${args.activityText}；活动未完成：居民已经改做其他事情。`,
+      createdAt: now + 1,
+      sourceKey: `activity:${args.operationId}:failed`,
+      operationId: args.operationId,
+      phase: 'failed',
+      category: args.category,
+      landmarkId: args.landmarkId,
+      economicActionJson: JSON.stringify(args.economicAction),
+      activityUntil: args.activityUntil,
+      failureReason: 'activity-replaced',
+    });
+
+    await expect(settleActivity(fixture.ctx, args)).rejects.toThrow(/outcome collision/u);
+  });
+
+  test('never settles from prose, an early timer or a resident outside the destination', async () => {
+    const fixtures = [
+      { fixture: settlementContext(), args: workSettlementArgs({ activityText: '另一段描述' }) },
+      { fixture: settlementContext(), args: { ...workSettlementArgs(), operationId: 'o:other' } },
+      { fixture: settlementContext(), args: workSettlementArgs({ now: now - 1 }) },
+      {
+        fixture: settlementContext({ position: { x: 30, y: 20 } }),
+        args: workSettlementArgs(),
+      },
+    ];
+    for (const { fixture, args } of fixtures) {
+      expect(await settleActivity(fixture.ctx, args)).not.toMatchObject({
+        status: 'settled',
+      });
+      expect(fixture.db.table('economyLedger')).toHaveLength(0);
+      expect(fixture.db.table('lifeEvents').filter((event) => event.phase === 'failed')).toHaveLength(0);
+      expect(fixture.db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
+        balance: 150,
+      }));
+    }
+  });
+
+  test('records structured terminal failures but never mutates financial state', async () => {
+    const replaced = settlementContext();
+    const replacedPlayer = (
+      replaced.db.table('worlds')[0].players as Array<Record<string, unknown>>
+    )[0];
+    (replacedPlayer.activity as Record<string, unknown>).description = '在听雨茶庄：改做别的事情';
+    expect(await settleActivity(replaced.ctx, workSettlementArgs())).toEqual({
+      status: 'rejected',
+      reason: 'activity-replaced',
+    });
+    expect(replaced.db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      phase: 'failed',
+      failureReason: 'activity-replaced',
+      kind: 'work',
+    }));
+    expect(replaced.db.table('economyLedger')).toHaveLength(0);
+
+    const invalidWork = settlementContext();
+    await initializeTownEconomy(invalidWork.ctx, worldId, now);
+    const teaHouse = invalidWork.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'tea-house',
+    )!;
+    teaHouse.stockJson = JSON.stringify({ tea: MAX_STOCK });
+    expect(await settleActivity(invalidWork.ctx, workSettlementArgs())).toEqual({
+      status: 'rejected',
+      reason: 'invalid-work-state',
+    });
+    expect(invalidWork.db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      phase: 'failed',
+      failureReason: 'invalid-work-state',
+    }));
+    expect(teaHouse).toEqual(expect.objectContaining({ cash: 120 }));
+
+    const exhausted = settlementContext({ position: { x: 30, y: 20 } });
+    expect(await settleActivity(exhausted.ctx, {
+      ...workSettlementArgs(),
+      terminalFailureReason: 'destination-not-reached',
+    })).toEqual({ status: 'rejected', reason: 'destination-not-reached' });
+    expect(exhausted.db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      phase: 'failed',
+      failureReason: 'destination-not-reached',
+    }));
+  });
+
+  test('transfers purchase money and stock atomically and rejects insufficient funds', async () => {
+    const success = settlementContext({ position: { x: 8, y: 24 } });
+    const args = purchaseSettlementArgs();
+    seedActivityStart(success.db, args.operationId, args.activityText);
+    expect(await settleActivity(success.ctx, args)).toMatchObject({ status: 'settled', amount: 6 });
+    expect(success.db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
+      balance: 144,
+      hunger: 100,
+      todayExpense: 6,
+    }));
+    const restaurant = success.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'restaurant',
+    );
+    expect(restaurant).toEqual(expect.objectContaining({
+      cash: 126,
+      stockJson: JSON.stringify({ meal: 11 }),
+      visitorCount: 1,
+    }));
+
+    const rejected = settlementContext({ startingBalance: 2, position: { x: 8, y: 24 } });
+    seedActivityStart(rejected.db, args.operationId, args.activityText);
+    expect(await settleActivity(rejected.ctx, purchaseSettlementArgs())).toEqual({
+      status: 'rejected',
+      reason: 'insufficient-funds-or-stock',
+    });
+    expect(await settleActivity(rejected.ctx, purchaseSettlementArgs())).toEqual({
+      status: 'already-failed',
+      reason: 'insufficient-funds-or-stock',
+    });
+    expect(rejected.db.table('economyLedger')).toHaveLength(0);
+    expect(rejected.db.table('lifeEvents')).toHaveLength(3);
+    expect(rejected.db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      kind: 'food',
+      phase: 'failed',
+      sourceKey: 'activity:o:purchase:1:failed',
+      failureReason: 'insufficient-funds-or-stock',
+    }));
+    expect(rejected.db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
+      balance: 2,
+    }));
+    const rejectedRestaurant = rejected.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'restaurant',
+    );
+    expect(rejectedRestaurant).toEqual(expect.objectContaining({
+      cash: 120,
+      stockJson: JSON.stringify({ meal: 12 }),
+    }));
+  });
+
+  test('fails before mutation when derived daily counters reach their exact bounds', async () => {
+    const fixture = settlementContext();
+    fixture.db.seed('residentEconomy', validResidentRow({
+      residentId: 'p:2',
+      profileId: 'tang-guo',
+      balance: 150,
+      initialBalance: 150,
+      todayIncome: MAX_MONEY,
+      initializationSourceKey: 'economy-definition:resident:tang-guo:v1',
+    }));
+    expect(await settleActivity(fixture.ctx, workSettlementArgs())).toEqual({
+      status: 'rejected',
+      reason: 'counter-boundary-exceeded',
+    });
+    expect(fixture.db.table('residentEconomy')[0]).toEqual(expect.objectContaining({
+      balance: 150,
+      todayIncome: MAX_MONEY,
+    }));
+    const teaHouse = fixture.db.table('townInstitutions').find(
+      (row) => row.institutionId === 'tea-house',
+    );
+    expect(teaHouse).toEqual(expect.objectContaining({ cash: 120 }));
+    expect(fixture.db.table('economyLedger')).toHaveLength(0);
+    expect(fixture.db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      failureReason: 'counter-boundary-exceeded',
+    }));
+  });
+
+  test('rejects malformed persisted failed outcomes instead of accepting a loose prefix', async () => {
+    const fixture = settlementContext({ startingBalance: 2, position: { x: 8, y: 24 } });
+    const args = purchaseSettlementArgs();
+    seedActivityStart(fixture.db, args.operationId, args.activityText);
+    await settleActivity(fixture.ctx, args);
+    const failed = fixture.db.table('lifeEvents').find((event) => event.phase === 'failed')!;
+    failed.text = `${args.activityText}；随便写的失败正文`;
+    await expect(settleActivity(fixture.ctx, args)).rejects.toThrow(/outcome collision/u);
+
+    failed.text = `${args.activityText}；消费未完成：余额不足或库存不足。`;
+    delete failed.failureReason;
+    await expect(settleActivity(fixture.ctx, args)).rejects.toThrow(/outcome collision/u);
+  });
+
+  test('settles rest once without creating a financial fact', async () => {
+    const fixture = settlementContext({ position: { x: 15, y: 20 } });
+    const account = fixture.db.seed('residentEconomy', validResidentRow({
+      residentId: 'p:2',
+      profileId: 'tang-guo',
+      balance: 150,
+      initialBalance: 150,
+      energy: 40,
+      initializationSourceKey: 'economy-definition:resident:tang-guo:v1',
+    }));
+    const args = {
+      ...workSettlementArgs(),
+      operationId: 'o:rest:1',
+      landmarkId: 'morning-market' as const,
+      category: 'care' as const,
+      economicAction: { kind: 'rest' as const },
+    };
+    const player = (fixture.db.table('worlds')[0].players as Array<Record<string, unknown>>)[0];
+    const playerActivity = player.activity as { description: string };
+    playerActivity.description = args.activityText;
+    seedActivityStart(fixture.db, args.operationId, args.activityText);
+    expect(await settleActivity(fixture.ctx, args)).toMatchObject({ status: 'settled' });
+    expect(await settleActivity(fixture.ctx, args)).toEqual({ status: 'already-settled' });
+    expect(account).toEqual(expect.objectContaining({ energy: 65 }));
+    expect(fixture.db.table('economyLedger')).toHaveLength(0);
+  });
+
+  test('fails closed when a settled operation id is reused for different facts', async () => {
+    const fixture = settlementContext();
+    const original = workSettlementArgs();
+    await settleActivity(fixture.ctx, original);
+    const player = (fixture.db.table('worlds')[0].players as Array<Record<string, unknown>>)[0];
+    (player.activity as Record<string, unknown>).description = '在听雨茶庄：另一项工作';
+    await expect(settleActivity(fixture.ctx, {
+      ...original,
+      activityText: '在听雨茶庄：另一项工作',
+      economicAction: {
+        kind: 'work',
+        institutionId: 'tea-house',
+        output: { kind: 'stock', item: 'tea', quantity: 2 },
+      },
+    })).rejects.toThrow(/activity operation collision/u);
+    expect(fixture.db.table('economyLedger')).toHaveLength(1);
+  });
+
+  test('fails closed when a completed rest operation is reused with changed facts', async () => {
+    const fixture = settlementContext({ position: { x: 15, y: 20 } });
+    const args = {
+      ...workSettlementArgs(),
+      operationId: 'o:rest:collision',
+      landmarkId: 'morning-market' as const,
+      category: 'care' as const,
+      economicAction: { kind: 'rest' as const },
+    };
+    seedActivityStart(fixture.db, args.operationId, args.activityText);
+    expect(await settleActivity(fixture.ctx, args)).toMatchObject({ status: 'settled' });
+    const player = (fixture.db.table('worlds')[0].players as Array<Record<string, unknown>>)[0];
+    (player.activity as Record<string, unknown>).description = '在晨雾集市：另一段休息';
+    await expect(settleActivity(fixture.ctx, {
+      ...args,
+      activityText: '在晨雾集市：另一段休息',
+    })).rejects.toThrow(/activity operation collision/u);
+  });
+
+  test('keeps structured activity phases in the original daily taxonomy', async () => {
+    const fixture = settlementContext();
+    await settleActivity(fixture.ctx, workSettlementArgs());
+    expect(fixture.db.table('lifeEvents')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'work', phase: 'start', category: 'work' }),
+      expect.objectContaining({ kind: 'work', phase: 'complete', category: 'work' }),
+    ]));
+  });
+
+  test('recovers initialization after pause and after startup reconciliation exhaustion', async () => {
+    const paused = settlementContext({ status: 'stoppedByDeveloper' });
+    const args = workSettlementArgs();
+    expect(await settleActivity(paused.ctx, args)).toEqual({ status: 'world-not-running' });
+    expect(paused.db.table('residentEconomy')).toHaveLength(0);
+    paused.db.table('worldStatus')[0].status = 'running';
+    expect(await settleActivity(paused.ctx, args)).toMatchObject({ status: 'settled' });
+
+    const longDistance = settlementContext({
+      status: 'stoppedByDeveloper',
+      position: { x: 30, y: 20 },
+    });
+    const movingPlayer = (
+      longDistance.db.table('worlds')[0].players as Array<Record<string, unknown>>
+    )[0];
+    movingPlayer.pathfinding = {
+      destination: { x: 5, y: 20 },
+      started: now,
+      state: { kind: 'needsPath' },
+    };
+    expect(await settleActivity(longDistance.ctx, args)).toEqual({ status: 'world-not-running' });
+    longDistance.db.table('worldStatus')[0].status = 'running';
+    expect(await settleActivity(longDistance.ctx, args)).toEqual({
+      status: 'destination-not-reached',
+      destinationProgressing: true,
+    });
+    movingPlayer.position = { x: 5, y: 20 };
+    expect(await settleActivity(longDistance.ctx, args)).toMatchObject({ status: 'settled' });
+
+    const delayed = makeContext();
+    seedWorldStatus(delayed.db, 'running');
+    delayed.db.seed('worlds', {
+      _id: worldId, nextId: 0, players: [], agents: [], conversations: [],
+    });
+    await reconcileTownEconomyAfterAgentCreation(delayed.ctx, {
+      worldId,
+      attempt: MAX_ECONOMY_RECONCILIATION_ATTEMPTS,
+      now,
+    });
+    addSettlementResident(delayed.db, { x: 5, y: 20 }, workSettlementArgs().activityText);
+    expect(await settleActivity(delayed.ctx, workSettlementArgs())).toMatchObject({
+      status: 'settled',
+    });
+    expect(delayed.db.table('residentEconomy')).toHaveLength(1);
+  });
+
+  test('validates structured activity semantics and registers start plus schedule exactly once', async () => {
+    const base = workSettlementArgs();
+    expect(() => validateActivityRegistration(base, now - 1)).not.toThrow();
+    expect(() => validateActivityRegistration({ ...base, activityUntil: now - 2 }, now - 1))
+      .toThrow(/activityUntil/u);
+    expect(() => validateActivityRegistration({ ...base, operationId: 'INVALID OP' }, now - 1))
+      .toThrow(/operationId/u);
+    expect(() => validateActivityRegistration({ ...base, activityText: '事'.repeat(501) }, now - 1))
+      .toThrow(/activityText/u);
+    expect(() => validateActivityRegistration({
+      ...base,
+      economicAction: {
+        ...base.economicAction,
+        output: { ...base.economicAction.output, quantity: MAX_STOCK + 1 },
+      },
+    }, now - 1)).toThrow(/work quantity/u);
+    expect(() => validateActivityRegistration({ ...base, landmarkId: 'restaurant' }, now - 1))
+      .toThrow(/landmark/u);
+    expect(() => validateActivityRegistration({
+      ...base,
+      landmarkId: 'missing-place' as never,
+    }, now - 1)).toThrow(/Unknown town landmark/u);
+
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'stoppedByDeveloper');
+    addRuntimeResident(fixture.db, '唐果', 'p:2');
+    const registration = {
+      worldId: base.worldId,
+      residentId: base.residentId,
+      operationId: base.operationId,
+      activityText: base.activityText,
+      activityDuration: 60_000,
+      landmarkId: base.landmarkId,
+      category: base.category,
+      economicAction: base.economicAction,
+      startedAt: now - 1,
+      agentId: 'a:2',
+      destination: { x: 5, y: 20 },
+      emoji: '🍵',
+    };
+    const queued = await enqueueResidentActivityInput(fixture.ctx, registration);
+    expect(queued.status).toBe('queued');
+    expect(typeof queued.registrationId).toBe('string');
+    expect(typeof queued.inputId).toBe('string');
+    const replay = await enqueueResidentActivityInput(fixture.ctx, registration);
+    expect(replay).toEqual({
+      status: 'already-queued',
+      registrationId: queued.registrationId,
+      inputId: queued.inputId,
+    });
+    expect(fixture.db.table('activityRegistrations')).toHaveLength(1);
+    expect(fixture.db.table('inputs')).toHaveLength(1);
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+    expect(fixture.scheduler.calls).toHaveLength(0);
+    const storedRegistration = fixture.db.table('activityRegistrations')[0];
+    const storedInput = fixture.db.table('inputs')[0];
+    expect(storedRegistration).toEqual(expect.objectContaining({
+      agentId: registration.agentId,
+      inputId: storedInput._id as Id<'inputs'>,
+      deliveryState: 'queued',
+    }));
+    expect(storedInput.name).toBe('finishDoSomething');
+    expect((storedInput.args as Record<string, unknown>).activityRegistrationId)
+      .toBe(storedRegistration._id);
+
+    // A paused engine keeps the atomically queued input and intent without polling or expiry.
+    const player = (fixture.db.table('worlds')[0].players as Array<Record<string, unknown>>)[0];
+    player.position = { x: 5, y: 20 };
+    expect(fixture.db.table('activityRegistrations')[0].state).toBe('intent');
+
+    // The engine acknowledgement is the trusted activation clock after a long pause/delay.
+    const activatedAt = now + 86_500_000;
+    const activityUntil = activatedAt + registration.activityDuration;
+    fixture.db.table('worldStatus')[0].status = 'running';
+    player.activity = {
+      description: registration.activityText,
+      emoji: '🍵',
+      until: activityUntil,
+    };
+    const forged = await applyCompletedActivityRegistrationAcks(fixture.ctx, worldId, [{
+      inputId: 'inputs:fully-unlinked-forgery' as Id<'inputs'>,
+      returnValue: { kind: 'ok', value: { activityRegistration: {} } },
+    }]);
+    expect(forged).toEqual([]);
+    expect(storedRegistration.state).toBe('intent');
+    expect(fixture.db.table('activityRegistrationAcks')).toHaveLength(0);
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+
+    const completedInput = {
+      inputId: storedInput._id as Id<'inputs'>,
+      returnValue: {
+        kind: 'ok',
+        value: {
+          activityRegistration: {
+            operationId: registration.operationId,
+            registrationId: storedRegistration._id,
+            agentId: registration.agentId,
+            residentId: registration.residentId,
+            status: 'activated',
+            activatedAt,
+            activityUntil,
+          },
+        },
+      },
+    };
+    const persisted = await applyCompletedActivityRegistrationAcks(
+      fixture.ctx, worldId, [completedInput],
+    );
+    expect(persisted[0]?.status).toBe('persisted');
+    expect(typeof (persisted[0] as { outboxId?: unknown }).outboxId).toBe('string');
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+    expect(fixture.db.table('activityRegistrations')[0].state).toBe('intent');
+    expect(fixture.db.table('activityRegistrations')[0]).toEqual(expect.objectContaining({
+      deliveryState: 'processing',
+    }));
+    expect(fixture.db.table('activityRegistrationAcks')).toHaveLength(1);
+    expect(fixture.db.table('activityRegistrationAcks')[0]).toEqual(expect.objectContaining({
+      worldId,
+      inputId: storedInput._id,
+      registrationId: storedRegistration._id,
+      ackKind: 'activated',
+      status: 'pending',
+      attempts: 0,
+    }));
+    expect(fixture.scheduler.calls.at(-1)).toEqual(expect.objectContaining({
+      delay: 0,
+    }));
+    const schedulerCount = fixture.scheduler.calls.length;
+    const replayedAck = await applyCompletedActivityRegistrationAcks(
+      fixture.ctx, worldId, [completedInput],
+    );
+    expect(replayedAck[0]?.status).toBe('already-persisted');
+    expect((replayedAck[0] as { outboxId?: unknown }).outboxId)
+      .toBe(fixture.db.table('activityRegistrationAcks')[0]._id);
+    expect(fixture.scheduler.calls).toHaveLength(schedulerCount);
+    const outbox = fixture.db.table('activityRegistrationAcks')[0];
+    fixture.scheduler.failNext = true;
+    expect(await dispatchActivityRegistrationAckWithRecovery({
+      process: () => runMemoryMutation(fixture, () => processActivityRegistrationAckOutbox(
+        fixture.ctx,
+        { outboxId: outbox._id as Id<'activityRegistrationAcks'> },
+      )),
+      recordFailure: () => recordActivityRegistrationAckFailure(fixture.ctx, {
+        outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+        errorCode: 'scheduler-unavailable secret detail',
+      }),
+    })).toEqual({ status: 'retrying', attempts: 1, delay: 2_000 });
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+    expect(fixture.db.table('activityRegistrations')[0]).toEqual(expect.objectContaining({
+      state: 'intent',
+      deliveryState: 'processing',
+    }));
+    const recoveredOutbox = fixture.db.table('activityRegistrationAcks')[0];
+    expect(recoveredOutbox).toEqual(expect.objectContaining({
+      status: 'retrying',
+      attempts: 1,
+      errorCode: 'ack-processing-failed',
+    }));
+    expect(fixture.scheduler.calls.at(-1)).toEqual(expect.objectContaining({ delay: 2_000 }));
+    expect(await processActivityRegistrationAckOutbox(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+    })).toEqual({ status: 'activated' });
+    expect(fixture.db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      sourceKey: 'activity:o:work:1:start',
+      phase: 'start',
+    }));
+    expect(fixture.db.table('activityRegistrations')[0]).toEqual(expect.objectContaining({
+      state: 'activated',
+      activatedAt,
+      activityUntil,
+      deliveryState: 'processed',
+    }));
+    expect(recoveredOutbox).toEqual(expect.objectContaining({ status: 'processed' }));
+    const settlementSchedule = fixture.scheduler.calls.at(-1);
+    expect(settlementSchedule?.delay).toBe(registration.activityDuration);
+    expect(settlementSchedule?.args.operationId).toBe(registration.operationId);
+    expect(settlementSchedule?.args.lastAttemptAt).toBe(activityUntil);
+    const processedSchedulerCount = fixture.scheduler.calls.length;
+    expect(await processActivityRegistrationAckOutbox(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+    })).toEqual({ status: 'already-processed' });
+    expect(fixture.scheduler.calls).toHaveLength(processedSchedulerCount);
+    expect(readFileSync('convex/aiTown/game.ts', 'utf8'))
+      .toContain('await applyCompletedActivityRegistrationAcks');
+    const operationsSource = readFileSync('convex/aiTown/agentOperations.ts', 'utf8');
+    expect(operationsSource).toContain('export async function processActivityRegistrationAckOutbox');
+    expect(operationsSource).toContain('export async function recordActivityRegistrationAckFailure');
+    expect(operationsSource)
+      .toContain('export async function dispatchActivityRegistrationAckWithRecovery');
+    expect(operationsSource)
+      .toContain('export async function persistActivitySettlementRetryState');
+    expect(operationsSource)
+      .toContain('export async function wakeOutstandingActivitySettlements');
+    expect(operationsSource).toContain('ctx.runMutation(');
+  });
+
+  test('persists bounded paused settlement state and wakes outstanding work once on resume', async () => {
+    const { fixture, queued, registration } = await makeLinkedActivityFixture('o:wake:paused');
+    const activatedAt = now;
+    const activityUntil = now + 60_000;
+    await applyCompletedActivityRegistrationAcks(fixture.ctx, worldId, [{
+      inputId: queued.inputId as Id<'inputs'>,
+      returnValue: {
+        kind: 'ok',
+        value: {
+          activityRegistration: {
+            registrationId: registration._id,
+            operationId: registration.operationId,
+            agentId: registration.agentId,
+            residentId: registration.residentId,
+            status: 'activated',
+            activatedAt,
+            activityUntil,
+          },
+        },
+      },
+    }]);
+    const outbox = fixture.db.table('activityRegistrationAcks')[0];
+    await processActivityRegistrationAckOutbox(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+    });
+
+    expect(await persistActivitySettlementRetryState(fixture.ctx, {
+      worldId,
+      operationId: registration.operationId as string,
+      arrivalGraceStartedAt: now + 16_000,
+      arrivalRecoveryDeadline: now + 300_000,
+      lastAttemptAt: now + 20_000,
+      pauseRetryCount: 4,
+    })).toEqual({ status: 'persisted' });
+    expect(registration).toEqual(expect.objectContaining({
+      settlementArrivalGraceStartedAt: now + 16_000,
+      settlementArrivalRecoveryDeadline: now + 300_000,
+      settlementLastAttemptAt: now + 20_000,
+      settlementPauseRetryCount: 4,
+    }));
+
+    const beforeWake = fixture.scheduler.calls.length;
+    const resumedAt = now + 24 * 60 * 60 * 1_000 + 20_000;
+    expect(await wakeOutstandingActivitySettlements(fixture.ctx, {
+      worldId,
+      now: resumedAt,
+    })).toEqual({ scheduled: 1 });
+    expect(fixture.scheduler.calls).toHaveLength(beforeWake + 1);
+    const wakeCall = fixture.scheduler.calls.at(-1);
+    expect(wakeCall?.delay).toBe(0);
+    expect(wakeCall?.args).toEqual(expect.objectContaining({
+      operationId: registration.operationId,
+      arrivalGraceStartedAt: now + 24 * 60 * 60 * 1_000 + 16_000,
+      arrivalRecoveryDeadline: now + 24 * 60 * 60 * 1_000 + 300_000,
+      lastAttemptAt: resumedAt,
+      pauseRetryCount: 0,
+    }));
+    expect(registration).toEqual(expect.objectContaining({
+      settlementArrivalGraceStartedAt: now + 24 * 60 * 60 * 1_000 + 16_000,
+      settlementArrivalRecoveryDeadline: now + 24 * 60 * 60 * 1_000 + 300_000,
+      settlementLastAttemptAt: resumedAt,
+    }));
+    expect((wakeCall?.args.arrivalGraceStartedAt as number) + 8_000 - resumedAt).toBe(4_000);
+    expect((wakeCall?.args.arrivalRecoveryDeadline as number) - resumedAt).toBe(280_000);
+    expect(await wakeOutstandingActivitySettlements(fixture.ctx, {
+      worldId,
+      now: resumedAt + 1,
+    })).toEqual({ scheduled: 0 });
+    expect(fixture.scheduler.calls).toHaveLength(beforeWake + 1);
+
+    expect(readFileSync('convex/world.ts', 'utf8'))
+      .toContain('wakeOutstandingActivitySettlementsMutation');
+    expect(readFileSync('convex/testing.ts', 'utf8'))
+      .toContain('wakeOutstandingActivitySettlementsMutation');
+  });
+
+  test('terminates a server-linked engine input error without creating economic facts', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    addRuntimeResident(fixture.db, '唐果', 'p:2');
+    const base = workSettlementArgs();
+    const queued = await enqueueResidentActivityInput(fixture.ctx, {
+      worldId,
+      residentId: base.residentId,
+      agentId: 'a:2',
+      operationId: 'o:work:error',
+      activityText: base.activityText,
+      activityDuration: 60_000,
+      landmarkId: base.landmarkId,
+      category: base.category,
+      economicAction: base.economicAction,
+      startedAt: now,
+      destination: { x: 5, y: 20 },
+      emoji: '🍵',
+    });
+    const persistedError = await applyCompletedActivityRegistrationAcks(fixture.ctx, worldId, [{
+      inputId: queued.inputId as Id<'inputs'>,
+      returnValue: { kind: 'error', message: 'x'.repeat(500) },
+    }]);
+    expect(persistedError[0]?.status).toBe('persisted');
+    expect(fixture.db.table('activityRegistrations')[0]).toEqual(expect.objectContaining({
+      state: 'intent',
+      deliveryState: 'processing',
+    }));
+    const outbox = fixture.db.table('activityRegistrationAcks')[0];
+    expect(JSON.parse(outbox.payloadJson as string)).toEqual({ message: 'x'.repeat(240) });
+    expect(await processActivityRegistrationAckOutbox(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+    })).toEqual({ status: 'abandoned' });
+    expect(fixture.db.table('activityRegistrations')[0]).toEqual(expect.objectContaining({
+      state: 'abandoned',
+      deliveryState: 'failed',
+      abandonReason: 'engine-input-error',
+    }));
+    expect(fixture.db.table('lifeEvents')).toHaveLength(0);
+    expect(fixture.db.table('economyLedger')).toHaveLength(0);
+    expect(fixture.scheduler.calls).toHaveLength(1);
+  });
+
+  test('durably terminates a server-linked completed input with a missing acknowledgement', async () => {
+    await expectInvalidAckTerminal(
+      'o:work:missing-ack',
+      'missing-ack',
+      () => ({ kind: 'ok', value: {} }),
+    );
+  });
+
+  test('durably terminates a server-linked completed input with a malformed acknowledgement', async () => {
+    await expectInvalidAckTerminal(
+      'o:work:malformed-ack',
+      'malformed-ack',
+      () => ({ kind: 'ok', value: '{invalid-json' }),
+    );
+  });
+
+  test('durably terminates a server-linked completed input with mismatched fields', async () => {
+    await expectInvalidAckTerminal(
+      'o:work:mismatched-ack',
+      'mismatched-ack',
+      (registration) => ({
+        kind: 'ok',
+        value: {
+          activityRegistration: {
+            registrationId: registration._id,
+            operationId: registration.operationId,
+            agentId: 'a:forged',
+            residentId: registration.residentId,
+            status: 'activated',
+            activatedAt: now,
+            activityUntil: now + 60_000,
+          },
+        },
+      }),
+    );
+  });
+
+  test('dead-letters a consumed acknowledgement after bounded processing failures', async () => {
+    const fixture = makeContext();
+    seedWorldStatus(fixture.db, 'running');
+    addRuntimeResident(fixture.db, '唐果', 'p:2');
+    const base = workSettlementArgs();
+    const queued = await enqueueResidentActivityInput(fixture.ctx, {
+      worldId,
+      residentId: base.residentId,
+      agentId: 'a:2',
+      operationId: 'o:work:dead-letter',
+      activityText: base.activityText,
+      activityDuration: 60_000,
+      landmarkId: base.landmarkId,
+      category: base.category,
+      economicAction: base.economicAction,
+      startedAt: now,
+      destination: { x: 5, y: 20 },
+    });
+    const registration = fixture.db.table('activityRegistrations')[0];
+    await applyCompletedActivityRegistrationAcks(fixture.ctx, worldId, [{
+      inputId: queued.inputId as Id<'inputs'>,
+      returnValue: {
+        kind: 'ok',
+        value: {
+          activityRegistration: {
+            registrationId: registration._id,
+            operationId: registration.operationId,
+            agentId: registration.agentId,
+            residentId: registration.residentId,
+            status: 'activated',
+            activatedAt: now,
+            activityUntil: now + 60_000,
+          },
+        },
+      },
+    }]);
+    const outbox = fixture.db.table('activityRegistrationAcks')[0];
+    outbox.payloadJson = '{invalid-json';
+    await expect(processActivityRegistrationAckOutbox(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+    })).rejects.toThrow();
+    await recordActivityRegistrationAckFailure(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+      errorCode: 'first',
+    });
+    await recordActivityRegistrationAckFailure(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+      errorCode: 'second',
+    });
+    const scheduledBeforeTerminal = fixture.scheduler.calls.length;
+    expect(await recordActivityRegistrationAckFailure(fixture.ctx, {
+      outboxId: outbox._id as Id<'activityRegistrationAcks'>,
+      errorCode: 'third',
+    })).toEqual({ status: 'dead-letter', attempts: 3 });
+    expect(fixture.scheduler.calls).toHaveLength(scheduledBeforeTerminal);
+    expect(outbox).toEqual(expect.objectContaining({
+      status: 'dead-letter',
+      attempts: 3,
+      errorCode: 'ack-processing-failed',
+    }));
+    expect(registration).toEqual(expect.objectContaining({
+      state: 'abandoned',
+      deliveryState: 'failed',
+      abandonReason: 'ack-processing-failed',
+      recoveryAttempts: 3,
+    }));
+  });
 });
+
+type SettlementOverrides = {
+  activityText?: string;
+  now?: number;
+  position?: { x: number; y: number };
+  status?: 'running' | 'stoppedByDeveloper';
+  startingBalance?: number;
+};
+
+function settlementContext(overrides: SettlementOverrides = {}) {
+  const fixture = makeContext();
+  seedWorldStatus(fixture.db, overrides.status ?? 'running');
+  addSettlementResident(
+    fixture.db,
+    overrides.position ?? { x: 5, y: 20 },
+    overrides.activityText ?? workSettlementArgs().activityText,
+  );
+  if (overrides.startingBalance !== undefined) {
+    fixture.db.seed('residentEconomy', validResidentRow({
+      residentId: 'p:2',
+      profileId: 'tang-guo',
+      balance: overrides.startingBalance,
+      initialBalance: 150,
+      initializationSourceKey: 'economy-definition:resident:tang-guo:v1',
+    }));
+  }
+  return fixture;
+}
+
+function addSettlementResident(
+  db: MemoryDb,
+  position: { x: number; y: number },
+  activityText: string,
+) {
+  addRuntimeResident(db, '唐果', 'p:2');
+  const world = db.table('worlds').find((row) => row._id === worldId)!;
+  const player = (world.players as Array<Record<string, unknown>>)[0];
+  Object.assign(player, {
+    position,
+    activity: { description: activityText, emoji: '🍵', until: now },
+  });
+  seedActivityStart(db, 'o:work:1', activityText);
+}
+
+function seedActivityStart(db: MemoryDb, operationId: string, activityText: string) {
+  const action = operationId.includes('purchase')
+    ? purchaseSettlementArgs().economicAction
+    : operationId.includes('rest')
+      ? { kind: 'rest' as const }
+      : workSettlementArgs().economicAction;
+  const landmarkId = operationId.includes('purchase')
+    ? 'restaurant'
+    : operationId.includes('rest') ? 'morning-market' : 'tea-house';
+  db.seed('lifeEvents', {
+    worldId,
+    residentId: 'p:2',
+    kind: operationId.includes('purchase') ? 'food' : operationId.includes('rest') ? 'care' : 'work',
+    text: `开始${activityText}`,
+    createdAt: now - 1,
+    sourceKey: `activity:${operationId}:start`,
+    operationId,
+    phase: 'start',
+    category: operationId.includes('purchase') ? 'food' : operationId.includes('rest') ? 'care' : 'work',
+    landmarkId,
+    economicActionJson: JSON.stringify(action),
+    activityUntil: now,
+  });
+}
+
+function workSettlementArgs(overrides: SettlementOverrides = {}) {
+  return {
+    worldId,
+    residentId: 'p:2',
+    operationId: 'o:work:1',
+    activityText: overrides.activityText ?? '在听雨茶庄：在临桥茶馆招呼客人并盘点今日茶叶',
+    activityUntil: now,
+    landmarkId: 'tea-house' as const,
+    category: 'work' as const,
+    economicAction: {
+      kind: 'work' as const,
+      institutionId: 'tea-house' as const,
+      output: { kind: 'stock' as const, item: 'tea' as const, quantity: 3 },
+    },
+    now: overrides.now ?? now,
+  };
+}
+
+function purchaseSettlementArgs() {
+  const text = workSettlementArgs().activityText;
+  return {
+    worldId,
+    residentId: 'p:2',
+    operationId: 'o:purchase:1',
+    activityText: text,
+    activityUntil: now,
+    landmarkId: 'restaurant' as const,
+    category: 'food' as const,
+    economicAction: {
+      kind: 'purchase' as const,
+      institutionId: 'restaurant' as const,
+      goodId: 'meal' as const,
+      quantity: 1 as const,
+    },
+    now,
+  };
+}
 
 function validResidentRow(overrides: Record<string, unknown> = {}) {
   return {

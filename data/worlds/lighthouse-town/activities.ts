@@ -1,4 +1,10 @@
 import type { TownLandmarkId } from './map';
+import {
+  residentEconomyProfiles,
+  type GoodId,
+  type InstitutionId,
+  type WorkOutput,
+} from './economy';
 
 export const ACTIVITY_CATEGORIES = ['work', 'food', 'care', 'social', 'leisure'] as const;
 
@@ -8,7 +14,13 @@ export type ResidentActivity = {
   duration: number;
   category: (typeof ACTIVITY_CATEGORIES)[number];
   landmarkId: TownLandmarkId;
+  economicAction?: EconomicAction;
 };
+
+export type EconomicAction =
+  | { kind: 'work'; institutionId: InstitutionId; output: WorkOutput }
+  | { kind: 'purchase'; institutionId: InstitutionId; goodId: GoodId; quantity: 1 }
+  | { kind: 'rest' };
 
 type ResidentActivityTemplate = Omit<ResidentActivity, 'landmarkId'>;
 
@@ -27,7 +39,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '系紧靛青披风并整理随身的灯塔钥匙',
+      description: '在值房坐下歇一会儿并喝些温水',
       emoji: '🧣',
       duration: 45_000,
       category: 'care',
@@ -59,7 +71,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '拂去长衫上的粉笔灰并理齐案头笔墨',
+      description: '放下书卷闭目休息片刻',
       emoji: '🧹',
       duration: 50_000,
       category: 'care',
@@ -91,7 +103,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '理好靛蓝围裙和桂花纹发带后擦净茶桌',
+      description: '在后堂坐下歇脚并喝一杯温茶',
       emoji: '🧣',
       duration: 55_000,
       category: 'care',
@@ -123,7 +135,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '拧干深青短打的衣角并重绑皮护腕',
+      description: '靠在船屋长凳上休息一阵',
       emoji: '🧵',
       duration: 45_000,
       category: 'care',
@@ -155,7 +167,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '束好窄袖工装并按大小理顺黄铜工具',
+      description: '放下工具活动肩背并安静休息',
       emoji: '🧰',
       duration: 50_000,
       category: 'care',
@@ -187,7 +199,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '重新分门别类整理药囊并系紧软底靴',
+      description: '在药庐内室闭目小憩片刻',
       emoji: '🎒',
       duration: 50_000,
       category: 'care',
@@ -219,7 +231,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '拍掉赭红短袍上的金粉并重系工作围腰',
+      description: '停下手里的活坐在廊下休息',
       emoji: '✨',
       duration: 45_000,
       category: 'care',
@@ -251,7 +263,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '卷高裤脚并把小挎包里的绳结重新排好',
+      description: '在集市棚下坐着歇一会儿',
       emoji: '🪢',
       duration: 40_000,
       category: 'care',
@@ -283,7 +295,7 @@ export const residentActivities: Record<string, ResidentActivityTemplate[]> = {
       category: 'food',
     },
     {
-      description: '抚平玄紫长衫并擦拭腰间的铜罗盘',
+      description: '在安静的厢房里闭目养神',
       emoji: '🧭',
       duration: 45_000,
       category: 'care',
@@ -333,10 +345,25 @@ const residentActivityLandmarks: Record<
 const locatedResidentActivities = Object.fromEntries(
   Object.entries(residentActivities).map(([residentName, activities]) => [
     residentName,
-    activities.map((activity) => ({
-      ...activity,
-      landmarkId: residentActivityLandmarks[residentName][activity.category],
-    })),
+    activities.map((activity) => {
+      const landmarkId = residentActivityLandmarks[residentName][activity.category];
+      const profile = residentEconomyProfiles.find((entry) => entry.name === residentName)!;
+      let economicAction: EconomicAction | undefined;
+      if (activity.category === 'work') {
+        economicAction = {
+          kind: 'work',
+          institutionId: profile.institutionId,
+          output: profile.workOutput,
+        };
+      } else if (activity.category === 'food') {
+        economicAction = landmarkId === 'tea-house'
+          ? { kind: 'purchase', institutionId: 'tea-house', goodId: 'tea', quantity: 1 }
+          : { kind: 'purchase', institutionId: 'restaurant', goodId: 'meal', quantity: 1 };
+      } else if (activity.category === 'care') {
+        economicAction = { kind: 'rest' };
+      }
+      return { ...activity, landmarkId, economicAction };
+    }),
   ]),
 ) as Record<string, ResidentActivity[]>;
 

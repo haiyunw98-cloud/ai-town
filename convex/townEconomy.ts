@@ -7,10 +7,21 @@ import {
   type InstitutionDefinition,
   type ResidentEconomyProfile,
 } from '../data/worlds/lighthouse-town/economy';
+import {
+  type EconomicAction,
+  type ResidentActivity,
+} from '../data/worlds/lighthouse-town/activities';
+import {
+  townLandmarkById,
+  townLandmarks,
+  type TownLandmarkId,
+} from '../data/worlds/lighthouse-town/map';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { internalMutation, type MutationCtx } from './_generated/server';
 import { MAX_MONEY, MAX_STOCK } from './townEconomyRules';
+import { settlePurchase, settleWork } from './townEconomyRules';
+import { distance } from './util/geometry';
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
 // The final millisecond that still formats as a four-digit Shanghai calendar year.
@@ -46,9 +57,10 @@ type EconomyLedgerBase = {
   text: string;
   createdAt: number;
 };
+type CompensationKind = ResidentEconomyProfile['compensation']['kind'];
 
 export type EconomyLedgerEntry = EconomyLedgerBase & (
-  | { kind: 'work'; residentId: string; institutionId: string; expectedAmount: number; item: string; quantity: number }
+  | { kind: 'work'; residentId: string; institutionId: string; expectedAmount: number; compensationKind: CompensationKind; item: string; quantity: number }
   | { kind: 'purchase'; residentId: string; institutionId: string; expectedAmount?: never; item: string; quantity: number }
   | { kind: 'restock'; residentId?: never; institutionId: string; expectedAmount?: never; item: string; quantity: number }
   | { kind: 'event-reward'; residentId: string; institutionId?: never; expectedAmount?: never; item?: never; quantity?: never }
@@ -228,6 +240,689 @@ export async function appendEconomyLedger(
   return true;
 }
 
+export type ActivitySettlementArgs = {
+  worldId: Id<'worlds'>;
+  residentId: string;
+  operationId: string;
+  activityText: string;
+  activityUntil: number;
+  landmarkId: TownLandmarkId;
+  category: ResidentActivity['category'];
+  economicAction: EconomicAction;
+  terminalFailureReason?: 'destination-not-reached';
+  now?: number;
+};
+
+export function validateActivityRegistration(
+  args: Omit<ActivitySettlementArgs, 'now' | 'terminalFailureReason'>,
+  createdAt: number,
+) {
+  assertDateTimestamp(createdAt, 'activity createdAt');
+  assertDateTimestamp(args.activityUntil, 'activityUntil');
+  if (args.activityUntil < createdAt || args.activityUntil - createdAt > 86_400_000) {
+    throw new Error('activityUntil must be within one day after registration');
+  }
+  for (const [key, label] of [
+    [`activity:${args.operationId}`, 'activity operationId'],
+    [`activity:${args.operationId}:start`, 'activity start sourceKey'],
+    [`activity:${args.operationId}:complete`, 'activity completion sourceKey'],
+    [`activity:${args.operationId}:failed`, 'activity failure sourceKey'],
+    [
+      `activity:${args.worldId}:${args.residentId}:${args.operationId}`,
+      'activity idempotencyKey',
+    ],
+  ] as const) {
+    assertCanonicalKey(key, label);
+  }
+  assertBoundedString(args.activityText, MAX_LEDGER_TEXT_LENGTH, 'activityText');
+  const landmark = townLandmarks.find((entry) => entry.id === args.landmarkId);
+  if (!landmark) throw new Error(`Unknown town landmark: ${args.landmarkId}`);
+  const action = args.economicAction;
+  if (action.kind === 'rest') {
+    if (args.category !== 'care') throw new Error('rest activity category mismatch');
+    return;
+  }
+  const definition = institutionDefinition(action.institutionId);
+  if (definition.landmarkId !== landmark.id) throw new Error('activity institution landmark mismatch');
+  if (action.kind === 'purchase') {
+    if (args.category !== 'food') throw new Error('purchase activity category mismatch');
+    if (!definition.goods.includes(action.goodId)) throw new Error('purchase good mismatch');
+    assertPositiveQuantity(action.quantity, 'purchase quantity');
+    return;
+  }
+  if (args.category !== 'work') throw new Error('work activity category mismatch');
+  assertPositiveQuantity(action.output.quantity, 'work quantity');
+  const outputId = action.output.kind === 'stock' ? action.output.item : action.output.serviceId;
+  const offered = action.output.kind === 'stock'
+    ? definition.goods.includes(action.output.item)
+    : definition.serviceIds.includes(action.output.serviceId);
+  if (!offered || !outputId) throw new Error('work output institution mismatch');
+}
+
+export async function settleActivity(
+  ctx: EconomyDbContext,
+  args: ActivitySettlementArgs,
+) {
+  const now = args.now ?? Date.now();
+  validateActivityRegistration(args, Math.min(now, args.activityUntil));
+  assertDateTimestamp(now, 'settlement now');
+  const status = await ctx.db
+    .query('worldStatus')
+    .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+    .unique();
+  if (!status || status.status !== 'running') return { status: 'world-not-running' as const };
+
+  const idempotencyKey = `activity:${args.worldId}:${args.residentId}:${args.operationId}`;
+  const sourceKey = `activity:${args.operationId}`;
+  assertCanonicalKey(idempotencyKey, 'activity idempotencyKey');
+  assertCanonicalKey(sourceKey, 'activity sourceKey');
+  const priorLedger = await ctx.db
+    .query('economyLedger')
+    .withIndex('idempotencyKey', (q) =>
+      q.eq('worldId', args.worldId).eq('idempotencyKey', idempotencyKey),
+    )
+    .unique();
+
+  await ensureActivityEconomyInitialized(ctx, args, now);
+  const world = await ctx.db.get(args.worldId);
+  if (!world) return { status: 'resident-not-active' as const };
+  const player = world.players.find((candidate) => candidate.id === args.residentId);
+  const activeAgentCount = world.agents.filter(
+    (candidate) => candidate.playerId === args.residentId,
+  ).length;
+  if (!player || player.human !== undefined || activeAgentCount !== 1) {
+    return { status: 'resident-not-active' as const };
+  }
+  const account = await ctx.db
+    .query('residentEconomy')
+    .withIndex('resident', (q) =>
+      q.eq('worldId', args.worldId).eq('residentId', args.residentId),
+    )
+    .unique();
+  if (!account) return { status: 'resident-account-missing' as const };
+  const startEvent = await activityEventBySource(
+    ctx,
+    args.worldId,
+    `activity:${args.operationId}:start`,
+  );
+  if (
+    !startEvent
+    || startEvent.text !== `开始${args.activityText}`
+    || startEvent.createdAt > args.activityUntil
+    || startEvent.residentId !== args.residentId
+    || startEvent.operationId !== args.operationId
+    || startEvent.phase !== 'start'
+    || startEvent.category !== args.category
+    || startEvent.landmarkId !== args.landmarkId
+    || startEvent.economicActionJson !== serializeEconomicAction(args.economicAction)
+    || startEvent.activityUntil !== args.activityUntil
+  ) {
+    const [completed, failed] = await Promise.all([
+      activityEventBySource(ctx, args.worldId, `activity:${args.operationId}:complete`),
+      activityEventBySource(ctx, args.worldId, `activity:${args.operationId}:failed`),
+    ]);
+    if (priorLedger || completed || failed) {
+      throw new Error(`activity operation collision: ${args.operationId}`);
+    }
+    return { status: 'operation-mismatch' as const };
+  }
+  validateActivityRegistration(args, startEvent.createdAt);
+  const priorOutcome = await priorNonFinancialActivityOutcome(
+    ctx, args, priorLedger, account,
+  );
+  if (priorOutcome?.status === 'already-failed') return priorOutcome;
+  if (priorOutcome) return priorOutcome;
+  if (priorLedger) {
+    const completionFact = validatePriorLedgerCompletion(priorLedger, args, account);
+    await recordCompletedActivity(ctx, args, now, completionFact);
+    return { status: 'already-settled' as const };
+  }
+  if (
+    !player.activity
+    || player.activity.description !== args.activityText
+    || player.activity.until !== args.activityUntil
+  ) {
+    await recordActivityOutcome(
+      ctx, args, now, 'failed', '活动未完成：居民已经改做其他事情。', 'activity-replaced',
+    );
+    return { status: 'rejected' as const, reason: 'activity-replaced' as const };
+  }
+  if (now < args.activityUntil) return { status: 'activity-not-complete' as const };
+  const landmark = townLandmarkById(args.landmarkId);
+  if (distance(player.position, landmark.destination) > 2) {
+    if (args.terminalFailureReason === 'destination-not-reached') {
+      await recordActivityOutcome(
+        ctx, args, now, 'failed', '活动未完成：到达宽限期结束时仍未到达地点。',
+        'destination-not-reached',
+      );
+      return { status: 'rejected' as const, reason: 'destination-not-reached' as const };
+    }
+    const destinationProgressing = !!player.pathfinding
+      && distance(player.pathfinding.destination, landmark.destination) < 0.01;
+    return { status: 'destination-not-reached' as const, destinationProgressing };
+  }
+  const dayKey = shanghaiEconomyDayKey(now);
+  const residentIncome = account.dayKey === dayKey ? account.todayIncome : 0;
+  const residentExpense = account.dayKey === dayKey ? account.todayExpense : 0;
+  const economicAction = args.economicAction;
+
+  if (economicAction.kind === 'rest') {
+    if (!isBoundedSafeInteger(residentIncome, MAX_MONEY)
+      || !isBoundedSafeInteger(residentExpense, MAX_MONEY)) {
+      await recordActivityOutcome(
+        ctx, args, now, 'failed', '休息记录未完成：日累计值超过安全边界。',
+        'counter-boundary-exceeded',
+      );
+      return { status: 'rejected' as const, reason: 'counter-boundary-exceeded' as const };
+    }
+    await ctx.db.patch(account._id, {
+      energy: Math.min(100, account.energy + 25),
+      hunger: Math.max(0, account.hunger - 1),
+      todayIncome: residentIncome,
+      todayExpense: residentExpense,
+      dayKey,
+      updatedAt: now,
+    });
+    await recordActivityOutcome(ctx, args, now, 'complete', '休息已经完成。');
+    return { status: 'settled' as const, amount: 0 };
+  }
+
+  const definition = institutionDefinition(economicAction.institutionId);
+  if (definition.landmarkId !== args.landmarkId) {
+    return { status: 'institution-location-mismatch' as const };
+  }
+  const institution = await ctx.db
+    .query('townInstitutions')
+    .withIndex('institution', (q) =>
+      q.eq('worldId', args.worldId)
+        .eq('institutionId', economicAction.institutionId),
+    )
+    .unique();
+  if (!institution) return { status: 'institution-missing' as const };
+  const institutionIncome = institution.dayKey === dayKey ? institution.todayIncome : 0;
+  const institutionExpense = institution.dayKey === dayKey ? institution.todayExpense : 0;
+  const visitors = institution.dayKey === dayKey ? institution.visitorCount : 0;
+
+  if (economicAction.kind === 'work') {
+    const profile = residentProfile(account.profileId);
+    if (
+      profile.institutionId !== economicAction.institutionId
+      || JSON.stringify(profile.workOutput) !== JSON.stringify(economicAction.output)
+    ) {
+      return { status: 'work-profile-mismatch' as const };
+    }
+    const output = economicAction.output;
+    if (priorLedger) {
+      assertPriorActivityLedger(
+        priorLedger, args, profile.compensation.amount, profile.compensation.kind,
+      );
+      return { status: 'already-settled' as const };
+    }
+    const counters = output.kind === 'stock'
+      ? parseCounterJson(institution.stockJson)
+      : parseCounterJson(institution.serviceCountersJson);
+    const item = output.kind === 'stock' ? output.item : output.serviceId;
+    const result = settleWork(
+      {
+        residentBalance: account.balance,
+        institutionCash: institution.cash,
+        stock: counters[item] ?? 0,
+      },
+      { pay: profile.compensation.amount, output: output.quantity },
+    );
+    if (!result.ok) {
+      await recordActivityOutcome(
+        ctx, args, now, 'failed', '工作未完成：经济状态或产出已达到安全边界。',
+        'invalid-work-state',
+      );
+      return { status: 'rejected' as const, reason: 'invalid-work-state' as const };
+    }
+    const amount = result.residentBalance - account.balance;
+    if (
+      !isBoundedSafeInteger(residentIncome + amount, MAX_MONEY)
+      || !isBoundedSafeInteger(residentExpense, MAX_MONEY)
+      || !isBoundedSafeInteger(institutionIncome, MAX_MONEY)
+      || !isBoundedSafeInteger(institutionExpense + amount, MAX_MONEY)
+      || !isBoundedSafeInteger(visitors, MAX_STOCK)
+    ) {
+      await recordActivityOutcome(
+        ctx, args, now, 'failed', '工作未完成：日累计值超过安全边界。',
+        'counter-boundary-exceeded',
+      );
+      return { status: 'rejected' as const, reason: 'counter-boundary-exceeded' as const };
+    }
+    counters[item] = result.stock;
+    await ctx.db.patch(account._id, {
+      balance: result.residentBalance,
+      hunger: Math.max(0, account.hunger - 2),
+      energy: Math.max(0, account.energy - 4),
+      todayIncome: residentIncome + amount,
+      todayExpense: residentExpense,
+      dayKey,
+      updatedAt: now,
+    });
+    await ctx.db.patch(institution._id, {
+      cash: result.institutionCash,
+      ...(output.kind === 'stock'
+        ? { stockJson: JSON.stringify(counters) }
+        : { serviceCountersJson: JSON.stringify(counters) }),
+      todayIncome: institutionIncome,
+      todayExpense: institutionExpense + amount,
+      visitorCount: visitors,
+      dayKey,
+      updatedAt: now,
+    });
+    await appendEconomyLedger(ctx, {
+      worldId: args.worldId,
+      idempotencyKey,
+      dayKey,
+      residentId: args.residentId,
+      institutionId: definition.id,
+      kind: 'work',
+      amount,
+      expectedAmount: profile.compensation.amount,
+      compensationKind: profile.compensation.kind,
+      item,
+      quantity: output.quantity,
+      sourceKey,
+      text: `${args.activityText}，实际获得 ${amount} 金贝。`,
+      createdAt: now,
+    });
+    await recordCompletedActivity(ctx, args, now, `工作完成，实际获得 ${amount} 金贝。`);
+    return { status: 'settled' as const, amount };
+  }
+
+  const good = goods.find((candidate) => candidate.id === economicAction.goodId);
+  if (!good || !definition.goods.includes(good.id)) {
+    return { status: 'purchase-good-mismatch' as const };
+  }
+  if (priorLedger) {
+    assertPriorActivityLedger(priorLedger, args, good.price * economicAction.quantity);
+    return { status: 'already-settled' as const };
+  }
+  const stock = parseCounterJson(institution.stockJson);
+  const result = settlePurchase(
+    {
+      residentBalance: account.balance,
+      institutionCash: institution.cash,
+      stock: stock[good.id] ?? 0,
+    },
+    { price: good.price, quantity: economicAction.quantity },
+  );
+  if (!result.ok) {
+    await recordActivityOutcome(
+      ctx,
+      args,
+      now,
+      'failed',
+      '消费未完成：余额不足或库存不足。',
+      'insufficient-funds-or-stock',
+    );
+    return { status: 'rejected' as const, reason: 'insufficient-funds-or-stock' as const };
+  }
+  const amount = account.balance - result.residentBalance;
+  if (
+    !isBoundedSafeInteger(residentIncome, MAX_MONEY)
+    || !isBoundedSafeInteger(residentExpense + amount, MAX_MONEY)
+    || !isBoundedSafeInteger(institutionIncome + amount, MAX_MONEY)
+    || !isBoundedSafeInteger(institutionExpense, MAX_MONEY)
+    || !isBoundedSafeInteger(visitors + 1, MAX_STOCK)
+  ) {
+    await recordActivityOutcome(
+      ctx, args, now, 'failed', '消费未完成：日累计值超过安全边界。',
+      'counter-boundary-exceeded',
+    );
+    return { status: 'rejected' as const, reason: 'counter-boundary-exceeded' as const };
+  }
+  stock[good.id] = result.stock;
+  await ctx.db.patch(account._id, {
+    balance: result.residentBalance,
+    hunger: Math.min(100, account.hunger + (good.id === 'meal' ? 25 : 12)),
+    energy: Math.max(0, account.energy - 1),
+    todayIncome: residentIncome,
+    todayExpense: residentExpense + amount,
+    dayKey,
+    updatedAt: now,
+  });
+  await ctx.db.patch(institution._id, {
+    cash: result.institutionCash,
+    stockJson: JSON.stringify(stock),
+    todayIncome: institutionIncome + amount,
+    todayExpense: institutionExpense,
+    visitorCount: visitors + 1,
+    dayKey,
+    updatedAt: now,
+  });
+  await appendEconomyLedger(ctx, {
+    worldId: args.worldId,
+    idempotencyKey,
+    dayKey,
+    residentId: args.residentId,
+    institutionId: definition.id,
+    kind: 'purchase',
+    amount,
+    item: good.id,
+    quantity: economicAction.quantity,
+    sourceKey,
+    text: `${args.activityText}，实际支付 ${amount} 金贝。`,
+    createdAt: now,
+  });
+  await recordCompletedActivity(ctx, args, now, `消费完成，实际支付 ${amount} 金贝。`);
+  return { status: 'settled' as const, amount };
+}
+
+async function ensureActivityEconomyInitialized(
+  ctx: EconomyDbContext,
+  args: ActivitySettlementArgs,
+  now: number,
+) {
+  const [account, accountRows, institutionRows] = await Promise.all([
+    ctx.db
+    .query('residentEconomy')
+    .withIndex('resident', (q) =>
+      q.eq('worldId', args.worldId).eq('residentId', args.residentId),
+    )
+      .unique(),
+    ctx.db
+      .query('residentEconomy')
+      .withIndex('world', (q) => q.eq('worldId', args.worldId))
+      .take(residentEconomyProfiles.length + 1),
+    ctx.db
+      .query('townInstitutions')
+      .withIndex('world', (q) => q.eq('worldId', args.worldId))
+      .take(institutions.length + 1),
+  ]);
+  let institutionReady = true;
+  if (args.economicAction.kind !== 'rest') {
+    const institutionId = args.economicAction.institutionId;
+    institutionReady = !!(await ctx.db
+      .query('townInstitutions')
+      .withIndex('institution', (q) =>
+        q.eq('worldId', args.worldId)
+          .eq('institutionId', institutionId),
+      )
+      .unique());
+  }
+  const complete = accountRows.length === residentEconomyProfiles.length
+    && institutionRows.length === institutions.length;
+  if (!account || !institutionReady || !complete) {
+    await initializeTownEconomy(ctx, args.worldId, now);
+  }
+}
+
+async function recordCompletedActivity(
+  ctx: EconomyDbContext,
+  args: ActivitySettlementArgs,
+  createdAt: number,
+  fact: string,
+) {
+  await recordActivityOutcome(ctx, args, createdAt, 'complete', fact);
+}
+
+async function activityEventBySource(
+  ctx: EconomyDbContext,
+  worldId: Id<'worlds'>,
+  sourceKey: string,
+) {
+  return ctx.db
+    .query('lifeEvents')
+    .withIndex('sourceKey', (q) =>
+      q.eq('worldId', worldId).eq('sourceKey', sourceKey),
+    )
+    .unique();
+}
+
+async function priorNonFinancialActivityOutcome(
+  ctx: EconomyDbContext,
+  args: ActivitySettlementArgs,
+  priorLedger: {
+    kind: string;
+    residentId?: string;
+    institutionId?: string;
+    amount: number;
+    expectedAmount?: number;
+    compensationKind?: CompensationKind;
+    item?: string;
+    quantity?: number;
+    sourceKey: string;
+    text: string;
+    createdAt: number;
+  } | null,
+  account: { profileId: string },
+) {
+  const phases = ['complete', 'failed'] as const;
+  const outcomes = await Promise.all(phases.map((phase) => activityEventBySource(
+    ctx,
+    args.worldId,
+    `activity:${args.operationId}:${phase}`,
+  )));
+  if (outcomes.every(Boolean)) {
+    throw new Error(`activity outcome collision: ${args.operationId}`);
+  }
+  for (const [index, phase] of phases.entries()) {
+    const event = outcomes[index];
+    if (!event) continue;
+    if (
+      event.residentId !== args.residentId
+      || event.operationId !== args.operationId
+      || event.phase !== phase
+      || event.category !== args.category
+      || event.landmarkId !== args.landmarkId
+      || event.economicActionJson !== serializeEconomicAction(args.economicAction)
+      || event.activityUntil !== args.activityUntil
+    ) {
+      throw new Error(`activity outcome collision: ${args.operationId}`);
+    }
+    if (phase === 'failed') {
+      if (
+        !event.failureReason
+        || event.text !== `${args.activityText}；${activityFailureFact(
+          event.failureReason,
+          args.economicAction,
+        )}`
+      ) {
+        throw new Error(`activity outcome collision: ${args.operationId}`);
+      }
+    } else {
+      if (event.failureReason !== undefined) {
+        throw new Error(`activity outcome collision: ${args.operationId}`);
+      }
+      const fact = args.economicAction.kind === 'rest'
+        ? '休息已经完成。'
+        : priorLedger && validatePriorLedgerCompletion(priorLedger, args, account);
+      if (!fact || event.text !== `${args.activityText}；${fact}`) {
+        throw new Error(`activity outcome collision: ${args.operationId}`);
+      }
+    }
+    return phase === 'failed'
+      ? {
+        status: 'already-failed' as const,
+        reason: event.failureReason ?? 'unknown-failure',
+      }
+      : { status: 'already-settled' as const };
+  }
+  return undefined;
+}
+
+async function recordActivityOutcome(
+  ctx: EconomyDbContext,
+  args: ActivitySettlementArgs,
+  createdAt: number,
+  phase: 'complete' | 'failed',
+  fact: string,
+  failureReason?: string,
+) {
+  if (phase === 'failed') {
+    if (!failureReason || fact !== activityFailureFact(failureReason, args.economicAction)) {
+      throw new Error('failed activity outcome requires its exact normative failure reason');
+    }
+  } else if (failureReason !== undefined) {
+    throw new Error('completed activity outcome cannot have a failure reason');
+  }
+  const sourceKey = `activity:${args.operationId}:${phase}`;
+  const existing = await activityEventBySource(ctx, args.worldId, sourceKey);
+  const text = `${args.activityText}；${fact}`;
+  const economicActionJson = serializeEconomicAction(args.economicAction);
+  if (existing) {
+    if (
+      existing.residentId === args.residentId
+      && existing.operationId === args.operationId
+      && existing.phase === phase
+      && existing.category === args.category
+      && existing.landmarkId === args.landmarkId
+      && existing.economicActionJson === economicActionJson
+      && existing.activityUntil === args.activityUntil
+      && existing.failureReason === failureReason
+      && existing.text === text
+    ) return false;
+    throw new Error(`activity outcome collision: ${args.operationId}`);
+  }
+  await ctx.db.insert('lifeEvents', {
+    worldId: args.worldId,
+    residentId: args.residentId,
+    kind: args.category,
+    text,
+    createdAt,
+    sourceKey,
+    operationId: args.operationId,
+    phase,
+    category: args.category,
+    landmarkId: args.landmarkId,
+    economicActionJson,
+    activityUntil: args.activityUntil,
+    ...(failureReason ? { failureReason } : {}),
+  });
+  return true;
+}
+
+function activityFailureFact(reason: string, action: EconomicAction) {
+  switch (reason) {
+    case 'activity-replaced':
+      return '活动未完成：居民已经改做其他事情。';
+    case 'destination-not-reached':
+      return '活动未完成：到达宽限期结束时仍未到达地点。';
+    case 'invalid-work-state':
+      return '工作未完成：经济状态或产出已达到安全边界。';
+    case 'insufficient-funds-or-stock':
+      return '消费未完成：余额不足或库存不足。';
+    case 'counter-boundary-exceeded':
+      return action.kind === 'work'
+        ? '工作未完成：日累计值超过安全边界。'
+        : action.kind === 'purchase'
+          ? '消费未完成：日累计值超过安全边界。'
+          : '休息记录未完成：日累计值超过安全边界。';
+    default:
+      throw new Error(`Unknown activity failure reason: ${reason}`);
+  }
+}
+
+function validatePriorLedgerCompletion(
+  entry: Parameters<typeof assertPriorActivityLedger>[0],
+  args: ActivitySettlementArgs,
+  account: { profileId: string },
+) {
+  const action = args.economicAction;
+  if (action.kind === 'rest') {
+    throw new Error(`activity ledger collision: ${args.operationId}`);
+  }
+  if (action.kind === 'work') {
+    const profile = residentProfile(account.profileId);
+    assertPriorActivityLedger(
+      entry, args, profile.compensation.amount, profile.compensation.kind,
+    );
+    return `工作完成，实际获得 ${entry.amount} 金贝。`;
+  }
+  const good = goods.find((candidate) => candidate.id === action.goodId);
+  if (!good) throw new Error(`activity ledger collision: ${args.operationId}`);
+  assertPriorActivityLedger(entry, args, good.price * action.quantity);
+  return `消费完成，实际支付 ${entry.amount} 金贝。`;
+}
+
+function assertPriorActivityLedger(
+  entry: {
+    kind: string;
+    residentId?: string;
+    institutionId?: string;
+    amount: number;
+    expectedAmount?: number;
+    compensationKind?: CompensationKind;
+    item?: string;
+    quantity?: number;
+    sourceKey: string;
+    text: string;
+    createdAt: number;
+  },
+  args: ActivitySettlementArgs,
+  expectedAmount: number,
+  compensationKind?: CompensationKind,
+) {
+  const action = args.economicAction;
+  const expectedKind = action.kind === 'work' ? 'work' : 'purchase';
+  const expectedInstitution = action.kind === 'rest' ? undefined : action.institutionId;
+  const expectedItem = action.kind === 'work'
+    ? action.output.kind === 'stock' ? action.output.item : action.output.serviceId
+    : action.kind === 'purchase' ? action.goodId : undefined;
+  const expectedQuantity = action.kind === 'work'
+    ? action.output.quantity
+    : action.kind === 'purchase' ? action.quantity : undefined;
+  const expectedText = action.kind === 'work'
+    ? `${args.activityText}，实际获得 ${entry.amount} 金贝。`
+    : `${args.activityText}，实际支付 ${entry.amount} 金贝。`;
+  const validAmount = action.kind === 'work'
+    ? entry.amount <= expectedAmount
+      && entry.expectedAmount === expectedAmount
+      && (entry.compensationKind === undefined || entry.compensationKind === compensationKind)
+    : entry.amount === expectedAmount && entry.expectedAmount === undefined;
+  if (
+    entry.kind !== expectedKind
+    || entry.residentId !== args.residentId
+    || entry.institutionId !== expectedInstitution
+    || entry.item !== expectedItem
+    || entry.quantity !== expectedQuantity
+    || entry.sourceKey !== `activity:${args.operationId}`
+    || entry.text !== expectedText
+    || entry.createdAt < args.activityUntil
+    || !validAmount
+  ) {
+    throw new Error(`activity idempotency collision: ${args.operationId}`);
+  }
+}
+
+function serializeEconomicAction(action: EconomicAction) {
+  switch (action.kind) {
+    case 'rest':
+      return '{"kind":"rest"}';
+    case 'purchase':
+      return JSON.stringify({
+        kind: action.kind,
+        institutionId: action.institutionId,
+        goodId: action.goodId,
+        quantity: action.quantity,
+      });
+    case 'work':
+      return JSON.stringify({
+        kind: action.kind,
+        institutionId: action.institutionId,
+        output: action.output.kind === 'stock'
+          ? {
+            kind: action.output.kind,
+            item: action.output.item,
+            quantity: action.output.quantity,
+          }
+          : {
+            kind: action.output.kind,
+            serviceId: action.output.serviceId,
+            quantity: action.output.quantity,
+          },
+      });
+  }
+}
+
+function parseCounterJson(json: string): Record<string, number> {
+  const parsed = JSON.parse(json) as Record<string, number>;
+  return { ...parsed };
+}
+
 export const initializeForWorld = internalMutation({
   args: { worldId: v.id('worlds') },
   handler: async (ctx, args) => initializeTownEconomy(ctx, args.worldId),
@@ -293,6 +988,7 @@ function resolveRuntimeResidentIdentity(
 
 async function migrateLegacyResident<T extends {
   _id: Id<'residentEconomy'>;
+  _creationTime: number;
   profileId: string;
   updatedAt: number;
   initialBalance?: number;
@@ -308,7 +1004,7 @@ async function migrateLegacyResident<T extends {
     ...(row.initializationSourceKey === undefined
       ? { initializationSourceKey: residentInitializationSource(row.profileId) }
       : {}),
-    ...(row.initializedAt === undefined ? { initializedAt: row.updatedAt } : {}),
+    ...(row.initializedAt === undefined ? { initializedAt: row._creationTime } : {}),
   };
   if (Object.keys(backfill).length > 0) await ctx.db.patch(row._id, backfill);
   return { ...row, ...backfill } as T & {
@@ -320,6 +1016,7 @@ async function migrateLegacyResident<T extends {
 
 async function migrateLegacyInstitution<T extends {
   _id: Id<'townInstitutions'>;
+  _creationTime: number;
   institutionId: string;
   updatedAt: number;
   initialCash?: number;
@@ -343,7 +1040,7 @@ async function migrateLegacyInstitution<T extends {
     ...(row.initializationSourceKey === undefined
       ? { initializationSourceKey: institutionInitializationSource(row.institutionId) }
       : {}),
-    ...(row.initializedAt === undefined ? { initializedAt: row.updatedAt } : {}),
+    ...(row.initializedAt === undefined ? { initializedAt: row._creationTime } : {}),
   };
   if (Object.keys(backfill).length > 0) await ctx.db.patch(row._id, backfill);
   return { ...row, ...backfill } as T & {
@@ -472,6 +1169,7 @@ function validateCounterJson(json: string, allowedKeys: readonly string[], label
 
 function validateLedgerEntryShape(entry: EconomyLedgerEntry) {
   const runtimeKind = (entry as { kind?: unknown }).kind;
+  const runtime = entry as unknown as Record<string, unknown>;
   if (
     runtimeKind !== 'work'
     && runtimeKind !== 'purchase'
@@ -493,36 +1191,52 @@ function validateLedgerEntryShape(entry: EconomyLedgerEntry) {
   if (entry.expectedAmount !== undefined) {
     assertBoundedSafeInteger(entry.expectedAmount, MAX_MONEY, 'expectedAmount');
   }
+  const runtimeCompensationKind = runtime.compensationKind;
+  if (runtimeCompensationKind !== undefined) {
+    if (
+      runtimeCompensationKind !== 'wage'
+      && runtimeCompensationKind !== 'owner-draw'
+      && runtimeCompensationKind !== 'contract-share'
+    ) {
+      throw new Error('compensationKind is invalid');
+    }
+  }
   if (entry.quantity !== undefined) assertPositiveQuantity(entry.quantity, 'quantity');
-  const runtime = entry as unknown as Record<string, unknown>;
   const requireField = (field: string) => {
     if (runtime[field] === undefined) throw new Error(`${runtimeKind} ${field} is required`);
   };
   const forbidField = (field: string) => requireAbsent(runtime[field], `${runtimeKind} ${field}`);
   switch (runtimeKind) {
     case 'work':
-      for (const field of ['residentId', 'institutionId', 'expectedAmount', 'item', 'quantity']) {
+      for (const field of [
+        'residentId', 'institutionId', 'expectedAmount', 'compensationKind', 'item', 'quantity',
+      ]) {
         requireField(field);
       }
       break;
     case 'purchase':
       for (const field of ['residentId', 'institutionId', 'item', 'quantity']) requireField(field);
       forbidField('expectedAmount');
+      forbidField('compensationKind');
       break;
     case 'restock':
       for (const field of ['institutionId', 'item', 'quantity']) requireField(field);
       forbidField('residentId');
       forbidField('expectedAmount');
+      forbidField('compensationKind');
       break;
     case 'event-reward':
       requireField('residentId');
-      for (const field of ['institutionId', 'expectedAmount', 'item', 'quantity']) {
+      for (const field of [
+        'institutionId', 'expectedAmount', 'compensationKind', 'item', 'quantity',
+      ]) {
         forbidField(field);
       }
       break;
     case 'event-service':
       for (const field of ['residentId', 'institutionId', 'item', 'quantity']) requireField(field);
       forbidField('expectedAmount');
+      forbidField('compensationKind');
       break;
   }
   assertDateTimestamp(entry.createdAt, 'createdAt');
@@ -546,6 +1260,9 @@ async function validateLedgerContract(ctx: EconomyDbContext, entry: EconomyLedge
       }
       if (entry.expectedAmount !== profile.compensation.amount) {
         throw new Error('expectedAmount must record the configured compensation attempt');
+      }
+      if (entry.compensationKind !== profile.compensation.kind) {
+        throw new Error('compensationKind must match the resident compensation contract');
       }
       if (entry.amount > entry.expectedAmount) throw new Error('work amount exceeds expectedAmount');
       return;
@@ -631,11 +1348,30 @@ function ledgerEntriesEquivalent(
 ) {
   const fields = [
     'worldId', 'idempotencyKey', 'dayKey', 'residentId', 'institutionId', 'kind',
-    'amount', 'expectedAmount', 'item', 'quantity', 'sourceKey', 'text', 'createdAt',
+    'amount', 'expectedAmount', 'compensationKind', 'item', 'quantity',
+    'sourceKey', 'text', 'createdAt',
   ];
-  return fields.every(
+  const equivalent = fields.every(
     (field) => existing[field] === (entry as unknown as Record<string, unknown>)[field],
   );
+  if (equivalent) return true;
+  // Accept otherwise exact imported legacy work rows missing contract metadata.
+  if (existing.kind !== 'work' || entry.kind !== 'work') {
+    return false;
+  }
+  if (
+    (existing.expectedAmount !== undefined
+      && existing.expectedAmount !== entry.expectedAmount)
+    || (existing.compensationKind !== undefined
+      && existing.compensationKind !== entry.compensationKind)
+  ) {
+    return false;
+  }
+  return fields
+    .filter((field) => field !== 'expectedAmount' && field !== 'compensationKind')
+    .every(
+      (field) => existing[field] === (entry as unknown as Record<string, unknown>)[field],
+    );
 }
 
 function initialStock(institution: InstitutionDefinition) {
@@ -700,6 +1436,10 @@ function assertNonNegativeSafeInteger(value: number, label: string) {
 function assertBoundedSafeInteger(value: number, maximum: number, label: string) {
   assertNonNegativeSafeInteger(value, label);
   if (value > maximum) throw new Error(`${label} exceeds the supported maximum`);
+}
+
+function isBoundedSafeInteger(value: number, maximum: number) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
 
 function assertDateTimestamp(value: number, label: string) {
