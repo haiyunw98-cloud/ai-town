@@ -62,6 +62,17 @@ class MemoryDb {
     return Promise.resolve(null);
   }
 
+  patch(id: string, value: Record<string, unknown>) {
+    for (const rows of this.rows.values()) {
+      const row = rows.find((candidate) => candidate._id === id);
+      if (row) {
+        Object.assign(row, value);
+        return Promise.resolve();
+      }
+    }
+    throw new Error(`Missing row ${id}`);
+  }
+
   table(name: string) {
     const existing = this.rows.get(name);
     if (existing) return existing;
@@ -151,6 +162,43 @@ describe('town economy persistence', () => {
     expect(schema).toContain(".index('institution', ['worldId', 'institutionId'])");
     expect(schema).toContain(".index('idempotencyKey', ['worldId', 'idempotencyKey'])");
     expect(schema).toContain(".index('day', ['worldId', 'dayKey', 'createdAt'])");
+    expect(schema).toContain('initialBalance: v.optional(v.number())');
+    expect(schema).toContain('initialCash: v.optional(v.number())');
+    expect(schema).toContain('initializationSourceKey: v.optional(v.string())');
+  });
+
+  test('backfills legacy baseline fields deterministically without duplicating state', async () => {
+    const { db, ctx } = makeContext();
+    seedRuntimeResidents(db);
+    const resident = db.seed('residentEconomy', validResidentRow());
+    const institution = db.seed('townInstitutions', validInstitutionRow());
+    for (const field of ['initialBalance', 'initializationSourceKey', 'initializedAt']) {
+      delete (resident as Record<string, unknown>)[field];
+    }
+    for (const field of [
+      'initialCash', 'initialStockJson', 'initialServiceCountersJson',
+      'initializationSourceKey', 'initializedAt',
+    ]) {
+      delete (institution as Record<string, unknown>)[field];
+    }
+
+    await initializeTownEconomy(ctx, worldId, now + 60_000);
+
+    expect(resident).toEqual(expect.objectContaining({
+      initialBalance: 120,
+      initializationSourceKey: 'economy-definition:resident:lin-lan:v1',
+      initializedAt: now,
+    }));
+    expect(institution).toEqual(expect.objectContaining({
+      initialCash: 120,
+      initialStockJson: JSON.stringify({ tea: 12 }),
+      initialServiceCountersJson: '{}',
+      initializationSourceKey: 'economy-definition:institution:tea-house:v1',
+      initializedAt: now,
+    }));
+    expect(db.table('residentEconomy')).toHaveLength(9);
+    expect(db.table('townInstitutions')).toHaveLength(9);
+    expect(db.table('economyLedger')).toHaveLength(0);
   });
 
   test('reconciles immediately and once more after asynchronous resident creation', () => {
@@ -299,6 +347,23 @@ describe('town economy persistence', () => {
     invalidDay.db.seed('residentEconomy', validResidentRow({ dayKey: '2026-02-31' }));
     await expect(initializeTownEconomy(invalidDay.ctx, worldId, now)).rejects.toThrow(/dayKey/u);
 
+    const mismatchedDay = makeContext();
+    seedRuntimeResidents(mismatchedDay.db);
+    mismatchedDay.db.seed('residentEconomy', validResidentRow({ dayKey: '2026-07-18' }));
+    await expect(initializeTownEconomy(mismatchedDay.ctx, worldId, now)).rejects.toThrow(
+      /dayKey.*updatedAt/iu,
+    );
+
+    const mismatchedInstitutionDay = makeContext();
+    seedRuntimeResidents(mismatchedInstitutionDay.db);
+    mismatchedInstitutionDay.db.seed(
+      'townInstitutions',
+      validInstitutionRow({ dayKey: '2026-07-18' }),
+    );
+    await expect(
+      initializeTownEconomy(mismatchedInstitutionDay.ctx, worldId, now),
+    ).rejects.toThrow(/dayKey.*updatedAt/iu);
+
     const malformedInstitution = makeContext();
     seedRuntimeResidents(malformedInstitution.db);
     malformedInstitution.db.seed('townInstitutions', validInstitutionRow({
@@ -414,8 +479,11 @@ describe('town economy persistence', () => {
     await expect(appendEconomyLedger(ctx, { ...base, amount: -1 })).rejects.toThrow(/amount/u);
     await expect(appendEconomyLedger(ctx, { ...base, amount: 1.5 })).rejects.toThrow(/amount/u);
     await expect(appendEconomyLedger(ctx, { ...base, amount: MAX_MONEY + 1 })).rejects.toThrow(/amount/u);
-    await expect(appendEconomyLedger(ctx, { ...base, quantity: 0 })).rejects.toThrow(/quantity/u);
-    await expect(appendEconomyLedger(ctx, { ...base, quantity: MAX_STOCK + 1 })).rejects.toThrow(/quantity/u);
+    await expect(appendEconomyLedger(ctx, { ...base, quantity: 0 } as never)).rejects.toThrow(/quantity/u);
+    await expect(appendEconomyLedger(ctx, {
+      ...base,
+      quantity: MAX_STOCK + 1,
+    } as never)).rejects.toThrow(/quantity/u);
     await expect(appendEconomyLedger(ctx, { ...base, dayKey: '2026-07-18' })).rejects.toThrow(/dayKey/u);
     await expect(appendEconomyLedger(ctx, { ...base, sourceKey: '   ' })).rejects.toThrow(/sourceKey/u);
     expect(db.table('economyLedger')).toHaveLength(0);
@@ -480,7 +548,7 @@ describe('town economy persistence', () => {
       ...work,
       idempotencyKey: 'work:missing-attempt',
       expectedAmount: undefined,
-    })).rejects.toThrow(/expectedAmount/u);
+    } as never)).rejects.toThrow(/expectedAmount/u);
     await expect(appendEconomyLedger(ctx, {
       ...work,
       idempotencyKey: 'work:overpayment',
@@ -667,10 +735,32 @@ describe('town economy persistence', () => {
     })).rejects.toThrow(/createdAt/u);
     await expect(appendEconomyLedger(ctx, {
       ...reward,
+      idempotencyKey: 'reward:shanghai-year-overflow',
+      dayKey: '9999-12-31',
+      createdAt: Date.parse('9999-12-31T16:00:00.000Z'),
+    })).rejects.toThrow(/createdAt/u);
+    await expect(appendEconomyLedger(ctx, {
+      ...reward,
       idempotencyKey: 'reward:text-overflow',
       text: '事'.repeat(501),
     })).rejects.toThrow(/text/u);
     expect(db.table('economyLedger')).toHaveLength(0);
+  });
+
+  test('fails closed for an unknown ledger kind at the exhaustive runtime boundary', async () => {
+    const { db, ctx } = makeContext();
+    seedRuntimeResidents(db);
+    await initializeTownEconomy(ctx, worldId, now);
+    await expect(appendEconomyLedger(ctx, {
+      worldId,
+      idempotencyKey: 'unknown:kind',
+      dayKey: '2026-07-19',
+      kind: 'unknown',
+      amount: 0,
+      sourceKey: 'unknown:kind',
+      text: '非法类型。',
+      createdAt: now,
+    } as never)).rejects.toThrow(/unknown ledger kind/iu);
   });
 });
 

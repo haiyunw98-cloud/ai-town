@@ -13,7 +13,8 @@ import { internalMutation, type MutationCtx } from './_generated/server';
 import { MAX_MONEY, MAX_STOCK } from './townEconomyRules';
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
-const MAX_DATE_MS = 8_640_000_000_000_000;
+// The final millisecond that still formats as a four-digit Shanghai calendar year.
+const MAX_SHANGHAI_TIMESTAMP = Date.parse('9999-12-31T15:59:59.999Z');
 const STARTING_INSTITUTION_CASH = 120;
 const MAX_LEDGER_KEY_LENGTH = 160;
 const MAX_LEDGER_TEXT_LENGTH = 500;
@@ -36,21 +37,23 @@ export type EconomyLedgerKind =
   | 'event-reward'
   | 'event-service';
 
-export type EconomyLedgerEntry = {
+type EconomyLedgerBase = {
   worldId: Id<'worlds'>;
   idempotencyKey: string;
   dayKey: string;
-  residentId?: string;
-  institutionId?: string;
-  kind: EconomyLedgerKind;
   amount: number;
-  expectedAmount?: number;
-  item?: string;
-  quantity?: number;
   sourceKey: string;
   text: string;
   createdAt: number;
 };
+
+export type EconomyLedgerEntry = EconomyLedgerBase & (
+  | { kind: 'work'; residentId: string; institutionId: string; expectedAmount: number; item: string; quantity: number }
+  | { kind: 'purchase'; residentId: string; institutionId: string; expectedAmount?: never; item: string; quantity: number }
+  | { kind: 'restock'; residentId?: never; institutionId: string; expectedAmount?: never; item: string; quantity: number }
+  | { kind: 'event-reward'; residentId: string; institutionId?: never; expectedAmount?: never; item?: never; quantity?: never }
+  | { kind: 'event-service'; residentId: string; institutionId: string; expectedAmount?: never; item: string; quantity: number }
+);
 
 type EconomyDbContext = Pick<MutationCtx, 'db'>;
 type EconomyReconciliationContext = Pick<MutationCtx, 'db' | 'scheduler'>;
@@ -84,7 +87,8 @@ export async function initializeTownEconomy(
   const accountResidentIds = new Set<string>();
   const accountProfileIds = new Set<string>();
   for (const row of existingAccounts) {
-    validatePersistedResident(row, identity.resolvedByProfileId);
+    const migrated = await migrateLegacyResident(ctx, row);
+    validatePersistedResident(migrated, identity.resolvedByProfileId);
     if (accountProfileIds.has(row.profileId)) {
       throw new Error(`Duplicate resident economy profile: ${row.profileId}`);
     }
@@ -132,7 +136,8 @@ export async function initializeTownEconomy(
     .collect();
   const institutionIds = new Set<string>();
   for (const row of existingInstitutions) {
-    validatePersistedInstitution(row);
+    const migrated = await migrateLegacyInstitution(ctx, row);
+    validatePersistedInstitution(migrated);
     if (institutionIds.has(row.institutionId)) {
       throw new Error(`Duplicate town institution: ${row.institutionId}`);
     }
@@ -286,6 +291,70 @@ function resolveRuntimeResidentIdentity(
   };
 }
 
+async function migrateLegacyResident<T extends {
+  _id: Id<'residentEconomy'>;
+  profileId: string;
+  updatedAt: number;
+  initialBalance?: number;
+  initializationSourceKey?: string;
+  initializedAt?: number;
+}>(
+  ctx: EconomyDbContext,
+  row: T,
+) {
+  const profile = residentProfile(row.profileId);
+  const backfill = {
+    ...(row.initialBalance === undefined ? { initialBalance: profile.startingBalance } : {}),
+    ...(row.initializationSourceKey === undefined
+      ? { initializationSourceKey: residentInitializationSource(row.profileId) }
+      : {}),
+    ...(row.initializedAt === undefined ? { initializedAt: row.updatedAt } : {}),
+  };
+  if (Object.keys(backfill).length > 0) await ctx.db.patch(row._id, backfill);
+  return { ...row, ...backfill } as T & {
+    initialBalance: number;
+    initializationSourceKey: string;
+    initializedAt: number;
+  };
+}
+
+async function migrateLegacyInstitution<T extends {
+  _id: Id<'townInstitutions'>;
+  institutionId: string;
+  updatedAt: number;
+  initialCash?: number;
+  initialStockJson?: string;
+  initialServiceCountersJson?: string;
+  initializationSourceKey?: string;
+  initializedAt?: number;
+}>(
+  ctx: EconomyDbContext,
+  row: T,
+) {
+  const definition = institutionDefinition(row.institutionId);
+  const backfill = {
+    ...(row.initialCash === undefined ? { initialCash: STARTING_INSTITUTION_CASH } : {}),
+    ...(row.initialStockJson === undefined
+      ? { initialStockJson: JSON.stringify(initialStock(definition)) }
+      : {}),
+    ...(row.initialServiceCountersJson === undefined
+      ? { initialServiceCountersJson: JSON.stringify(initialServiceCounters(definition)) }
+      : {}),
+    ...(row.initializationSourceKey === undefined
+      ? { initializationSourceKey: institutionInitializationSource(row.institutionId) }
+      : {}),
+    ...(row.initializedAt === undefined ? { initializedAt: row.updatedAt } : {}),
+  };
+  if (Object.keys(backfill).length > 0) await ctx.db.patch(row._id, backfill);
+  return { ...row, ...backfill } as T & {
+    initialCash: number;
+    initialStockJson: string;
+    initialServiceCountersJson: string;
+    initializationSourceKey: string;
+    initializedAt: number;
+  };
+}
+
 function validatePersistedResident(
   row: {
     residentId: string;
@@ -323,6 +392,9 @@ function validatePersistedResident(
   }
   assertDateTimestamp(row.initializedAt, `${row.profileId}.initializedAt`);
   assertDateTimestamp(row.updatedAt, `${row.profileId}.updatedAt`);
+  if (row.dayKey !== shanghaiEconomyDayKey(row.updatedAt)) {
+    throw new Error(`Resident economy dayKey must match updatedAt: ${row.profileId}`);
+  }
   if (row.updatedAt < row.initializedAt) {
     throw new Error(`Resident economy updatedAt precedes initialization: ${row.profileId}`);
   }
@@ -371,6 +443,9 @@ function validatePersistedInstitution(row: {
   }
   assertDateTimestamp(row.initializedAt, `${row.institutionId}.initializedAt`);
   assertDateTimestamp(row.updatedAt, `${row.institutionId}.updatedAt`);
+  if (row.dayKey !== shanghaiEconomyDayKey(row.updatedAt)) {
+    throw new Error(`Town institution dayKey must match updatedAt: ${row.institutionId}`);
+  }
   if (row.updatedAt < row.initializedAt) {
     throw new Error(`Town institution updatedAt precedes initialization: ${row.institutionId}`);
   }
@@ -396,6 +471,16 @@ function validateCounterJson(json: string, allowedKeys: readonly string[], label
 }
 
 function validateLedgerEntryShape(entry: EconomyLedgerEntry) {
+  const runtimeKind = (entry as { kind?: unknown }).kind;
+  if (
+    runtimeKind !== 'work'
+    && runtimeKind !== 'purchase'
+    && runtimeKind !== 'restock'
+    && runtimeKind !== 'event-reward'
+    && runtimeKind !== 'event-service'
+  ) {
+    throw new Error(`Unknown ledger kind: ${String(runtimeKind)}`);
+  }
   assertCanonicalKey(entry.idempotencyKey, 'idempotencyKey');
   assertCanonicalKey(entry.sourceKey, 'sourceKey');
   assertBoundedString(entry.text, MAX_LEDGER_TEXT_LENGTH, 'text');
@@ -409,6 +494,37 @@ function validateLedgerEntryShape(entry: EconomyLedgerEntry) {
     assertBoundedSafeInteger(entry.expectedAmount, MAX_MONEY, 'expectedAmount');
   }
   if (entry.quantity !== undefined) assertPositiveQuantity(entry.quantity, 'quantity');
+  const runtime = entry as unknown as Record<string, unknown>;
+  const requireField = (field: string) => {
+    if (runtime[field] === undefined) throw new Error(`${runtimeKind} ${field} is required`);
+  };
+  const forbidField = (field: string) => requireAbsent(runtime[field], `${runtimeKind} ${field}`);
+  switch (runtimeKind) {
+    case 'work':
+      for (const field of ['residentId', 'institutionId', 'expectedAmount', 'item', 'quantity']) {
+        requireField(field);
+      }
+      break;
+    case 'purchase':
+      for (const field of ['residentId', 'institutionId', 'item', 'quantity']) requireField(field);
+      forbidField('expectedAmount');
+      break;
+    case 'restock':
+      for (const field of ['institutionId', 'item', 'quantity']) requireField(field);
+      forbidField('residentId');
+      forbidField('expectedAmount');
+      break;
+    case 'event-reward':
+      requireField('residentId');
+      for (const field of ['institutionId', 'expectedAmount', 'item', 'quantity']) {
+        forbidField(field);
+      }
+      break;
+    case 'event-service':
+      for (const field of ['residentId', 'institutionId', 'item', 'quantity']) requireField(field);
+      forbidField('expectedAmount');
+      break;
+  }
   assertDateTimestamp(entry.createdAt, 'createdAt');
   if (entry.dayKey !== shanghaiEconomyDayKey(entry.createdAt)) {
     throw new Error('dayKey must match createdAt in Asia/Shanghai');
@@ -416,63 +532,58 @@ function validateLedgerEntryShape(entry: EconomyLedgerEntry) {
 }
 
 async function validateLedgerContract(ctx: EconomyDbContext, entry: EconomyLedgerEntry) {
-  if (entry.kind === 'work') {
-    const account = await requireResidentAccount(ctx, entry);
-    const profile = residentProfile(account.profileId);
-    const institution = await requireInstitution(ctx, entry);
-    if (institution.id !== profile.institutionId) throw new Error('work institution mismatch');
-    const expectedOutput = profile.workOutput.kind === 'stock'
-      ? profile.workOutput.item
-      : profile.workOutput.serviceId;
-    if (entry.item !== expectedOutput || entry.quantity !== profile.workOutput.quantity) {
-      throw new Error('work output does not match the resident economic profile');
+  switch (entry.kind) {
+    case 'work': {
+      const account = await requireResidentAccount(ctx, entry);
+      const profile = residentProfile(account.profileId);
+      const institution = await requireInstitution(ctx, entry);
+      if (institution.id !== profile.institutionId) throw new Error('work institution mismatch');
+      const expectedOutput = profile.workOutput.kind === 'stock'
+        ? profile.workOutput.item
+        : profile.workOutput.serviceId;
+      if (entry.item !== expectedOutput || entry.quantity !== profile.workOutput.quantity) {
+        throw new Error('work output does not match the resident economic profile');
+      }
+      if (entry.expectedAmount !== profile.compensation.amount) {
+        throw new Error('expectedAmount must record the configured compensation attempt');
+      }
+      if (entry.amount > entry.expectedAmount) throw new Error('work amount exceeds expectedAmount');
+      return;
     }
-    if (entry.expectedAmount !== profile.compensation.amount) {
-      throw new Error('expectedAmount must record the configured compensation attempt');
+    case 'purchase': {
+      await requireResidentAccount(ctx, entry);
+      const institution = await requireInstitution(ctx, entry);
+      const good = requireInstitutionGood(institution, entry.item, 'purchase item');
+      const total = good.price * entry.quantity;
+      if (entry.amount <= 0 || entry.amount !== total) {
+        throw new Error('purchase amount must equal the configured price times quantity');
+      }
+      return;
     }
-    if (entry.amount > entry.expectedAmount) throw new Error('work amount exceeds expectedAmount');
-    return;
-  }
-  if (entry.kind === 'purchase') {
-    await requireResidentAccount(ctx, entry);
-    const institution = await requireInstitution(ctx, entry);
-    requireAbsent(entry.expectedAmount, 'purchase expectedAmount');
-    const good = requireInstitutionGood(institution, entry.item, 'purchase item');
-    const quantity = requireQuantity(entry.quantity, 'purchase quantity');
-    const total = good.price * quantity;
-    if (entry.amount <= 0 || entry.amount !== total) {
-      throw new Error('purchase amount must equal the configured price times quantity');
+    case 'event-reward':
+      await requireResidentAccount(ctx, entry);
+      if (![10, 30, 80].includes(entry.amount)) {
+        throw new Error('event reward amount must be an earned configured tier');
+      }
+      return;
+    case 'restock': {
+      const institution = await requireInstitution(ctx, entry);
+      requireInstitutionGood(institution, entry.item, 'restock item');
+      return;
     }
-    return;
-  }
-  if (entry.kind === 'event-reward') {
-    await requireResidentAccount(ctx, entry);
-    requireAbsent(entry.institutionId, 'event reward institutionId');
-    requireAbsent(entry.item, 'event reward item');
-    requireAbsent(entry.quantity, 'event reward quantity');
-    requireAbsent(entry.expectedAmount, 'event reward expectedAmount');
-    if (![10, 30, 80].includes(entry.amount)) {
-      throw new Error('event reward amount must be an earned configured tier');
+    case 'event-service': {
+      await requireResidentAccount(ctx, entry);
+      const institution = await requireInstitution(ctx, entry);
+      if (!institution.serviceIds.includes(entry.item as never)) {
+        throw new Error('event service must belong to the institution');
+      }
+      if (entry.amount <= 0) throw new Error('event service amount must be positive');
+      return;
     }
-    return;
-  }
-  if (entry.kind === 'restock') {
-    requireAbsent(entry.residentId, 'restock residentId');
-    requireAbsent(entry.expectedAmount, 'restock expectedAmount');
-    const institution = await requireInstitution(ctx, entry);
-    requireInstitutionGood(institution, entry.item, 'restock item');
-    requireQuantity(entry.quantity, 'restock quantity');
-    return;
-  }
-  if (entry.kind === 'event-service') {
-    await requireResidentAccount(ctx, entry);
-    const institution = await requireInstitution(ctx, entry);
-    requireAbsent(entry.expectedAmount, 'event service expectedAmount');
-    if (!entry.item || !institution.serviceIds.includes(entry.item as never)) {
-      throw new Error('event service must belong to the institution');
+    default: {
+      const exhaustive: never = entry;
+      throw new Error(`Unknown ledger kind: ${String((exhaustive as { kind?: unknown }).kind)}`);
     }
-    requireQuantity(entry.quantity, 'event service quantity');
-    if (entry.amount <= 0) throw new Error('event service amount must be positive');
   }
 }
 
@@ -481,7 +592,7 @@ async function requireResidentAccount(ctx: EconomyDbContext, entry: EconomyLedge
   const account = await ctx.db
     .query('residentEconomy')
     .withIndex('resident', (q) =>
-      q.eq('worldId', entry.worldId).eq('residentId', entry.residentId!),
+      q.eq('worldId', entry.worldId).eq('residentId', entry.residentId),
     )
     .unique();
   if (!account) throw new Error(`${entry.kind} resident account is missing`);
@@ -494,7 +605,7 @@ async function requireInstitution(ctx: EconomyDbContext, entry: EconomyLedgerEnt
   const persisted = await ctx.db
     .query('townInstitutions')
     .withIndex('institution', (q) =>
-      q.eq('worldId', entry.worldId).eq('institutionId', entry.institutionId!),
+      q.eq('worldId', entry.worldId).eq('institutionId', entry.institutionId),
     )
     .unique();
   if (!persisted) throw new Error(`${entry.kind} institution is not initialized`);
@@ -518,11 +629,13 @@ function ledgerEntriesEquivalent(
   existing: Record<string, unknown>,
   entry: EconomyLedgerEntry,
 ) {
-  const fields: Array<keyof EconomyLedgerEntry> = [
+  const fields = [
     'worldId', 'idempotencyKey', 'dayKey', 'residentId', 'institutionId', 'kind',
     'amount', 'expectedAmount', 'item', 'quantity', 'sourceKey', 'text', 'createdAt',
   ];
-  return fields.every((field) => existing[field] === entry[field]);
+  return fields.every(
+    (field) => existing[field] === (entry as unknown as Record<string, unknown>)[field],
+  );
 }
 
 function initialStock(institution: InstitutionDefinition) {
@@ -561,12 +674,6 @@ function institutionInitializationSource(institutionId: string) {
   return `economy-definition:institution:${institutionId}:v1`;
 }
 
-function requireQuantity(quantity: number | undefined, label: string) {
-  if (quantity === undefined) throw new Error(`${label} is required`);
-  assertPositiveQuantity(quantity, label);
-  return quantity;
-}
-
 function requireAbsent(value: unknown, label: string) {
   if (value !== undefined) throw new Error(`${label} must be absent`);
 }
@@ -597,8 +704,8 @@ function assertBoundedSafeInteger(value: number, maximum: number, label: string)
 
 function assertDateTimestamp(value: number, label: string) {
   assertNonNegativeSafeInteger(value, label);
-  if (value > MAX_DATE_MS - SHANGHAI_OFFSET_MS) {
-    throw new Error(`${label} exceeds the supported Date range`);
+  if (value > MAX_SHANGHAI_TIMESTAMP) {
+    throw new Error(`${label} exceeds the supported Shanghai calendar range`);
   }
 }
 
