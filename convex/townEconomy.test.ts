@@ -3,6 +3,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { residentEconomyProfiles } from '../data/worlds/lighthouse-town/economy';
 import { localizedDescriptions } from '../data/worlds/lighthouse-town/characters';
+import { mapheight, mapwidth } from '../data/worlds/lighthouse-town/map';
 import {
   appendEconomyLedger,
   advanceDailyEconomy,
@@ -2494,8 +2495,8 @@ function institutionQueryFixture(
   seedWorldStatus(fixture.db, status);
   fixture.db.seed('maps', {
     worldId,
-    width: 40,
-    height: 30,
+    width: mapwidth,
+    height: mapheight,
     tileSetUrl,
     tileDim: 32,
   });

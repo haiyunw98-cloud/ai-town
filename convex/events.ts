@@ -11,11 +11,22 @@ import {
 } from './_generated/server';
 import { insertInput } from './aiTown/insertInput';
 import { parseGameId } from './aiTown/ids';
-import { eventCheckpoints } from '../data/worlds/lighthouse-town/map';
+import {
+  dailyEventCheckpointById,
+  eventCheckpoints,
+  mapheight,
+  mapwidth,
+  objmap,
+  trialIslandCheckpoints,
+} from '../data/worlds/lighthouse-town/map';
 import { institutions } from '../data/worlds/lighthouse-town/economy';
 import { requestEventDecision } from './events/model';
 import { fallbackDailyTheme, requestDailyTheme } from './events/dailyTheme';
-import { dailyEventTemplates } from './events/dailyTemplates';
+import {
+  dailyEventTemplates,
+  type DailyEventTemplate,
+  type VenueMode,
+} from './events/dailyTemplates';
 import {
   dailyEventAction,
   selectDailyTemplate,
@@ -45,6 +56,198 @@ import {
 
 const EVENT_NAME = '灯塔镇百万金贝寻宝赛';
 const OBSERVER_SNAPSHOT_LIMIT = 500;
+
+type DailyMovementParticipant = Readonly<{
+  residentId: string;
+  displayName: string;
+  active: boolean;
+}>;
+
+export type DailyMovementCommand = Readonly<{
+  kind: 'move' | 'transfer';
+  residentId: string;
+  destination: { x: number; y: number };
+  description: string;
+  until: number;
+}>;
+
+function validateDailyMovementRoster(participants: readonly DailyMovementParticipant[]) {
+  if (
+    participants.length !== 9
+    || new Set(participants.map((participant) => participant.residentId)).size !== 9
+    || participants.some((participant) => !participant.residentId || !participant.displayName.trim())
+  ) {
+    throw new Error('Daily event movement requires one unique nine-resident roster.');
+  }
+}
+
+function walkableDailyOffsets(base: { x: number; y: number }, count: number) {
+  const positions: Array<{ x: number; y: number }> = [];
+  for (let radius = 0; radius <= 4 && positions.length < count; radius += 1) {
+    for (let dy = -radius; dy <= radius && positions.length < count; dy += 1) {
+      for (let dx = -radius; dx <= radius && positions.length < count; dx += 1) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+        const x = base.x + dx;
+        const y = base.y + dy;
+        if (
+          x < 0 || y < 0 || x >= mapwidth || y >= mapheight
+          || objmap.some((layer) => layer[x]?.[y] !== -1)
+        ) continue;
+        positions.push({ x, y });
+      }
+    }
+  }
+  if (positions.length !== count) {
+    throw new Error(`Daily event checkpoint lacks ${count} walkable adjacent positions.`);
+  }
+  return positions;
+}
+
+export function buildDailyStageMovementCommands(
+  template: DailyEventTemplate,
+  stageIndex: number,
+  participants: readonly DailyMovementParticipant[],
+  now: number,
+  phaseEndsAt: number,
+  includeIslandTransfer: boolean,
+): DailyMovementCommand[] {
+  validateDailyMovementRoster(participants);
+  if (!Number.isFinite(now)) throw new Error('Daily movement time must be finite.');
+  if (!Number.isFinite(phaseEndsAt) || phaseEndsAt > now + 2 * 60 * 60_000) {
+    throw new Error('Daily movement phase expiry is outside the safe event window.');
+  }
+  if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= template.stages.length) {
+    throw new Error('Daily movement stage is outside the template.');
+  }
+  const stage = template.stages[stageIndex];
+  const activeCheckpoint = dailyEventCheckpointById(
+    stageIndex === 0 ? 'old-dock' : stage.checkpoints[0],
+  );
+  const spectatorCheckpoint = template.venue === 'trial-island'
+    ? trialIslandCheckpoints.spectatorStand
+    : eventCheckpoints.plaza;
+  const bases = participants.map((participant) =>
+    stageIndex === 0 || participant.active ? activeCheckpoint : spectatorCheckpoint,
+  );
+  const groups = new Map<string, { base: { x: number; y: number }; indexes: number[] }>();
+  bases.forEach((base, index) => {
+    const key = `${base.x}:${base.y}`;
+    const group = groups.get(key) ?? { base, indexes: [] as number[] };
+    group.indexes.push(index);
+    groups.set(key, group);
+  });
+  const destinationByIndex = new Map<number, { x: number; y: number }>();
+  for (const group of groups.values()) {
+    const offsets = walkableDailyOffsets(group.base, group.indexes.length);
+    group.indexes.forEach((participantIndex, offsetIndex) => {
+      destinationByIndex.set(participantIndex, offsets[offsetIndex]);
+    });
+  }
+  const until = Math.max(now, phaseEndsAt);
+  const transfers: DailyMovementCommand[] = template.venue === 'trial-island'
+    && stageIndex > 0 && includeIslandTransfer
+    ? participants.map((participant) => ({
+        kind: 'transfer',
+        residentId: participant.residentId,
+        destination: { ...trialIslandCheckpoints.arrival },
+        description: '乘摆渡船抵达试炼岛活动场地',
+        until,
+      }))
+    : [];
+  const moves: DailyMovementCommand[] = participants.map((participant, index) => ({
+    kind: 'move',
+    residentId: participant.residentId,
+    destination: destinationByIndex.get(index)!,
+    description: participant.active || stageIndex === 0
+      ? `参加${stage.label}`
+      : template.venue === 'trial-island'
+        ? '在试炼岛观众席观看活动并为同伴加油'
+        : '在灯塔广场观看活动并为同伴加油',
+    until,
+  }));
+  return [...transfers, ...moves];
+}
+
+export function buildDailyReturnMovementCommands(
+  venue: VenueMode,
+  participants: readonly DailyMovementParticipant[],
+  now: number,
+): DailyMovementCommand[] {
+  validateDailyMovementRoster(participants);
+  if (!Number.isFinite(now)) throw new Error('Daily return time must be finite.');
+  if (venue === 'trial-island') {
+    return participants.map((participant) => ({
+      kind: 'transfer',
+      residentId: participant.residentId,
+      destination: { ...eventCheckpoints.dock },
+      description: '乘摆渡船返回主镇，恢复普通生活',
+      until: now,
+    }));
+  }
+  if (venue !== 'main-town') throw new Error(`Unknown daily event venue: ${venue}`);
+  const destinations = walkableDailyOffsets(eventCheckpoints.plaza, participants.length);
+  return participants.map((participant, index) => ({
+    kind: 'move',
+    residentId: participant.residentId,
+    destination: destinations[index],
+    description: '活动结束，恢复普通生活',
+    until: now,
+  }));
+}
+
+type DailyMovementBatchIO = {
+  markerCount: (key: string) => Promise<number>;
+  enqueue: (command: DailyMovementCommand) => Promise<void>;
+  recordFailure: (key: string, residentId: string, error: unknown) => Promise<void>;
+  recordMarker: (key: string) => Promise<void>;
+};
+
+export async function executeDailyMovementBatch(
+  markerKey: string,
+  commands: readonly DailyMovementCommand[],
+  fallbackKind: 'move' | 'transfer',
+  io: DailyMovementBatchIO,
+) {
+  const markerCount = await io.markerCount(markerKey);
+  if (markerCount > 1) throw new Error(`Daily movement marker collision: ${markerKey}`);
+  if (markerCount === 1) {
+    return { status: 'already-queued' as const, queued: 0, failures: 0 };
+  }
+  let queued = 0;
+  const failedResidents = new Set<string>();
+  const fallbacks: DailyMovementCommand[] = [];
+  for (const command of commands) {
+    if (failedResidents.has(command.residentId)) continue;
+    try {
+      await io.enqueue(command);
+      queued += 1;
+    } catch (error) {
+      failedResidents.add(command.residentId);
+      await io.recordFailure(`${markerKey}:failure`, command.residentId, error);
+      fallbacks.push({
+        kind: fallbackKind,
+        residentId: command.residentId,
+        destination: { ...eventCheckpoints.dock },
+        description: '活动移动失败，返回旧水码头恢复普通生活',
+        until: command.until,
+      });
+    }
+  }
+  for (const fallback of fallbacks) {
+    try {
+      await io.enqueue(fallback);
+    } catch {
+      // The stable failure record above is the audit trail; a second engine-input
+      // outage must not roll back rewards or other residents' successful moves.
+    }
+  }
+  await io.recordMarker(markerKey);
+  return {
+    status: 'queued' as const,
+    queued,
+    failures: failedResidents.size,
+  };
+}
 
 export function boundObserverRows<T>(rows: readonly T[], limit = OBSERVER_SNAPSHOT_LIMIT) {
   return {
@@ -167,6 +370,9 @@ export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
     });
     const eventId = await insertDailyDraft(ctx, worldStatus.worldId, draft);
     await recordDailyParticipation(ctx, worldStatus.worldId, eventId, draft.participants, now);
+    await queuePersistedDailyStageMovement(
+      ctx, worldStatus.worldId, eventId, draft.event, draft.participants, now,
+    );
     if (action.stageIndex > 0) {
       await advancePersistedDailyEvent(
         ctx, eventId, worldStatus.worldId, action.stageIndex, now, dayKey,
@@ -727,9 +933,9 @@ async function loadPersistedDailyDraft(ctx: MutationCtx, eventId: Id<'townEvents
   }
   const [participantDocs, logDocs] = await Promise.all([
     ctx.db.query('eventParticipants').withIndex('eventId', (q) => q.eq('eventId', eventId)).take(10),
-    ctx.db.query('eventLog').withIndex('eventId', (q) => q.eq('eventId', eventId)).take(51),
+    ctx.db.query('eventLog').withIndex('eventId', (q) => q.eq('eventId', eventId)).take(201),
   ]);
-  if (participantDocs.length !== 9 || logDocs.length === 51) {
+  if (participantDocs.length !== 9 || logDocs.length === 201) {
     throw new Error('Persisted daily event rows are incomplete or unbounded.');
   }
   const persistedEvent: PersistedDailyEvent = {
@@ -840,8 +1046,14 @@ async function advancePersistedDailyEvent(
   await applyDailyDraft(ctx, eventId, persisted);
   if (persisted.event.status === 'completed') {
     await settleDailyEventRewards(ctx, { worldId, eventId, dayKey, hostServices: null, now });
+    await queuePersistedDailyReturnMovement(
+      ctx, worldId, eventId, persisted.event, persisted.participants, now,
+    );
     await recordDailyReturn(ctx, worldId, eventId, persisted.participants, now, 'completed');
   } else {
+    await queuePersistedDailyStageMovement(
+      ctx, worldId, eventId, persisted.event, persisted.participants, now,
+    );
     await ctx.scheduler.runAfter(0, internal.events.generateNextDecision, {});
   }
 }
@@ -856,6 +1068,9 @@ async function archiveInterruptedCrossDayEvent(
   const archived = archiveInterruptedDailyDraft(draft, now);
   if (archived === draft) return;
   await applyDailyDraft(ctx, eventId, archived);
+  await queuePersistedDailyReturnMovement(
+    ctx, worldId, eventId, archived.event, archived.participants, now,
+  );
   await recordDailyReturn(
     ctx, worldId, eventId, archived.participants, now, 'interrupted-cross-day',
   );
@@ -894,7 +1109,155 @@ async function archivePausedDailyEvent(
       kind: 'paused', text, createdAt: now,
     });
   }
+  await queuePersistedDailyReturnMovement(
+    ctx, worldId, eventId, draft.event, draft.participants, now,
+  );
   await recordDailyReturn(ctx, worldId, eventId, draft.participants, now, 'world-paused');
+}
+
+const DAILY_EVENT_LOG_BOUND = 200;
+
+async function boundedEventLogs(ctx: MutationCtx, eventId: Id<'townEvents'>) {
+  const rows = await ctx.db
+    .query('eventLog')
+    .withIndex('eventId', (q) => q.eq('eventId', eventId))
+    .take(DAILY_EVENT_LOG_BOUND + 1);
+  if (rows.length > DAILY_EVENT_LOG_BOUND) {
+    throw new Error('Daily event log exceeded the bounded movement audit limit.');
+  }
+  return rows;
+}
+
+async function insertUniqueMovementLog(
+  ctx: MutationCtx,
+  eventId: Id<'townEvents'>,
+  eventKey: string,
+  stageIndex: number,
+  kind: string,
+  text: string,
+  createdAt: number,
+) {
+  const duplicates = await ctx.db
+    .query('eventLog')
+    .withIndex('eventKey', (q) => q.eq('eventId', eventId).eq('eventKey', eventKey))
+    .take(2);
+  if (duplicates.length > 1) throw new Error(`Daily movement log collision: ${eventKey}`);
+  if (duplicates[0]) return;
+  const rows = await boundedEventLogs(ctx, eventId);
+  const sequence = rows.reduce((maximum, row) => Math.max(maximum, row.sequence), -1) + 1;
+  await ctx.db.insert('eventLog', {
+    eventId, eventKey, sequence, stageIndex, kind, text, createdAt,
+  });
+}
+
+async function runPersistedDailyMovementBatch(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  eventId: Id<'townEvents'>,
+  markerKey: string,
+  stageIndex: number,
+  commands: readonly DailyMovementCommand[],
+  fallbackKind: 'move' | 'transfer',
+  now: number,
+) {
+  return await executeDailyMovementBatch(markerKey, commands, fallbackKind, {
+    markerCount: async (key) => (await ctx.db
+      .query('eventLog')
+      .withIndex('eventKey', (q) => q.eq('eventId', eventId).eq('eventKey', key))
+      .take(2)).length,
+    enqueue: async (command) => {
+      const args = {
+        playerId: parseGameId('players', command.residentId),
+        destination: command.destination,
+        description: command.description,
+        until: command.until,
+      };
+      if (command.kind === 'transfer') {
+        await insertInput(ctx, worldId, 'eventTransfer', args);
+      } else {
+        await insertInput(ctx, worldId, 'eventMove', args);
+      }
+    },
+    recordFailure: async (prefix, residentId, error) => {
+      const detail = error instanceof Error ? error.message : '未知输入错误';
+      await insertUniqueMovementLog(
+        ctx,
+        eventId,
+        `${prefix}:${residentId}`,
+        stageIndex,
+        'movement-failure',
+        `居民 ${residentId} 的活动移动未能排队：${detail.replace(/\s+/gu, ' ').slice(0, 80)}`,
+        now,
+      );
+    },
+    recordMarker: async (key) => {
+      await insertUniqueMovementLog(
+        ctx, eventId, key, stageIndex, 'movement-marker', '本阶段地图移动已经排队。', now,
+      );
+    },
+  });
+}
+
+async function queuePersistedDailyStageMovement(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  eventId: Id<'townEvents'>,
+  event: PersistedDailyEvent,
+  participants: readonly PersistedDailyParticipant[],
+  now: number,
+) {
+  const template = dailyEventTemplates.find((entry) => entry.id === event.templateId);
+  if (!template || !event.dailyKey) throw new Error('Unknown daily event movement template.');
+  const logs = await boundedEventLogs(ctx, eventId);
+  const positiveStagePrefix = `daily:${event.dailyKey}:movement:stage:`;
+  const hasIslandArrival = logs.some((entry) =>
+    entry.eventKey.startsWith(positiveStagePrefix)
+    && !entry.eventKey.includes(':failure:')
+    && Number(entry.eventKey.slice(positiveStagePrefix.length)) > 0,
+  );
+  const commands = buildDailyStageMovementCommands(
+    template,
+    event.stageIndex,
+    participants,
+    now,
+    event.phaseEndsAt,
+    template.venue === 'trial-island' && event.stageIndex > 0
+      && !hasIslandArrival,
+  );
+  return await runPersistedDailyMovementBatch(
+    ctx,
+    worldId,
+    eventId,
+    `daily:${event.dailyKey}:movement:stage:${event.stageIndex}`,
+    event.stageIndex,
+    commands,
+    template.venue === 'trial-island' ? 'transfer' : 'move',
+    now,
+  );
+}
+
+async function queuePersistedDailyReturnMovement(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  eventId: Id<'townEvents'>,
+  event: PersistedDailyEvent,
+  participants: readonly PersistedDailyParticipant[],
+  now: number,
+) {
+  if (!event.dailyKey || (event.venueMode !== 'main-town' && event.venueMode !== 'trial-island')) {
+    throw new Error('Unknown daily event return venue.');
+  }
+  const commands = buildDailyReturnMovementCommands(event.venueMode, participants, now);
+  return await runPersistedDailyMovementBatch(
+    ctx,
+    worldId,
+    eventId,
+    `daily:${event.dailyKey}:movement:return`,
+    event.stageIndex,
+    commands,
+    event.venueMode === 'trial-island' ? 'transfer' : 'move',
+    now,
+  );
 }
 
 async function recordDailyParticipation(
