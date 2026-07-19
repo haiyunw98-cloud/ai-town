@@ -24,6 +24,14 @@ import {
 } from './util/conversationText';
 
 const EVENT_NAME = '灯塔镇百万金贝寻宝赛';
+const OBSERVER_SNAPSHOT_LIMIT = 500;
+
+export function boundObserverRows<T>(rows: readonly T[], limit = OBSERVER_SNAPSHOT_LIMIT) {
+  return {
+    rows: rows.slice(0, limit),
+    truncation: { truncated: rows.length > limit, omittedAtLeast: rows.length > limit ? 1 : 0 },
+  };
+}
 
 export function isObserverIntervention(
   humanPlayerIds: ReadonlySet<string>,
@@ -109,6 +117,7 @@ export const observerSnapshot = query({
         dailyEconomyLedger: [],
         institutionStates: [],
         dailyRelationshipChanges: [],
+        snapshotTruncation: {},
       };
     }
     const descriptions = await ctx.db
@@ -122,11 +131,12 @@ export const observerSnapshot = query({
       .withIndex('worldId', (q) => q.eq('worldId', worldId))
       .collect();
     const humanPlayerIds = collectHumanPlayerIds(world?.players ?? [], archivedPlayers);
-    const dailyLifeEvents = (await ctx.db
+    const lifeEventRows = boundObserverRows(await ctx.db
       .query('lifeEvents')
       .withIndex('worldTime', (q) => q.eq('worldId', worldId))
       .order('desc')
-      .take(500))
+      .take(OBSERVER_SNAPSHOT_LIMIT + 1));
+    const dailyLifeEvents = lifeEventRows.rows
       .map((entry) => ({
         residentId: entry.residentId,
         displayName: names.get(entry.residentId) ?? '居民',
@@ -134,11 +144,12 @@ export const observerSnapshot = query({
         text: entry.text,
         createdAt: entry.createdAt,
       }));
-    const messages = await ctx.db
+    const messageRows = boundObserverRows(await ctx.db
       .query('messages')
       .filter((q) => q.eq(q.field('worldId'), worldId))
       .order('desc')
-      .take(500);
+      .take(OBSERVER_SNAPSHOT_LIMIT + 1));
+    const messages = messageRows.rows;
     const legacyMessages = messages.slice(0, 80);
     const dailyMessages = messages.map((message) => ({
       messageId: String(message._id),
@@ -154,11 +165,12 @@ export const observerSnapshot = query({
     const institutionNames = new Map<string, string>(
       institutions.map((institution) => [institution.id, institution.name]),
     );
-    const dailyEconomyLedger = (await ctx.db
+    const economyRows = boundObserverRows(await ctx.db
       .query('economyLedger')
       .withIndex('day', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))
       .order('asc')
-      .take(500))
+      .take(OBSERVER_SNAPSHOT_LIMIT + 1));
+    const dailyEconomyLedger = economyRows.rows
       .filter((entry) => shanghaiDayKey(entry.createdAt) === observerDayKey)
       .sort((left, right) => left.createdAt - right.createdAt)
       .map((entry) => ({
@@ -179,10 +191,12 @@ export const observerSnapshot = query({
         text: entry.text,
         createdAt: entry.createdAt,
       }));
-    const institutionStates = (await ctx.db
+    // Institution state has a smaller display cap; the 51st row is its sentinel.
+    const institutionRows = boundObserverRows(await ctx.db
       .query('townInstitutions')
       .withIndex('world', (q) => q.eq('worldId', worldId))
-      .take(50))
+      .take(51), 50);
+    const institutionStates = institutionRows.rows
       .filter((state) =>
         state.dayKey === observerDayKey && shanghaiDayKey(state.updatedAt) === observerDayKey,
       )
@@ -197,11 +211,12 @@ export const observerSnapshot = query({
         dayKey: state.dayKey,
         updatedAt: state.updatedAt,
       }));
-    const dailyRelationshipChanges = (await ctx.db
+    const relationshipRows = boundObserverRows(await ctx.db
       .query('relationshipChanges')
       .withIndex('worldDay', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))
       .order('asc')
-      .take(500))
+      .take(OBSERVER_SNAPSHOT_LIMIT + 1));
+    const dailyRelationshipChanges = relationshipRows.rows
       .filter((change) => shanghaiDayKey(change.createdAt) === observerDayKey)
       .sort((left, right) => left.createdAt - right.createdAt)
       .map((change) => ({
@@ -225,6 +240,13 @@ export const observerSnapshot = query({
       observerDayKey,
     );
     const residentActivity = buildResidentActivity(world?.players ?? [], world?.conversations ?? [], names);
+    const snapshotTruncation = {
+      dailyLifeEvents: lifeEventRows.truncation,
+      dailyMessages: messageRows.truncation,
+      dailyEconomyLedger: economyRows.truncation,
+      institutionStates: institutionRows.truncation,
+      dailyRelationshipChanges: relationshipRows.truncation,
+    };
     const event = await ctx.db
       .query('townEvents')
       .withIndex('worldId', (q) => q.eq('worldId', worldId))
@@ -241,6 +263,7 @@ export const observerSnapshot = query({
         dailyEconomyLedger,
         institutionStates,
         dailyRelationshipChanges,
+        snapshotTruncation,
         logs: legacyMessages.map((message, index) => ({
           eventKey: `message:${message._id}`,
           sequence: index,
@@ -289,6 +312,7 @@ export const observerSnapshot = query({
       dailyEconomyLedger,
       institutionStates,
       dailyRelationshipChanges,
+      snapshotTruncation,
     };
   },
 });

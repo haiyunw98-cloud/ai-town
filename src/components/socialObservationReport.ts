@@ -57,6 +57,7 @@ export type SocialObservationFacts = {
   institutionUses: SocialObservationInstitutionUse[];
   activityFacts: SocialObservationActivityFact[];
   publicFacts: SocialObservationPublicFact[];
+  truncationNotes?: string[];
 };
 
 export type SocialNarrative = {
@@ -277,6 +278,9 @@ export function buildSocialObservationFacts(
     messageCount: messages.length,
     lifeEventCount: lifeEvents.length,
     observerInterventions: messages.filter((message) => message.observerIntervention).length,
+    truncationNotes: Object.entries(snapshot.snapshotTruncation ?? {})
+      .filter(([, state]) => state.truncated)
+      .map(([key, state]) => `快照截断：${key} 至少省略 ${state.omittedAtLeast} 条记录`),
     conversations,
     residentFacts: buildResidentFacts(
       messages,
@@ -440,6 +444,7 @@ export function buildSocialObservationDigest(facts: SocialObservationFacts) {
     `当日消息：${facts.messageCount}`,
     `当日生活事件：${facts.lifeEventCount}`,
     `观察者介入：${facts.observerInterventions}`,
+    ...(facts.truncationNotes ?? []).map((note) => encodeDigestDynamicText(note)),
   ];
 
   const conversationLines: string[] = [];
@@ -792,6 +797,10 @@ export function buildSocialObservationReport(
           ['coverage-counts', facts.residentCount, facts.messageCount, facts.lifeEventCount],
           `居民：${facts.residentCount}；消息：${facts.messageCount}；生活事件：${facts.lifeEventCount}`,
         ),
+        ...(facts.truncationNotes ?? []).map((note, index) => reportSectionItem(
+          ['coverage-truncation', index, note],
+          escapeReportMarkdown(note, REPORT_TEXT_GRAPHEME_LIMIT, '…', REPORT_TEXT_RENDERED_LIMIT),
+        )),
       ],
       2,
       reportSectionBudgets.coverage,

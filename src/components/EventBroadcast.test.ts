@@ -1180,8 +1180,8 @@ describe('event broadcast view model', () => {
     expect(source).toContain("query('relationshipChanges')");
     expect(source).toContain("withIndex('worldDay', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))");
     expect(source).toContain("query('townInstitutions')");
-    expect(source).toContain('.take(500)');
-    expect(source).toContain('.take(50)');
+    expect(source).toContain('.take(OBSERVER_SNAPSHOT_LIMIT + 1)');
+    expect(source).toContain('boundObserverRows');
     expect(source).not.toMatch(/query\('townInstitutions'\)[\s\S]*?\.collect\(\)[\s\S]*?\.slice\(0, 50\)/u);
     expect(source).toContain('shanghaiDayKey(entry.createdAt) === observerDayKey');
     expect(source).toContain('shanghaiDayKey(change.createdAt) === observerDayKey');

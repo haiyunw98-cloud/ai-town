@@ -105,6 +105,10 @@ export type BroadcastSnapshot = {
     text: string;
     createdAt: number;
   }>;
+  snapshotTruncation?: Partial<Record<
+    'dailyLifeEvents' | 'dailyMessages' | 'dailyEconomyLedger' | 'institutionStates' | 'dailyRelationshipChanges',
+    { truncated: boolean; omittedAtLeast: number }
+  >>;
 };
 
 export type ResolvedSocialNarrative = {
@@ -231,15 +235,19 @@ function buildMetadataSection(data: DailyReportData) {
 }
 
 function buildOverviewSection(data: DailyReportData) {
+  const omitted = (key: keyof NonNullable<BroadcastSnapshot['snapshotTruncation']>) => {
+    const state = data.snapshot.snapshotTruncation?.[key];
+    return state?.truncated ? `（另至少 ${state.omittedAtLeast} 条未纳入快照）` : '';
+  };
   return reportSection('全镇事实概览', [
     `- 居民档案：${residentLifeProfiles.length} 人`,
     `- 当前状态记录：${data.snapshot.residentActivity.filter((entry) => !entry.observerControlled).length} 条`,
-    `- 当日生活记录：${data.lifeEvents.length} 条`,
+    `- 当日生活记录：${data.lifeEvents.length} 条${omitted('dailyLifeEvents')}`,
     `- 当日对话：${data.conversations.length} 组`,
-    `- 当日原始消息：${data.dailyMessages.length} 条`,
+    `- 当日原始消息：${data.dailyMessages.length} 条${omitted('dailyMessages')}`,
     `- 当日公共事件日志：${data.logs.length} 条`,
-    `- 当日经济流水：${data.economyLedger.length} 笔`,
-    `- 当日关系变化：${data.relationshipChanges.length} 笔`,
+    `- 当日经济流水：${data.economyLedger.length} 笔${omitted('dailyEconomyLedger')}`,
+    `- 当日关系变化：${data.relationshipChanges.length} 笔${omitted('dailyRelationshipChanges')}`,
   ]);
 }
 
@@ -551,7 +559,7 @@ function buildEconomyAndRelationshipFactsSection(data: DailyReportData) {
     for (const entry of data.economyLedger) {
       const resident = entry.residentName ?? entry.residentId ?? '机构';
       const institution = entry.institutionName ?? entry.institutionId ?? '未记录机构';
-      lines.push(`- ${escapeMarkdown(resident)}｜${economyFactLabel(entry)}｜${escapeMarkdown(institution)}｜证据 ${escapeMarkdown(entry.sourceKey)}`);
+      lines.push(`- ${entry.createdAt}｜${escapeMarkdown(resident)}｜${economyFactLabel(entry)}｜${escapeMarkdown(institution)}｜幂等键 ${escapeMarkdown(entry.idempotencyKey)}｜证据 ${escapeMarkdown(entry.sourceKey)}`);
     }
   }
   lines.push('', '### 当日机构状态', '');
@@ -568,7 +576,7 @@ function buildEconomyAndRelationshipFactsSection(data: DailyReportData) {
   } else {
     for (const change of data.relationshipChanges) {
       const deltas = relationshipDeltaLabels(change);
-      lines.push(`- ${escapeMarkdown(change.residentAName)} ↔ ${escapeMarkdown(change.residentBName)}｜${deltas.length > 0 ? deltas.join('、') : '数值变化 0'}｜证据 ${escapeMarkdown(change.sourceKey)}`);
+      lines.push(`- ${change.createdAt}｜${escapeMarkdown(change.residentAName)} ↔ ${escapeMarkdown(change.residentBName)}｜${deltas.length > 0 ? deltas.join('、') : '数值变化 0'}｜幂等键 ${escapeMarkdown(change.idempotencyKey)}｜证据 ${escapeMarkdown(change.sourceKey)}`);
     }
   }
   return reportSection('经济与关系事实', lines);
