@@ -87,7 +87,7 @@ export const advanceActiveEvents = internalMutation({
 export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
   const defaults = await ctx.db
     .query('worldStatus')
-    .filter((q) => q.eq(q.field('isDefault'), true))
+    .withIndex('isDefault', (q) => q.eq('isDefault', true))
     .take(2);
   if (defaults.length === 0) return { kind: 'none' as const, reason: 'world-not-ready' };
   if (defaults.length !== 1) throw new Error('Default world status is ambiguous.');
@@ -175,7 +175,7 @@ export const observerSnapshot = query({
       ? undefined
       : await ctx.db
           .query('worldStatus')
-          .filter((q) => q.eq(q.field('isDefault'), true))
+          .withIndex('isDefault', (q) => q.eq('isDefault', true))
           .first();
     const worldId = args.worldId ?? worldStatus?.worldId;
     if (!worldId) {
@@ -922,7 +922,7 @@ export const decisionCandidate = internalQuery({
   handler: async (ctx) => {
     const defaults = await ctx.db
       .query('worldStatus')
-      .filter((q) => q.eq(q.field('isDefault'), true))
+      .withIndex('isDefault', (q) => q.eq('isDefault', true))
       .take(2);
     if (defaults.length !== 1 || defaults[0].status !== 'running') return null;
     const dayKey = shanghaiEventDayKey(Date.now());
@@ -1024,7 +1024,7 @@ export const saveDecision = internalMutation({
   handler: async (ctx, args) => {
     const defaults = await ctx.db
       .query('worldStatus')
-      .filter((q) => q.eq(q.field('isDefault'), true))
+      .withIndex('isDefault', (q) => q.eq('isDefault', true))
       .take(2);
     const event = await ctx.db.get(args.eventId);
     if (
@@ -1080,7 +1080,7 @@ export const dailyThemeCandidate = internalQuery({
   handler: async (ctx, args) => {
     const defaults = await ctx.db
       .query('worldStatus')
-      .filter((q) => q.eq(q.field('isDefault'), true))
+      .withIndex('isDefault', (q) => q.eq('isDefault', true))
       .take(2);
     const event = await ctx.db.get(args.eventId);
     if (!event || defaults.length !== 1 || event.worldId !== defaults[0].worldId) return null;
@@ -1118,7 +1118,7 @@ export const saveDailyTheme = internalMutation({
   handler: async (ctx, args) => {
     const defaults = await ctx.db
       .query('worldStatus')
-      .filter((q) => q.eq(q.field('isDefault'), true))
+      .withIndex('isDefault', (q) => q.eq('isDefault', true))
       .take(2);
     const event = await ctx.db.get(args.eventId);
     if (

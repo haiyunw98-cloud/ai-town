@@ -629,7 +629,7 @@ export async function settleDailyEventRewards(
   const persistedParticipants = await ctx.db
     .query('eventParticipants')
     .withIndex('eventId', (q) => q.eq('eventId', args.eventId))
-    .collect();
+    .take(10);
   const participants = validatePersistedDailyEventParticipants(
     persistedParticipants,
     event.winnerId,

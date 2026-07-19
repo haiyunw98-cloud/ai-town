@@ -2665,6 +2665,36 @@ describe('daily event reward settlement', () => {
     }
   });
 
+  test('bounds daily reward participant reads and rejects a tenth persisted row', async () => {
+    const fixture = dailyRewardFixture();
+    const first = fixture.db.table('eventParticipants')[0];
+    fixture.db.seed('eventParticipants', {
+      ...first,
+      _id: 'eventParticipants:overflow',
+      residentId: 'p:overflow',
+      displayName: '额外居民',
+      identity: '不属于配置名单的额外身份',
+      role: 'spectator',
+      active: false,
+      reachedFinal: false,
+    });
+    const before = fixture.db.snapshot();
+
+    await expect(settleDailyEventRewards(
+      fixture.ctx,
+      dailyRewardArgs(fixture.eventId),
+    )).rejects.toThrow(/exactly nine/i);
+    expect(fixture.db.snapshot()).toEqual(before);
+
+    const source = readFileSync('convex/townEconomy.ts', 'utf8');
+    const settlement = source.slice(
+      source.indexOf('export async function settleDailyEventRewards'),
+      source.indexOf('function validateDailyEventRewardInput'),
+    );
+    expect(settlement).toContain(".withIndex('eventId', (q) => q.eq('eventId', args.eventId))\n    .take(10)");
+    expect(settlement).not.toContain(".withIndex('eventId', (q) => q.eq('eventId', args.eventId))\n    .collect()");
+  });
+
   test('keeps identity as real agent persona text and rejects profile ids posing as identity', async () => {
     const fixture = dailyRewardFixture();
     expect(String(fixture.db.table('eventParticipants')[0].identity)).toContain('林澜');

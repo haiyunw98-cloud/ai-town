@@ -1,5 +1,6 @@
 import * as eventsModule from '../events';
 import { localizedDescriptions } from '../../data/worlds/lighthouse-town/characters';
+import { readFileSync } from 'node:fs';
 
 const events = eventsModule as unknown as {
   isDailyThemeSaveEligible: (
@@ -27,6 +28,14 @@ const events = eventsModule as unknown as {
 };
 
 describe('daily model persistence eligibility', () => {
+  test('declares and uses the bounded isDefault world-status index', () => {
+    const schema = readFileSync('convex/aiTown/schema.ts', 'utf8');
+    const source = readFileSync('convex/events.ts', 'utf8');
+    expect(schema).toContain(".index('isDefault', ['isDefault'])");
+    expect(source).not.toContain(".filter((q) => q.eq(q.field('isDefault'), true))");
+    expect(source.match(/\.withIndex\('isDefault', \(q\) => q\.eq\('isDefault', true\)\)/gu))
+      .toHaveLength(6);
+  });
   test('accepts a theme only for a still-running stage-zero event on the same day', () => {
     const event = {
       dailyKey: '2026-07-19', status: 'running', stageIndex: 0, themeSource: 'fallback',
