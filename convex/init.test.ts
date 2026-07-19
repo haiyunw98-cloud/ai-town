@@ -120,7 +120,7 @@ function fixture(
     worldId: world._id,
     playerId: 'p:99',
     name: '游客甲',
-    character: 'f3',
+    character: 'visitor',
     description: 'unknown resident',
   });
   for (const row of options.agentDescriptions ?? [
@@ -179,6 +179,7 @@ describe('persisted resident description migration', () => {
     expect(db.table('playerDescriptions')[1]).toMatchObject({
       playerId: 'p:99',
       name: '游客甲',
+      character: 'visitor',
       description: 'unknown resident',
     });
     expect(db.table('messages')).toEqual(messagesBefore);
@@ -209,6 +210,52 @@ describe('persisted resident description migration', () => {
 
     expect(writesAfterFirstRun).toBe(2);
     expect(db.patches).toHaveLength(writesAfterFirstRun);
+  });
+
+  test('uses a stable character to migrate an old locale display name', async () => {
+    const { db, world } = fixture();
+    Object.assign(db.table('playerDescriptions')[0], {
+      name: 'Lin Lan',
+      description: 'Old English profile with a legacy mystery seed.',
+    });
+
+    await reconcileConfiguredResidentDescriptions(
+      { db } as never,
+      world._id as never,
+      descriptions,
+    );
+
+    expect(db.table('playerDescriptions')[0]).toMatchObject({
+      playerId: 'p:7',
+      name: linLan.name,
+      character: linLan.character,
+      description: linLan.identity,
+    });
+    expect(db.table('agentDescriptions')[0]).toMatchObject({
+      agentId: 'a:12',
+      identity: linLan.identity,
+      plan: linLan.plan,
+    });
+    expect(db.patches).toHaveLength(2);
+  });
+
+  test('fails before any patch when current name and stable character select different residents', async () => {
+    const { db, world } = fixture();
+    Object.assign(db.table('playerDescriptions')[0], {
+      name: descriptions[1].name,
+      character: descriptions[0].character,
+    });
+
+    await expect(
+      reconcileConfiguredResidentDescriptions({ db } as never, world._id as never, descriptions),
+    ).rejects.toThrow(/name\/character.*conflict/iu);
+
+    expect(db.patches).toHaveLength(0);
+    expect(db.table('playerDescriptions')[0]).toMatchObject({
+      name: descriptions[1].name,
+      character: descriptions[0].character,
+      description: expect.stringContaining('十三夜'),
+    });
   });
 
   test.each([

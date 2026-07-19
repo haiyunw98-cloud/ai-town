@@ -61,14 +61,27 @@ export async function reconcileConfiguredResidentDescriptions(
       .query('playerDescriptions')
       .withIndex('worldId', (q) => q.eq('worldId', worldId).eq('playerId', player.id))
       .take(2);
-    const configuredRows = playerDescriptions.filter((row) => byName.has(row.name));
+    const configuredRows = playerDescriptions.flatMap((row) => {
+      const byStableCharacter = byCharacter.get(row.character);
+      const byCurrentName = byName.get(row.name);
+      return byStableCharacter || byCurrentName ? [{ row, byStableCharacter, byCurrentName }] : [];
+    });
     if (configuredRows.length === 0) continue;
     if (playerDescriptions.length !== 1) {
       throw new Error(`Duplicate player description mapping for ${player.id}`);
     }
 
-    const playerDescription = configuredRows[0];
-    const configured = byName.get(playerDescription.name)!;
+    const { row: playerDescription, byStableCharacter, byCurrentName } = configuredRows[0];
+    if (
+      byStableCharacter &&
+      byCurrentName &&
+      byStableCharacter.name !== byCurrentName.name
+    ) {
+      throw new Error(
+        `Name/character profile conflict for ${playerDescription.name}: ${playerDescription.character}`,
+      );
+    }
+    const configured = byStableCharacter ?? byCurrentName!;
     if (matchedNames.has(configured.name)) {
       throw new Error(`Duplicate persisted resident name: ${configured.name}`);
     }
