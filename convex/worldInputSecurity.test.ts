@@ -18,6 +18,7 @@ describe('public world input security boundary', () => {
     'finishRememberConversation',
     'agentFinishSendingMessage',
     'eventMove',
+    'eventTransfer',
     'createAgent',
     'join',
     'leave',

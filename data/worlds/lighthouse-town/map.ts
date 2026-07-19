@@ -1,5 +1,6 @@
 export const tiledim = 32;
-export const mapwidth = 40;
+export const TOWN_WIDTH = 40;
+export const mapwidth = 84;
 export const mapheight = 30;
 export const tilesetpath = '/ai-town/assets/worlds/lighthouse-town/tileset.svg';
 export const tilesetpxw = 256;
@@ -12,7 +13,7 @@ const ground = layer(0);
 const objects = layer(-1);
 
 // Stone paths connect every district to the lighthouse plaza.
-for (let x = 1; x < mapwidth - 1; x++) {
+for (let x = 1; x < TOWN_WIDTH - 1; x++) {
   ground[x][14] = 1;
   ground[x][15] = 1;
 }
@@ -78,13 +79,13 @@ objects[22][16] = 9;
 objects[24][16] = 9;
 
 // Trees form a visible boundary; flowers and lanterns decorate the walkable interior.
-for (let x = 0; x < mapwidth; x++) {
+for (let x = 0; x < TOWN_WIDTH; x++) {
   objects[x][0] = 8;
   objects[x][mapheight - 1] = 8;
 }
 for (let y = 0; y < mapheight; y++) {
   objects[0][y] = 8;
-  objects[mapwidth - 1][y] = 8;
+  objects[TOWN_WIDTH - 1][y] = 8;
 }
 for (const [x, y, tile] of [
   [2, 2, 27],
@@ -165,6 +166,53 @@ objects[10][9] = 22;
 objects[31][22] = 22;
 objects[25][7] = 30;
 
+// A fully blocked inland river separates the original town from Trial Island.
+// Residents must use the controlled ferry transfer instead of pathfinding across it.
+for (let x = TOWN_WIDTH; x <= 47; x += 1) {
+  for (let y = 0; y < mapheight; y += 1) {
+    ground[x][y] = (x + y) % 3 === 0 ? 3 : 2;
+    objects[x][y] = 2;
+  }
+}
+
+// Trial Island occupies columns 48..82 and has its own collision boundary.
+// Task 7 supplies the matching WebP art; these tiles define its playable topology now.
+for (let x = 48; x <= 82; x += 1) {
+  ground[x][0] = 0;
+  ground[x][mapheight - 1] = 0;
+  objects[x][0] = 8;
+  objects[x][mapheight - 1] = 8;
+}
+for (let y = 0; y < mapheight; y += 1) {
+  ground[83][y] = 0;
+  objects[83][y] = 8;
+}
+
+// Broad walkable routes connect the ferry, courts, challenge areas and awards stand.
+for (let x = 49; x <= 81; x += 1) {
+  ground[x][14] = 1;
+  ground[x][15] = 1;
+}
+for (let y = 2; y <= 27; y += 1) {
+  ground[57][y] = 1;
+  ground[69][y] = 1;
+  ground[79][y] = 1;
+}
+for (let x = 52; x <= 80; x += 1) {
+  ground[x][7] = 1;
+  ground[x][24] = 1;
+}
+
+// Fixed obstacles make the island legible while leaving every declared checkpoint walkable.
+for (const [x, y, tile] of [
+  [52, 4, 8], [62, 4, 27], [74, 4, 8], [81, 4, 27],
+  [52, 10, 27], [64, 10, 8], [74, 10, 27], [81, 11, 8],
+  [52, 19, 8], [62, 19, 27], [74, 18, 8], [81, 24, 27],
+  [52, 27, 27], [62, 27, 8], [74, 27, 27], [81, 27, 8],
+] as const) {
+  objects[x][y] = tile;
+}
+
 export const bgtiles = [ground];
 export const objmap = [objects];
 export const animatedsprites: never[] = [];
@@ -179,6 +227,19 @@ export const eventCheckpoints = {
   workshop: { x: 35, y: 20 },
   herbShop: { x: 15, y: 7 },
   lanternShop: { x: 35, y: 7 },
+} as const;
+
+export const trialIslandCheckpoints = {
+  arrival: { x: 50, y: 15 },
+  track: { x: 58, y: 5 },
+  bridge: { x: 70, y: 7 },
+  courtyard: { x: 57, y: 15 },
+  teamField: { x: 69, y: 15 },
+  maze: { x: 57, y: 24 },
+  resourceZone: { x: 69, y: 24 },
+  spectatorStand: { x: 79, y: 20 },
+  final: { x: 78, y: 8 },
+  awards: { x: 79, y: 15 },
 } as const;
 
 export const townLandmarks = [
@@ -197,7 +258,7 @@ export const townLandmarks = [
   {
     id: 'old-dock', name: '旧水码头', icon: '舟', x: 25.6, y: 7.7,
     destination: { x: 23, y: 6 }, openHours: '全天十二时辰开放',
-    description: '摆渡、卸货和交换水路消息的老码头，雾浓时仍有人守夜。',
+    description: '摆渡、卸货和交换水路消息的老码头，白天常有船工与商贩往来。',
     services: ['水路摆渡', '货物装卸', '船只停泊'],
   },
   {
@@ -243,6 +304,38 @@ export type TownLandmarkId = TownLandmark['id'];
 
 export function townLandmarkById(id: TownLandmarkId): TownLandmark {
   return townLandmarks.find((landmark) => landmark.id === id)!;
+}
+
+const dailyTownCheckpoints: Record<string, { x: number; y: number }> = {
+  'old-dock': eventCheckpoints.dock,
+  plaza: eventCheckpoints.plaza,
+  academy: townLandmarkById('academy').destination,
+  'herb-clinic': townLandmarkById('herb-clinic').destination,
+  'morning-market': townLandmarkById('morning-market').destination,
+  'tea-house': townLandmarkById('tea-house').destination,
+  workshop: townLandmarkById('workshop').destination,
+  restaurant: townLandmarkById('restaurant').destination,
+  'town-office': townLandmarkById('town-office').destination,
+  'divination-hall': townLandmarkById('divination-hall').destination,
+};
+
+const dailyIslandCheckpoints: Record<string, { x: number; y: number }> = {
+  'island-arrival': trialIslandCheckpoints.arrival,
+  'island-track': trialIslandCheckpoints.track,
+  'island-bridge': trialIslandCheckpoints.bridge,
+  'island-courtyard': trialIslandCheckpoints.courtyard,
+  'island-team-field': trialIslandCheckpoints.teamField,
+  'island-maze': trialIslandCheckpoints.maze,
+  'island-resource-zone': trialIslandCheckpoints.resourceZone,
+  'island-spectator-stand': trialIslandCheckpoints.spectatorStand,
+  'island-final': trialIslandCheckpoints.final,
+  'island-awards': trialIslandCheckpoints.awards,
+};
+
+export function dailyEventCheckpointById(id: string) {
+  const checkpoint = dailyTownCheckpoints[id] ?? dailyIslandCheckpoints[id];
+  if (!checkpoint) throw new Error(`Unknown daily event checkpoint: ${id}`);
+  return checkpoint;
 }
 
 export const spawnPoints = [
