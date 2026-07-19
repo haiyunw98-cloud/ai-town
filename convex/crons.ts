@@ -18,7 +18,7 @@ crons.interval(
 
 crons.interval('restart dead worlds', { seconds: 60 }, internal.world.restartDeadWorlds);
 
-crons.interval('advance town challenge', { seconds: 30 }, internal.events.advanceActiveEvents);
+crons.interval('advance daily town activity', { seconds: 30 }, internal.events.advanceActiveEvents);
 
 crons.interval(
   'advance daily town economy',

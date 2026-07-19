@@ -17,7 +17,7 @@ export type PersistedDailyEvent = {
   eventName: string;
   announcement: string;
   venueMode: string;
-  startedAt: number;
+  startedAt?: number;
   endedAt?: number;
   archiveReason?: string;
   stageIndex: number;
@@ -56,6 +56,46 @@ export type DailyEventDraft = {
   participants: PersistedDailyParticipant[];
   logs: PersistedDailyLog[];
 };
+
+export function buildMissedDailyEventDraft(
+  worldId: string,
+  dayKey: string,
+  worldStatus: 'running' | 'inactive' | 'stoppedByDeveloper',
+  now: number,
+): DailyEventDraft {
+  const archiveReason = worldStatus === 'running' ? 'missed-window' : 'world-paused';
+  const text = archiveReason === 'world-paused'
+    ? '当日活动因小镇暂停而未举行，没有参赛者或奖金。'
+    : '当日活动窗口已经错过，没有参赛者或奖金。';
+  return {
+    event: {
+      worldId,
+      dailyKey: dayKey,
+      templateId: 'none',
+      eventName: '当日活动未举行',
+      announcement: text,
+      venueMode: 'main-town',
+      status: 'completed',
+      phase: 'missed',
+      seed: stableSeed(dayKey),
+      phaseEndsAt: now,
+      endedAt: now,
+      archiveReason,
+      stageIndex: 0,
+      themeSource: 'fallback',
+      updatedAt: now,
+    },
+    participants: [],
+    logs: [{
+      eventKey: `daily:${dayKey}:missed`,
+      sequence: 0,
+      stageIndex: 0,
+      kind: 'missed',
+      text,
+      createdAt: now,
+    }],
+  };
+}
 
 export function buildDailyEventDraft(args: {
   worldId: string;
@@ -152,8 +192,14 @@ export function serializeDailyEventState(
   if (state.dayKey !== previousEvent.dailyKey || state.worldId !== previousEvent.worldId) {
     throw new Error('Daily event persisted identity changed during advancement.');
   }
+  if (previousEvent.startedAt === undefined) {
+    throw new Error('Running daily event is missing startedAt.');
+  }
   const participantIdentity = new Map(
     previousParticipants.map((participant) => [participant.residentId, participant.identity]),
+  );
+  const previousParticipantById = new Map(
+    previousParticipants.map((participant) => [participant.residentId, participant]),
   );
   if (participantIdentity.size !== 9) {
     throw new Error('Daily event cannot advance without nine persisted identities.');
@@ -180,6 +226,9 @@ export function serializeDailyEventState(
         throw new Error(`Missing persisted daily identity: ${participant.residentId}`);
       })(),
       shells: 0,
+      quote: previousParticipantById.get(participant.residentId)?.quote,
+      choiceId: previousParticipantById.get(participant.residentId)?.choiceId,
+      decisionStage: previousParticipantById.get(participant.residentId)?.decisionStage,
     })),
     logs: state.log.map((entry, index) => ({
       eventKey: index === 0
@@ -236,4 +285,10 @@ function assertRole(role: string): 'competitor' | 'spectator' | 'winner' {
     throw new Error(`Invalid daily event role: ${role}`);
   }
   return role;
+}
+
+function stableSeed(value: string) {
+  let hash = 2166136261;
+  for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  return hash >>> 0;
 }

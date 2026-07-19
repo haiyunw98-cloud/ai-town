@@ -2,6 +2,7 @@ import { localizedDescriptions } from '../../data/worlds/lighthouse-town/charact
 import { dailyEventTemplates } from './dailyTemplates';
 import {
   buildDailyEventDraft,
+  buildMissedDailyEventDraft,
   restoreDailyEventState,
   serializeDailyEventState,
 } from './dailyPersistence';
@@ -117,5 +118,41 @@ describe('daily event persistence contract', () => {
     expect(persisted.participants.filter((entry) => entry.role === 'winner')).toHaveLength(1);
     expect(persisted.participants.filter((entry) => entry.reachedFinal)).toHaveLength(4);
     expect(persisted.logs.at(-1)?.eventKey).toBe(`daily:${dayKey}:return`);
+  });
+
+  test('preserves persisted decision evidence while advancing the factual state', () => {
+    const draft = buildDailyEventDraft({
+      worldId: 'world', dayKey, template: dailyEventTemplates[1], theme,
+      residents, seed: 19, startedAt: noon,
+    });
+    draft.participants[0] = {
+      ...draft.participants[0], choiceId: 'observe', quote: '我先看清规则。', decisionStage: 0,
+    };
+    const next = advanceDailyEventToStage(
+      restoreDailyEventState(draft.event, draft.participants, draft.logs), 1, noon + 10 * 60_000,
+      { 'p:0': 'observe' },
+    );
+    const persisted = serializeDailyEventState(
+      draft.event, draft.participants, next, noon + 10 * 60_000,
+    );
+    expect(persisted.participants[0]).toEqual(expect.objectContaining({
+      choiceId: 'observe', quote: '我先看清规则。', decisionStage: 0,
+    }));
+  });
+
+  test.each([
+    ['running', 'missed-window'],
+    ['inactive', 'world-paused'],
+    ['stoppedByDeveloper', 'world-paused'],
+  ] as const)('records an unplayed day as a participant-free fact for %s', (status, reason) => {
+    const draft = buildMissedDailyEventDraft('world', dayKey, status, noon + 2 * 60 * 60_000);
+    expect(draft.event).toEqual(expect.objectContaining({
+      dailyKey: dayKey, status: 'completed', phase: 'missed', archiveReason: reason,
+      endedAt: noon + 2 * 60 * 60_000,
+    }));
+    expect(draft.participants).toEqual([]);
+    expect(draft.logs).toEqual([
+      expect.objectContaining({ eventKey: `daily:${dayKey}:missed` }),
+    ]);
   });
 });

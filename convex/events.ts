@@ -14,6 +14,25 @@ import { parseGameId } from './aiTown/ids';
 import { eventCheckpoints } from '../data/worlds/lighthouse-town/map';
 import { institutions } from '../data/worlds/lighthouse-town/economy';
 import { requestEventDecision } from './events/model';
+import { fallbackDailyTheme, requestDailyTheme } from './events/dailyTheme';
+import { dailyEventTemplates } from './events/dailyTemplates';
+import {
+  dailyEventAction,
+  selectDailyTemplate,
+  shanghaiEventDayKey,
+} from './events/dailySchedule';
+import {
+  buildDailyEventDraft,
+  buildMissedDailyEventDraft,
+  restoreDailyEventState,
+  serializeDailyEventState,
+  type DailyEventDraft,
+  type PersistedDailyEvent,
+  type PersistedDailyLog,
+  type PersistedDailyParticipant,
+} from './events/dailyPersistence';
+import { advanceDailyEventToStage } from './events/dailyStateMachine';
+import { settleDailyEventRewards } from './townEconomy';
 import { advanceEvent, createInitialEvent } from './events/stateMachine';
 import { EventPhase, TownEventState } from './events/types';
 import {
@@ -54,46 +73,100 @@ export function collectHumanPlayerIds(
 export const ensureFirstEvent = mutation({
   args: {},
   handler: async (ctx) => {
-    const worldStatus = await ctx.db
-      .query('worldStatus')
-      .filter((q) => q.eq(q.field('isDefault'), true))
-      .first();
-    if (!worldStatus) return { created: false, reason: '世界尚未初始化' };
-    const result = await ensureEventForWorld(ctx, worldStatus.worldId);
-    if (result.created && result.eventId) {
-      await queuePhaseMovement(ctx, worldStatus.worldId, result.eventId, 'announcement');
-      await ctx.scheduler.runAfter(0, internal.events.generateNextDecision, {});
-    }
-    return result;
+    return await advanceDailyTownActivity(ctx, Date.now());
   },
 });
 
 export const advanceActiveEvents = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const worldStatus = await ctx.db
-      .query('worldStatus')
-      .filter((q) => q.eq(q.field('isDefault'), true))
-      .first();
-    if (!worldStatus) return;
-    await ensureEventForWorld(ctx, worldStatus.worldId);
-    const events = await ctx.db.query('townEvents').withIndex('worldId', (q) =>
-      q.eq('worldId', worldStatus.worldId),
-    ).collect();
-    const now = Date.now();
-    for (const event of events.filter((entry) => entry.status !== 'completed')) {
-      if (event.phaseEndsAt <= now) {
-        const current = await loadEventState(ctx, event._id);
-        const next = advanceEvent(current, now);
-        if (next !== current) {
-          await persistEventState(ctx, event._id, next);
-          await queuePhaseMovement(ctx, event.worldId, event._id, next.phase);
-        }
-      }
-    }
-    await ctx.scheduler.runAfter(0, internal.events.generateNextDecision, {});
+    return await advanceDailyTownActivity(ctx, Date.now());
   },
 });
+
+export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
+  const defaults = await ctx.db
+    .query('worldStatus')
+    .filter((q) => q.eq(q.field('isDefault'), true))
+    .take(2);
+  if (defaults.length === 0) return { kind: 'none' as const, reason: 'world-not-ready' };
+  if (defaults.length !== 1) throw new Error('Default world status is ambiguous.');
+  const worldStatus = defaults[0];
+  const dayKey = shanghaiEventDayKey(now);
+  const today = await ctx.db
+    .query('townEvents')
+    .withIndex('worldDay', (q) => q.eq('worldId', worldStatus.worldId).eq('dailyKey', dayKey))
+    .take(2);
+  if (today.length > 1) throw new Error(`Daily event collision for ${dayKey}.`);
+  const existing = today[0];
+  const action = dailyEventAction(
+    now,
+    worldStatus.status,
+    existing
+      ? {
+          dayKey,
+          status: existing.status === 'completed' ? 'completed' : 'running',
+          stageIndex: existing.stageIndex ?? 0,
+        }
+      : null,
+  );
+  if (action.kind === 'none') return action;
+
+  if (action.kind === 'record-missed') {
+    const draft = buildMissedDailyEventDraft(
+      String(worldStatus.worldId), dayKey, worldStatus.status, now,
+    );
+    await insertDailyDraft(ctx, worldStatus.worldId, draft);
+    return { kind: 'record-missed' as const, dayKey };
+  }
+  if (action.kind === 'archive-paused') {
+    if (!existing?.dailyKey) throw new Error('Cannot pause-archive a legacy event.');
+    await archivePausedDailyEvent(ctx, existing._id, worldStatus.worldId, dayKey, now);
+    return { kind: 'archive-paused' as const, dayKey };
+  }
+  if (action.kind === 'create') {
+    const roster = await loadConfiguredDailyRoster(ctx, worldStatus.worldId);
+    const recent = await ctx.db
+      .query('townEvents')
+      .withIndex('worldId', (q) => q.eq('worldId', worldStatus.worldId))
+      .order('desc')
+      .take(20);
+    const previousTemplateIds = recent
+      .flatMap((event) => event.dailyKey && event.templateId && event.templateId !== 'none'
+        ? [event.templateId]
+        : [])
+      .slice(0, 6);
+    const templateId = selectDailyTemplate(dayKey, previousTemplateIds);
+    const template = dailyEventTemplates.find((entry) => entry.id === templateId);
+    if (!template) throw new Error(`Missing daily event template: ${templateId}`);
+    const startedAt = Date.parse(`${dayKey}T04:00:00.000Z`);
+    const draft = buildDailyEventDraft({
+      worldId: String(worldStatus.worldId),
+      dayKey,
+      template,
+      theme: fallbackDailyTheme(template),
+      residents: roster,
+      seed: stableDailySeed(`${worldStatus.worldId}:${dayKey}:${template.id}`),
+      startedAt,
+    });
+    const eventId = await insertDailyDraft(ctx, worldStatus.worldId, draft);
+    await recordDailyParticipation(ctx, worldStatus.worldId, eventId, draft.participants, now);
+    if (action.stageIndex > 0) {
+      await advancePersistedDailyEvent(
+        ctx, eventId, worldStatus.worldId, action.stageIndex, now, dayKey,
+      );
+    } else {
+      await ctx.scheduler.runAfter(0, internal.events.generateDailyTheme, { eventId });
+    }
+    await ctx.scheduler.runAfter(0, internal.events.generateNextDecision, {});
+    return { kind: 'create' as const, dayKey, eventId, stageIndex: action.stageIndex };
+  }
+  if (!existing?.dailyKey) throw new Error('Legacy events are archive-only.');
+  await advancePersistedDailyEvent(
+    ctx, existing._id, worldStatus.worldId, action.stageIndex, now, dayKey,
+  );
+  return { kind: action.kind, dayKey, eventId: existing._id, stageIndex: action.stageIndex };
+}
 
 export const observerSnapshot = query({
   args: { worldId: v.optional(v.id('worlds')), dayKey: v.optional(v.string()) },
@@ -276,7 +349,7 @@ export const observerSnapshot = query({
     const participants = await ctx.db
       .query('eventParticipants')
       .withIndex('eventId', (q) => q.eq('eventId', event._id))
-      .collect();
+      .take(10);
     const logs = await ctx.db
       .query('eventLog')
       .withIndex('eventId', (q) => q.eq('eventId', event._id))
@@ -285,15 +358,25 @@ export const observerSnapshot = query({
     return {
       event: {
         id: event._id,
-        name: EVENT_NAME,
+        name: event.dailyKey ? event.eventName ?? '灯塔镇每日活动' : EVENT_NAME,
         status: event.status,
         phase: event.phase,
         phaseEndsAt: event.phaseEndsAt,
         winnerId: event.winnerId,
-        prize: '一百万金贝＋灯塔湖畔宅院使用权＋下一届灯塔节命名权',
+        prize: event.dailyKey
+          ? '参与 10 金贝；进入前四名加 20 金贝；冠军再加 50 金贝'
+          : '一百万金贝＋灯塔湖畔宅院使用权＋下一届灯塔节命名权',
+        dailyKey: event.dailyKey,
+        templateId: event.templateId,
+        announcement: event.announcement,
+        venueMode: event.venueMode,
+        stageIndex: event.stageIndex,
+        endedAt: event.endedAt,
+        archiveReason: event.archiveReason,
       },
       participants: participants
-        .map(({ residentId, displayName, score, shells, active, role, rank, quote }) => ({
+        .map(({ residentId, displayName, score, shells, active, role, rank, quote,
+          teamId, reachedFinal, choiceId, decisionStage }) => ({
           residentId,
           displayName,
           score,
@@ -302,6 +385,10 @@ export const observerSnapshot = query({
           role,
           rank,
           quote,
+          teamId,
+          reachedFinal,
+          choiceId,
+          decisionStage,
         }))
         .sort((left, right) => (left.rank ?? 99) - (right.rank ?? 99)),
       logs,
@@ -517,29 +604,388 @@ function buildResidentActivity(
   });
 }
 
+async function loadConfiguredDailyRoster(ctx: MutationCtx, worldId: Id<'worlds'>) {
+  const world = await ctx.db.get(worldId);
+  if (!world) throw new Error('Daily event world is missing.');
+  const [players, agents] = await Promise.all([
+    ctx.db
+      .query('playerDescriptions')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
+      .take(33),
+    ctx.db
+      .query('agentDescriptions')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
+      .take(33),
+  ]);
+  if (players.length === 33 || agents.length === 33) {
+    throw new Error('Daily event description lookup exceeded its safe bound.');
+  }
+  return selectConfiguredAiRoster(world, players, agents);
+}
+
+export function selectConfiguredAiRoster(
+  world: {
+    players: ReadonlyArray<{ id: string; human?: string }>;
+    agents: ReadonlyArray<{ id: string; playerId: string }>;
+  },
+  playerDescriptions: ReadonlyArray<{
+    playerId: string; name: string; description: string;
+  }>,
+  agentDescriptions: ReadonlyArray<{ agentId: string; identity: string }>,
+) {
+  if (world.agents.length !== 9) {
+    throw new Error('Daily event requires exactly nine active AI agents.');
+  }
+  return world.agents.map((agent) => {
+    const runtimePlayers = world.players.filter((player) => player.id === agent.playerId);
+    const players = playerDescriptions.filter((player) => player.playerId === agent.playerId);
+    const agents = agentDescriptions.filter((description) => description.agentId === agent.id);
+    if (
+      runtimePlayers.length !== 1 || runtimePlayers[0].human !== undefined
+      || players.length !== 1 || agents.length !== 1
+      || players[0].description !== agents[0].identity
+    ) {
+      throw new Error(`Daily event AI mapping is ambiguous: ${agent.playerId}`);
+    }
+    return {
+      residentId: agent.playerId,
+      displayName: players[0].name,
+      identity: agents[0].identity,
+    };
+  });
+}
+
+export function selectDailyStateLogs<T extends { eventKey: string; sequence: number }>(
+  rows: readonly T[],
+  dayKey: string,
+) {
+  const prefix = `daily:${dayKey}:`;
+  return rows
+    .filter((entry) =>
+      entry.eventKey === `${prefix}announcement`
+      || entry.eventKey === `${prefix}return`
+      || new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}stage:\\d+$`, 'u')
+        .test(entry.eventKey),
+    )
+    .sort((left, right) => left.sequence - right.sequence);
+}
+
+async function insertDailyDraft(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  draft: DailyEventDraft,
+) {
+  const { worldId: _draftWorldId, ...event } = draft.event;
+  const eventId = await ctx.db.insert('townEvents', { ...event, worldId });
+  for (const participant of draft.participants) {
+    await ctx.db.insert('eventParticipants', { eventId, ...participant });
+  }
+  for (const entry of draft.logs) await ctx.db.insert('eventLog', { eventId, ...entry });
+  return eventId;
+}
+
+async function loadPersistedDailyDraft(ctx: MutationCtx, eventId: Id<'townEvents'>) {
+  const event = await ctx.db.get(eventId);
+  if (!event || !event.dailyKey || !event.templateId || event.templateId === 'none') {
+    throw new Error('Legacy or missed events cannot enter daily event progression.');
+  }
+  if (
+    event.stageIndex === undefined || event.eventName === undefined
+    || event.announcement === undefined || event.venueMode === undefined
+    || event.startedAt === undefined || event.themeSource === undefined
+    || (event.status !== 'running' && event.status !== 'completed')
+  ) {
+    throw new Error('Persisted daily event fields are incomplete.');
+  }
+  const [participantDocs, logDocs] = await Promise.all([
+    ctx.db.query('eventParticipants').withIndex('eventId', (q) => q.eq('eventId', eventId)).take(10),
+    ctx.db.query('eventLog').withIndex('eventId', (q) => q.eq('eventId', eventId)).take(51),
+  ]);
+  if (participantDocs.length !== 9 || logDocs.length === 51) {
+    throw new Error('Persisted daily event rows are incomplete or unbounded.');
+  }
+  const persistedEvent: PersistedDailyEvent = {
+    worldId: String(event.worldId),
+    dailyKey: event.dailyKey,
+    templateId: event.templateId,
+    eventName: event.eventName,
+    announcement: event.announcement,
+    venueMode: event.venueMode,
+    startedAt: event.startedAt,
+    endedAt: event.endedAt,
+    archiveReason: event.archiveReason,
+    stageIndex: event.stageIndex,
+    themeSource: event.themeSource,
+    status: event.status,
+    phase: event.phase,
+    seed: event.seed,
+    phaseEndsAt: event.phaseEndsAt,
+    winnerId: event.winnerId,
+    updatedAt: event.updatedAt,
+  };
+  const participants: PersistedDailyParticipant[] = participantDocs.map((participant) => {
+    if (!participant.teamId || participant.reachedFinal === undefined) {
+      throw new Error(`Daily event participant fields are incomplete: ${participant.residentId}`);
+    }
+    return {
+      residentId: participant.residentId,
+      displayName: participant.displayName,
+      identity: participant.identity,
+      score: participant.score,
+      shells: participant.shells,
+      active: participant.active,
+      role: participant.role,
+      teamId: participant.teamId,
+      reachedFinal: participant.reachedFinal,
+      quote: participant.quote,
+      choiceId: participant.choiceId,
+      decisionStage: participant.decisionStage,
+    };
+  });
+  const stateLogDocs = selectDailyStateLogs(logDocs, event.dailyKey);
+  if (stateLogDocs.length === 0 || stateLogDocs.length > 8) {
+    throw new Error('Persisted daily state logs are incomplete or unbounded.');
+  }
+  const logs: PersistedDailyLog[] = stateLogDocs.map((entry) => {
+    if (entry.stageIndex === undefined) throw new Error('Daily event log stage is missing.');
+    return {
+      eventKey: entry.eventKey,
+      sequence: entry.sequence,
+      stageIndex: entry.stageIndex,
+      kind: entry.kind,
+      text: entry.text,
+      createdAt: entry.createdAt,
+    };
+  });
+  return { event: persistedEvent, participants, logs };
+}
+
+async function applyDailyDraft(
+  ctx: MutationCtx,
+  eventId: Id<'townEvents'>,
+  draft: DailyEventDraft,
+) {
+  const { worldId: _draftWorldId, ...event } = draft.event;
+  await ctx.db.patch(eventId, event);
+  const docs = await ctx.db
+    .query('eventParticipants')
+    .withIndex('eventId', (q) => q.eq('eventId', eventId))
+    .take(10);
+  if (docs.length !== draft.participants.length) {
+    throw new Error('Daily event participant persistence changed during advancement.');
+  }
+  for (const participant of draft.participants) {
+    const doc = docs.find((entry) => entry.residentId === participant.residentId);
+    if (!doc) throw new Error(`Daily event participant disappeared: ${participant.residentId}`);
+    await ctx.db.patch(doc._id, participant);
+  }
+  for (const entry of draft.logs) {
+    const matches = await ctx.db
+      .query('eventLog')
+      .withIndex('eventKey', (q) => q.eq('eventId', eventId).eq('eventKey', entry.eventKey))
+      .take(2);
+    if (matches.length > 1) throw new Error(`Daily event log collision: ${entry.eventKey}`);
+    if (!matches[0]) await ctx.db.insert('eventLog', { eventId, ...entry });
+  }
+}
+
+async function advancePersistedDailyEvent(
+  ctx: MutationCtx,
+  eventId: Id<'townEvents'>,
+  worldId: Id<'worlds'>,
+  targetStageIndex: number,
+  now: number,
+  dayKey: string,
+) {
+  const draft = await loadPersistedDailyDraft(ctx, eventId);
+  if (draft.event.dailyKey !== dayKey || draft.event.status === 'completed') return;
+  const state = restoreDailyEventState(draft.event, draft.participants, draft.logs);
+  const decisions = Object.fromEntries(
+    draft.participants.flatMap((participant) =>
+      participant.decisionStage === state.stageIndex && participant.choiceId
+        ? [[participant.residentId, participant.choiceId]]
+        : []),
+  );
+  const next = advanceDailyEventToStage(state, targetStageIndex, now, decisions);
+  if (next === state) return;
+  const persisted = serializeDailyEventState(draft.event, draft.participants, next, now);
+  await applyDailyDraft(ctx, eventId, persisted);
+  if (persisted.event.status === 'completed') {
+    await settleDailyEventRewards(ctx, { worldId, eventId, dayKey, hostServices: null, now });
+    await recordDailyReturn(ctx, worldId, eventId, persisted.participants, now, 'completed');
+  } else {
+    await ctx.scheduler.runAfter(0, internal.events.generateNextDecision, {});
+  }
+}
+
+async function archivePausedDailyEvent(
+  ctx: MutationCtx,
+  eventId: Id<'townEvents'>,
+  worldId: Id<'worlds'>,
+  dayKey: string,
+  now: number,
+) {
+  const draft = await loadPersistedDailyDraft(ctx, eventId);
+  if (draft.event.dailyKey !== dayKey || draft.event.status === 'completed') return;
+  const text = '活动因小镇暂停而结束，没有发放奖金，居民恢复普通生活。';
+  await ctx.db.patch(eventId, {
+    status: 'completed', phase: 'paused', phaseEndsAt: now, endedAt: now,
+    archiveReason: 'world-paused', winnerId: undefined, updatedAt: now,
+  });
+  const participantDocs = await ctx.db
+    .query('eventParticipants')
+    .withIndex('eventId', (q) => q.eq('eventId', eventId))
+    .take(10);
+  for (const participant of participantDocs) {
+    await ctx.db.patch(participant._id, { active: false, role: 'spectator' });
+  }
+  const eventKey = `daily:${dayKey}:paused`;
+  const duplicate = await ctx.db
+    .query('eventLog')
+    .withIndex('eventKey', (q) => q.eq('eventId', eventId).eq('eventKey', eventKey))
+    .take(2);
+  if (duplicate.length > 1) throw new Error(`Daily event log collision: ${eventKey}`);
+  if (!duplicate[0]) {
+    await ctx.db.insert('eventLog', {
+      eventId, eventKey, sequence: draft.logs.length, stageIndex: draft.event.stageIndex,
+      kind: 'paused', text, createdAt: now,
+    });
+  }
+  await recordDailyReturn(ctx, worldId, eventId, draft.participants, now, 'world-paused');
+}
+
+async function recordDailyParticipation(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  eventId: Id<'townEvents'>,
+  participants: readonly PersistedDailyParticipant[],
+  now: number,
+) {
+  for (const participant of participants) {
+    await ctx.db.insert('lifeEvents', {
+      worldId,
+      residentId: parseGameId('players', participant.residentId),
+      kind: 'daily-event-participation',
+      text: `${participant.displayName}参加了今日安全活动。`,
+      createdAt: now,
+      sourceKey: `daily-event:${eventId}:${participant.residentId}:participation`,
+    });
+  }
+}
+
+async function recordDailyReturn(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  eventId: Id<'townEvents'>,
+  participants: readonly PersistedDailyParticipant[],
+  now: number,
+  reason: 'completed' | 'world-paused',
+) {
+  for (const participant of participants) {
+    const sourceKey = `daily-event:${eventId}:${participant.residentId}:return`;
+    const existing = await ctx.db
+      .query('lifeEvents')
+      .withIndex('sourceKey', (q) => q.eq('worldId', worldId).eq('sourceKey', sourceKey))
+      .take(2);
+    if (existing.length > 1) throw new Error(`Daily return collision: ${sourceKey}`);
+    if (!existing[0]) {
+      await ctx.db.insert('lifeEvents', {
+        worldId,
+        residentId: parseGameId('players', participant.residentId),
+        kind: 'daily-event-return',
+        text: reason === 'completed'
+          ? `${participant.displayName}结束活动并恢复普通生活。`
+          : `${participant.displayName}因小镇暂停结束活动，没有获得奖金，恢复普通生活。`,
+        createdAt: now,
+        sourceKey,
+      });
+    }
+  }
+  const world = await ctx.db.get(worldId);
+  if (!world) throw new Error('Daily event world disappeared during return.');
+  const participantIds = new Set(participants.map((participant) => participant.residentId));
+  await ctx.db.patch(worldId, {
+    players: world.players.map((player) => participantIds.has(player.id)
+      ? { ...player, activity: undefined }
+      : player),
+  });
+}
+
+function stableDailySeed(value: string) {
+  let hash = 2166136261;
+  for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  return hash >>> 0;
+}
+
 export const decisionCandidate = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const events = await ctx.db.query('townEvents').order('desc').take(5);
-    const event = events.find((entry) => entry.status !== 'completed');
-    if (!event) return null;
+    const defaults = await ctx.db
+      .query('worldStatus')
+      .filter((q) => q.eq(q.field('isDefault'), true))
+      .take(2);
+    if (defaults.length !== 1 || defaults[0].status !== 'running') return null;
+    const dayKey = shanghaiEventDayKey(Date.now());
+    const events = await ctx.db
+      .query('townEvents')
+      .withIndex('worldDay', (q) => q.eq('worldId', defaults[0].worldId).eq('dailyKey', dayKey))
+      .take(2);
+    if (events.length !== 1) return null;
+    const event = events[0];
     const participants = await ctx.db
       .query('eventParticipants')
       .withIndex('eventId', (q) => q.eq('eventId', event._id))
-      .collect();
-    const candidate = participants
-      .filter((entry) => entry.decisionPhase !== event.phase)
-      .sort((left, right) => Number(right.active) - Number(left.active))[0];
+      .take(10);
+    if (participants.length !== 9) return null;
+    const candidate = selectDailyDecisionCandidate(event, participants);
     if (!candidate) return null;
-    return {
-      eventId: event._id,
-      phase: event.phase as EventPhase,
-      residentId: candidate.residentId,
-      displayName: candidate.displayName,
-      identity: candidate.identity,
-    };
+    return { eventId: event._id, dayKey, ...candidate };
   },
 });
+
+export function isDailyThemeSaveEligible(
+  event: { dailyKey?: string; status: string; stageIndex?: number; themeSource?: string },
+  worldStatus: string,
+  dayKey: string,
+) {
+  return !!event.dailyKey
+    && event.dailyKey === dayKey
+    && worldStatus === 'running'
+    && event.status === 'running'
+    && event.stageIndex === 0
+    && event.themeSource === 'fallback';
+}
+
+export function selectDailyDecisionCandidate(
+  event: { dailyKey?: string; templateId?: string; status: string; stageIndex?: number },
+  participants: ReadonlyArray<{
+    residentId: string;
+    displayName: string;
+    identity: string;
+    active: boolean;
+    decisionStage?: number;
+  }>,
+) {
+  if (
+    !event.dailyKey || event.status !== 'running'
+    || event.stageIndex === undefined || event.stageIndex < 0 || event.stageIndex > 5
+  ) return null;
+  const template = dailyEventTemplates.find((entry) => entry.id === event.templateId);
+  const stage = template?.stages[event.stageIndex];
+  if (!stage) return null;
+  const candidate = participants.find((entry) =>
+    entry.active && entry.decisionStage !== event.stageIndex,
+  );
+  if (!candidate) return null;
+  return {
+    residentId: candidate.residentId,
+    displayName: candidate.displayName,
+    identity: candidate.identity,
+    stageIndex: event.stageIndex,
+    phase: stage.id,
+    choices: stage.choices,
+  };
+}
 
 export const generateNextDecision = internalAction({
   args: {},
@@ -551,12 +997,13 @@ export const generateNextDecision = internalAction({
       displayName: candidate.displayName,
       identity: candidate.identity,
       phase: candidate.phase,
-      choices: choicesForPhase(candidate.phase),
+      choices: candidate.choices,
     });
     await ctx.runMutation(internal.events.saveDecision, {
       eventId: candidate.eventId,
       residentId: candidate.residentId,
-      phase: candidate.phase,
+      dayKey: candidate.dayKey,
+      stageIndex: candidate.stageIndex,
       choiceId: decision.choiceId,
       publicQuote: decision.publicQuote,
       source: decision.source,
@@ -568,30 +1015,47 @@ export const saveDecision = internalMutation({
   args: {
     eventId: v.id('townEvents'),
     residentId: v.string(),
-    phase: v.string(),
+    dayKey: v.string(),
+    stageIndex: v.number(),
     choiceId: v.string(),
     publicQuote: v.string(),
     source: v.union(v.literal('model'), v.literal('fallback')),
   },
   handler: async (ctx, args) => {
+    const defaults = await ctx.db
+      .query('worldStatus')
+      .filter((q) => q.eq(q.field('isDefault'), true))
+      .take(2);
     const event = await ctx.db.get(args.eventId);
-    if (!event || event.phase !== args.phase) return;
+    if (
+      defaults.length !== 1 || defaults[0].status !== 'running'
+      || !event || event.worldId !== defaults[0].worldId
+      || event.dailyKey !== args.dayKey || shanghaiEventDayKey(Date.now()) !== args.dayKey
+      || event.status !== 'running' || event.stageIndex !== args.stageIndex
+    ) return;
+    const template = dailyEventTemplates.find((entry) => entry.id === event.templateId);
+    const stage = template?.stages[args.stageIndex];
+    if (!stage?.choices.some((choice) => choice.id === args.choiceId)) return;
     const participants = await ctx.db
       .query('eventParticipants')
       .withIndex('eventId', (q) => q.eq('eventId', args.eventId))
-      .collect();
+      .take(10);
+    if (participants.length !== 9) return;
     const participant = participants.find((entry) => entry.residentId === args.residentId);
-    if (!participant || participant.decisionPhase === args.phase) return;
+    if (!participant?.active || participant.decisionStage === args.stageIndex) return;
     await ctx.db.patch(participant._id, {
       quote: args.publicQuote,
-      decisionPhase: args.phase,
+      choiceId: args.choiceId,
+      decisionStage: args.stageIndex,
+      decisionPhase: stage.id,
     });
-    const eventKey = `quote:${args.phase}:${args.residentId}`;
+    const eventKey = `daily:${args.dayKey}:decision:${args.stageIndex}:${args.residentId}`;
     const duplicate = await ctx.db
       .query('eventLog')
       .withIndex('eventKey', (q) => q.eq('eventId', args.eventId).eq('eventKey', eventKey))
-      .first();
-    if (!duplicate) {
+      .take(2);
+    if (duplicate.length > 1) throw new Error(`Daily decision log collision: ${eventKey}`);
+    if (!duplicate[0]) {
       const latest = await ctx.db
         .query('eventLog')
         .withIndex('eventId', (q) => q.eq('eventId', args.eventId))
@@ -602,10 +1066,80 @@ export const saveDecision = internalMutation({
         eventKey,
         sequence: (latest?.sequence ?? -1) + 1,
         kind: 'interview',
+        stageIndex: args.stageIndex,
         text: `${participant.displayName}选择“${args.choiceId}”：${args.publicQuote}`,
         createdAt: Date.now(),
       });
     }
+    await ctx.scheduler.runAfter(0, internal.events.generateNextDecision, {});
+  },
+});
+
+export const dailyThemeCandidate = internalQuery({
+  args: { eventId: v.id('townEvents') },
+  handler: async (ctx, args) => {
+    const defaults = await ctx.db
+      .query('worldStatus')
+      .filter((q) => q.eq(q.field('isDefault'), true))
+      .take(2);
+    const event = await ctx.db.get(args.eventId);
+    if (!event || defaults.length !== 1 || event.worldId !== defaults[0].worldId) return null;
+    const dayKey = shanghaiEventDayKey(Date.now());
+    if (!isDailyThemeSaveEligible(event, defaults[0].status, dayKey)) return null;
+    const template = dailyEventTemplates.find((entry) => entry.id === event.templateId);
+    return template ? { dayKey, template } : null;
+  },
+});
+
+export const generateDailyTheme = internalAction({
+  args: { eventId: v.id('townEvents') },
+  handler: async (ctx, args) => {
+    const candidate = await ctx.runQuery(internal.events.dailyThemeCandidate, args);
+    if (!candidate) return;
+    const theme = await requestDailyTheme(candidate.template, candidate.dayKey);
+    await ctx.runMutation(internal.events.saveDailyTheme, {
+      eventId: args.eventId,
+      dayKey: candidate.dayKey,
+      name: theme.name,
+      announcement: theme.announcement,
+      source: theme.source,
+    });
+  },
+});
+
+export const saveDailyTheme = internalMutation({
+  args: {
+    eventId: v.id('townEvents'),
+    dayKey: v.string(),
+    name: v.string(),
+    announcement: v.string(),
+    source: v.union(v.literal('model'), v.literal('fallback')),
+  },
+  handler: async (ctx, args) => {
+    const defaults = await ctx.db
+      .query('worldStatus')
+      .filter((q) => q.eq(q.field('isDefault'), true))
+      .take(2);
+    const event = await ctx.db.get(args.eventId);
+    if (
+      defaults.length !== 1 || !event || event.worldId !== defaults[0].worldId
+      || !isDailyThemeSaveEligible(event, defaults[0].status, args.dayKey)
+      || shanghaiEventDayKey(Date.now()) !== args.dayKey
+    ) return;
+    await ctx.db.patch(args.eventId, {
+      eventName: args.name,
+      announcement: args.announcement,
+      themeSource: args.source,
+      updatedAt: Date.now(),
+    });
+    const logs = await ctx.db
+      .query('eventLog')
+      .withIndex('eventKey', (q) =>
+        q.eq('eventId', args.eventId).eq('eventKey', `daily:${args.dayKey}:announcement`),
+      )
+      .take(2);
+    if (logs.length !== 1) throw new Error('Daily announcement log is missing or ambiguous.');
+    await ctx.db.patch(logs[0]._id, { text: args.announcement });
   },
 });
 
