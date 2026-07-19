@@ -1193,6 +1193,8 @@ describe('event broadcast view model', () => {
     expect(readme).toContain('明确争执使友情 `-2`、信任 `-1`（每日下限分别为 `-4`、`-2`）');
     expect(readme).toContain('结构化的双方互惠证据才使亲密倾向 `+1`（每日最多 `+1`）');
     expect(readme).not.toContain('已完成的普通对话双方友情 `+1`');
+    expect(readme).toContain('余额不足时，对应消费候选会被过滤，不会自动改选最低价餐食');
+    expect(readme).not.toContain('余额不足时居民选择最低价基本餐食');
   });
 
   test('renders the exact daily empty state in the production fast-summary component', () => {
