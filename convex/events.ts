@@ -124,10 +124,9 @@ export const observerSnapshot = query({
     const humanPlayerIds = collectHumanPlayerIds(world?.players ?? [], archivedPlayers);
     const dailyLifeEvents = (await ctx.db
       .query('lifeEvents')
-      .filter((q) => q.eq(q.field('worldId'), worldId))
-      .collect())
-      .sort((left, right) => right.createdAt - left.createdAt)
-      .slice(0, 500)
+      .withIndex('worldTime', (q) => q.eq('worldId', worldId))
+      .order('desc')
+      .take(500))
       .map((entry) => ({
         residentId: entry.residentId,
         displayName: names.get(entry.residentId) ?? '居民',
@@ -183,12 +182,11 @@ export const observerSnapshot = query({
     const institutionStates = (await ctx.db
       .query('townInstitutions')
       .withIndex('world', (q) => q.eq('worldId', worldId))
-      .collect())
+      .take(50))
       .filter((state) =>
         state.dayKey === observerDayKey && shanghaiDayKey(state.updatedAt) === observerDayKey,
       )
       .sort((left, right) => left.updatedAt - right.updatedAt || left.institutionId.localeCompare(right.institutionId))
-      .slice(0, 50)
       .map((state) => ({
         institutionId: state.institutionId,
         institutionName: institutionNames.get(state.institutionId) ?? state.institutionId,

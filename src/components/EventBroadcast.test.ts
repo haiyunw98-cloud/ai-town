@@ -1170,18 +1170,29 @@ describe('event broadcast view model', () => {
 
   test('includes bounded, chronological Shanghai-day economy and relationship rows in the observer snapshot', () => {
     const source = readFileSync(new URL('../../convex/events.ts', import.meta.url), 'utf8');
+    const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
 
+    expect(source).toContain("withIndex('worldTime', (q) => q.eq('worldId', worldId))");
+    expect(source).not.toContain("query('lifeEvents')\n      .filter");
+    expect(source).not.toMatch(/query\('lifeEvents'\)[\s\S]*?\.collect\(\)[\s\S]*?\.slice\(0, 500\)/u);
     expect(source).toContain("query('economyLedger')");
     expect(source).toContain("withIndex('day', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))");
     expect(source).toContain("query('relationshipChanges')");
     expect(source).toContain("withIndex('worldDay', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))");
     expect(source).toContain("query('townInstitutions')");
     expect(source).toContain('.take(500)');
+    expect(source).toContain('.take(50)');
+    expect(source).not.toMatch(/query\('townInstitutions'\)[\s\S]*?\.collect\(\)[\s\S]*?\.slice\(0, 50\)/u);
     expect(source).toContain('shanghaiDayKey(entry.createdAt) === observerDayKey');
     expect(source).toContain('shanghaiDayKey(change.createdAt) === observerDayKey');
     expect(source).toContain('dailyEconomyLedger,');
     expect(source).toContain('institutionStates,');
     expect(source).toContain('dailyRelationshipChanges,');
+    expect(readme).toContain('普通对话仅写入结构化记录，四个维度均为 `0`');
+    expect(readme).toContain('真实交易或委托使信任、商业合作各 `+1`（每日各最多 `+3`）');
+    expect(readme).toContain('明确争执使友情 `-2`、信任 `-1`（每日下限分别为 `-4`、`-2`）');
+    expect(readme).toContain('结构化的双方互惠证据才使亲密倾向 `+1`（每日最多 `+1`）');
+    expect(readme).not.toContain('已完成的普通对话双方友情 `+1`');
   });
 
   test('renders the exact daily empty state in the production fast-summary component', () => {
