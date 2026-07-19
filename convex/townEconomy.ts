@@ -22,6 +22,7 @@ import { internalMutation, internalQuery, type MutationCtx } from './_generated/
 import { MAX_MONEY, MAX_STOCK } from './townEconomyRules';
 import { settlePurchase, settleWork } from './townEconomyRules';
 import { distance } from './util/geometry';
+import { recordInstitutionPurchaseTrade } from './townRelations';
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
 // The final millisecond that still formats as a four-digit Shanghai calendar year.
@@ -821,6 +822,16 @@ export async function settleActivity(
     quantity: economicAction.quantity,
     sourceKey,
     text: `${args.activityText}，实际支付 ${amount} 金贝。`,
+    createdAt: now,
+  });
+  await recordInstitutionPurchaseTrade(ctx, {
+    worldId: args.worldId,
+    buyerResidentId: args.residentId,
+    institutionId: definition.id,
+    item: good.id,
+    quantity: economicAction.quantity,
+    economyIdempotencyKey: idempotencyKey,
+    economySourceKey: sourceKey,
     createdAt: now,
   });
   await recordCompletedActivity(ctx, args, now, `消费完成，实际支付 ${amount} 金贝。`);

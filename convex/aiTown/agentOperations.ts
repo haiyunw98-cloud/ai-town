@@ -166,11 +166,18 @@ export async function generateValidatedResidentMessage(
 }
 
 export async function rememberConversationAndRelease(dependencies: {
+  isWorldRunning?: () => Promise<boolean>;
   remember: () => Promise<unknown>;
+  recordContact?: () => Promise<unknown>;
   release: () => Promise<void>;
 }): Promise<void> {
   try {
-    await dependencies.remember();
+    if (dependencies.isWorldRunning && !await dependencies.isWorldRunning()) return;
+    try {
+      await dependencies.remember();
+    } finally {
+      await dependencies.recordContact?.();
+    }
   } finally {
     await dependencies.release();
   }
@@ -1085,6 +1092,17 @@ export const pendingResidentActivitySettlement = internalQuery({
   handler: pendingResidentActivitySettlementForResident,
 });
 
+export const conversationMemoryWorldRunning = internalQuery({
+  args: { worldId: v.id('worlds') },
+  handler: async (ctx, args) => {
+    const status = await ctx.db
+      .query('worldStatus')
+      .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+      .unique();
+    return status?.status === 'running';
+  },
+});
+
 export async function pendingResidentActivitySettlementForResident(
   ctx: Pick<QueryCtx, 'db'>,
   args: {
@@ -1132,6 +1150,10 @@ export const agentRememberConversation = internalAction({
   },
   handler: async (ctx, args) => {
     await rememberConversationAndRelease({
+      isWorldRunning: () => ctx.runQuery(
+        internal.aiTown.agentOperations.conversationMemoryWorldRunning,
+        { worldId: args.worldId },
+      ),
       remember: () =>
         rememberConversation(
           ctx,
@@ -1140,6 +1162,10 @@ export const agentRememberConversation = internalAction({
           args.playerId as GameId<'players'>,
           args.conversationId as GameId<'conversations'>,
         ),
+      recordContact: () => ctx.runMutation(
+        internal.townRelations.recordConversationContact,
+        { worldId: args.worldId, conversationId: args.conversationId },
+      ),
       release: async () => {
         await sleep(Math.random() * 1000);
         await ctx.runMutation(internal.aiTown.main.sendInput, {

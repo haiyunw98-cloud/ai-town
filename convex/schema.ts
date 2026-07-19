@@ -262,6 +262,57 @@ export default defineSchema({
     .index('idempotencyKey', ['worldId', 'idempotencyKey'])
     .index('day', ['worldId', 'dayKey', 'createdAt']),
 
+  townRelationships: defineTable({
+    worldId: v.id('worlds'),
+    residentA: playerId,
+    residentB: playerId,
+    friendship: v.number(),
+    trust: v.number(),
+    attraction: v.number(),
+    business: v.number(),
+    initialFriendship: v.optional(v.number()),
+    initialTrust: v.optional(v.number()),
+    initialAttraction: v.optional(v.number()),
+    initialBusiness: v.optional(v.number()),
+    initializationSourceKey: v.optional(v.string()),
+    initializedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index('pair', ['worldId', 'residentA', 'residentB'])
+    .index('worldResidentA', ['worldId', 'residentA'])
+    .index('worldResidentB', ['worldId', 'residentB'])
+    .index('world', ['worldId']),
+
+  // Append-only structured facts. The matching relationship update happens in
+  // the same Convex mutation, so either both writes commit or neither does.
+  relationshipChanges: defineTable({
+    worldId: v.id('worlds'),
+    idempotencyKey: v.string(),
+    residentA: playerId,
+    residentB: playerId,
+    kind: v.union(
+      v.literal('conversation'),
+      v.literal('cooperation'),
+      v.literal('trade'),
+      v.literal('care'),
+      v.literal('reciprocal-affection'),
+      v.literal('dispute'),
+    ),
+    reciprocal: v.optional(v.boolean()),
+    friendshipDelta: v.number(),
+    trustDelta: v.number(),
+    attractionDelta: v.number(),
+    businessDelta: v.number(),
+    dayKey: v.string(),
+    sourceKey: v.string(),
+    text: v.string(),
+    createdAt: v.number(),
+  })
+    .index('idempotencyKey', ['worldId', 'idempotencyKey'])
+    .index('pairDay', ['worldId', 'residentA', 'residentB', 'dayKey'])
+    .index('pairTime', ['worldId', 'residentA', 'residentB', 'createdAt'])
+    .index('worldDay', ['worldId', 'dayKey', 'createdAt']),
+
   ...agentTables,
   ...aiTownTables,
   ...engineTables,

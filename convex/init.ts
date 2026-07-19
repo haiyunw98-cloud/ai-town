@@ -13,6 +13,10 @@ import {
   initializeTownEconomy,
   reconcileTownEconomyAfterAgentCreation,
 } from './townEconomy';
+import {
+  initializeTownRelations,
+  reconcileTownRelationsAfterAgentCreation,
+} from './townRelations';
 
 const Descriptions = localizedDescriptions(getWorldLocale());
 
@@ -46,6 +50,7 @@ const init = mutation({
       await ctx.scheduler.runAfter(15_000, internal.events.advanceActiveEvents, {});
     }
     const economy = await initializeTownEconomy(ctx, worldStatus.worldId);
+    const relations = await initializeTownRelations(ctx, worldStatus.worldId);
     if (
       economy.residentCount < Descriptions.length
       && economy.conflictingResidentNames.length === 0
@@ -55,10 +60,20 @@ const init = mutation({
         attempt: 0,
       });
     }
+    if (
+      relations.residentCount < Descriptions.length
+      && relations.conflictingResidentNames.length === 0
+    ) {
+      await ctx.scheduler.runAfter(20_000, internal.init.reconcileTownRelations, {
+        worldId: worldStatus.worldId,
+        attempt: 0,
+      });
+    }
     return {
       worldId: worldStatus.worldId,
       queuedResidents: missingDescriptionIndexes.map((index) => Descriptions[index].name),
       economy,
+      relations,
     };
   },
 });
@@ -69,6 +84,11 @@ export default init;
 export const reconcileTownEconomy = internalMutation({
   args: { worldId: v.id('worlds'), attempt: v.number() },
   handler: async (ctx, args) => reconcileTownEconomyAfterAgentCreation(ctx, args),
+});
+
+export const reconcileTownRelations = internalMutation({
+  args: { worldId: v.id('worlds'), attempt: v.number() },
+  handler: async (ctx, args) => reconcileTownRelationsAfterAgentCreation(ctx, args),
 });
 
 async function getOrCreateDefaultWorld(ctx: MutationCtx) {
