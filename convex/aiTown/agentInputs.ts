@@ -17,6 +17,7 @@ import { segmentConversationGraphemes } from '../util/conversationText';
 
 const Descriptions = localizedDescriptions(getWorldLocale());
 const MAX_EVENT_TRANSFER_DURATION = 2 * 60 * 60_000;
+export const MAX_EVENT_TRANSFER_STALENESS = 2 * 60 * 60_000;
 const EVENT_TRANSFER_DESTINATIONS = [
   eventCheckpoints.dock,
   ...Object.values(trialIslandCheckpoints),
@@ -43,7 +44,11 @@ export function prepareEventTransfer(
   if (game.worldMap.objectTiles.some((layer) => layer[x]?.[y] !== -1)) {
     throw new Error('Event transfer destination must be walkable.');
   }
-  if (!Number.isFinite(args.until) || args.until < now || args.until > now + MAX_EVENT_TRANSFER_DURATION) {
+  if (
+    !Number.isFinite(args.until)
+    || args.until < now - MAX_EVENT_TRANSFER_STALENESS
+    || args.until > now + MAX_EVENT_TRANSFER_DURATION
+  ) {
     throw new Error('Event transfer activity expiry is outside the allowed time window.');
   }
   const trimmed = args.description.trim();
@@ -51,7 +56,7 @@ export function prepareEventTransfer(
   return {
     destination: { x, y },
     description: segmentConversationGraphemes(trimmed).slice(0, 80).join(''),
-    until: args.until,
+    until: Math.max(now, args.until),
   };
 }
 

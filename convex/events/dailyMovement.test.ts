@@ -100,6 +100,14 @@ describe('daily event map movement planning', () => {
     expect(moves.slice(4).every((command) => command.destination.x >= 76)).toBe(true);
   });
 
+  test('preserves a slightly elapsed phase deadline for the delayed input layer to clamp', () => {
+    const elapsedPhaseEnd = now - 5_000;
+    const commands = movement.buildDailyStageMovementCommands(
+      dailyEventTemplates[0], 1, participants, now, elapsedPhaseEnd, true,
+    );
+    expect(commands.every((command) => command.until === elapsedPhaseEnd)).toBe(true);
+  });
+
   test('moves later island stages without another transfer and main-town stages never transfer', () => {
     const island = movement.buildDailyStageMovementCommands(
       dailyEventTemplates[0], 4, participants, now, phaseEndsAt, false,

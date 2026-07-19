@@ -148,7 +148,7 @@ describe('controlled daily event ferry transfer', () => {
   test.each([
     ['', appliedAt + 60_000],
     ['   ', appliedAt + 60_000],
-    ['乘船', appliedAt - 1],
+    ['乘船', appliedAt - 2 * 60 * 60_000 - 1],
     ['乘船', appliedAt + 2 * 60 * 60_000 + 1],
     ['乘船', Number.NaN],
   ])('rejects an invalid description or expiry without partial mutation', (description, until) => {
@@ -160,6 +160,36 @@ describe('controlled daily event ferry transfer', () => {
       description,
       until,
     })).toThrow(/description|until|expiry|time/iu);
+    expect(player).toEqual(before);
+  });
+
+  test('accepts a briefly delayed return command and expires it at engine application time', () => {
+    const { game, player } = ferryGame({ position: trialIslandCheckpoints.awards });
+    const serverQueuedAt = appliedAt - 5_000;
+
+    expect(transfer().handler(game as never, appliedAt, {
+      playerId: 'p:1' as never,
+      destination: { x: 23, y: 6 },
+      description: '乘摆渡船返回主镇，恢复普通生活',
+      until: serverQueuedAt,
+    })).toBeNull();
+
+    expect(player.position).toEqual({ x: 23, y: 6 });
+    expect(player).toEqual(expect.objectContaining({
+      activity: expect.objectContaining({ until: appliedAt }),
+    }));
+  });
+
+  test('rejects a return command delayed by more than two hours without mutation', () => {
+    const { game, player } = ferryGame({ position: trialIslandCheckpoints.awards });
+    const before = structuredClone(player);
+
+    expect(() => transfer().handler(game as never, appliedAt, {
+      playerId: 'p:1' as never,
+      destination: { x: 23, y: 6 },
+      description: '过期返程',
+      until: appliedAt - 2 * 60 * 60_000 - 1,
+    })).toThrow(/expiry|stale|time|window/iu);
     expect(player).toEqual(before);
   });
 

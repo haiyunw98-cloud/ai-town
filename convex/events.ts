@@ -143,7 +143,7 @@ export function buildDailyStageMovementCommands(
       destinationByIndex.set(participantIndex, offsets[offsetIndex]);
     });
   }
-  const until = Math.max(now, phaseEndsAt);
+  const until = phaseEndsAt;
   const transfers: DailyMovementCommand[] = template.venue === 'trial-island'
     && stageIndex > 0 && includeIslandTransfer
     ? participants.map((participant) => ({
