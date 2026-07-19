@@ -12,6 +12,14 @@ export type BackgroundLifeAction = {
   kind: BackgroundLifeActionKind;
 };
 
+export function backgroundLifeModeForWorldStatus(
+  status: 'running' | 'inactive' | 'stoppedByDeveloper',
+) {
+  if (status === 'inactive') return 'simulate' as const;
+  if (status === 'stoppedByDeveloper') return 'hold-without-catch-up' as const;
+  return 'foreground' as const;
+}
+
 export function floorBackgroundLifeSlot(timestamp: number) {
   assertTimestamp(timestamp);
   return Math.floor(timestamp / BACKGROUND_LIFE_SLOT_MS) * BACKGROUND_LIFE_SLOT_MS;

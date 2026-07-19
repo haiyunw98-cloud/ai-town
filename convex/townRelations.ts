@@ -155,9 +155,26 @@ export async function reconcileTownRelationsAfterAgentCreation(
 }
 
 export async function recordRelationEvent(ctx: RelationContext, event: RelationEvent) {
+  return recordRelationEventForStatus(ctx, event, 'running');
+}
+
+export async function recordInactiveRelationEvent(
+  ctx: RelationContext,
+  event: RelationEvent,
+) {
+  return recordRelationEventForStatus(ctx, event, 'inactive');
+}
+
+async function recordRelationEventForStatus(
+  ctx: RelationContext,
+  event: RelationEvent,
+  requiredStatus: 'running' | 'inactive',
+) {
   validateEvent(event);
   const status = await worldStatus(ctx, event.worldId);
-  if (!status || status.status !== 'running') return relationResult('world-not-running', ZERO);
+  if (!status || status.status !== requiredStatus) {
+    return relationResult('world-not-running', ZERO);
+  }
   const [residentA, residentB] = sortedPair(event.residentA, event.residentB);
   const dayKey = shanghaiRelationDayKey(event.createdAt);
   const existing = await ctx.db

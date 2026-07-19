@@ -92,19 +92,30 @@ describe('daily event Shanghai schedule', () => {
   });
 });
 
-describe('daily event action while the world is paused or stopped', () => {
+describe('daily event action while the world is unobserved or stopped', () => {
   const live = Date.parse('2026-07-17T05:15:00Z');
   const after = Date.parse('2026-07-17T06:00:00Z');
 
-  test.each(['inactive', 'stoppedByDeveloper'] as const)(
-    'does not create or advance an event while world status is %s',
-    (worldStatus) => {
-      expect(dailyEventAction(live, worldStatus, null)).toEqual({ kind: 'none' });
-      expect(
-        dailyEventAction(live, worldStatus, existingEvent('2026-07-17', 'running', 1)),
-      ).toEqual({ kind: 'none' });
-    },
-  );
+  test('continues deterministic event life while nobody is observing', () => {
+    expect(dailyEventAction(live, 'inactive', null)).toEqual({
+      kind: 'create',
+      stageIndex: 4,
+    });
+    expect(
+      dailyEventAction(live, 'inactive', existingEvent('2026-07-17', 'running', 1)),
+    ).toEqual({ kind: 'advance', stageIndex: 4 });
+  });
+
+  test('does not create or advance an event during a manual pause', () => {
+    expect(dailyEventAction(live, 'stoppedByDeveloper', null)).toEqual({ kind: 'none' });
+    expect(
+      dailyEventAction(
+        live,
+        'stoppedByDeveloper',
+        existingEvent('2026-07-17', 'running', 1),
+      ),
+    ).toEqual({ kind: 'none' });
+  });
 
   test('catches a running world up to the current stage without duplicate advancement', () => {
     expect(dailyEventAction(live, 'running', null)).toEqual({
@@ -132,7 +143,7 @@ describe('daily event action while the world is paused or stopped', () => {
     ).toEqual({ kind: 'archive', stageIndex: 6 });
     expect(
       dailyEventAction(after, 'inactive', existingEvent('2026-07-17', 'running', 4)),
-    ).toEqual({ kind: 'archive-paused' });
+    ).toEqual({ kind: 'archive', stageIndex: 6 });
     expect(
       dailyEventAction(
         after,

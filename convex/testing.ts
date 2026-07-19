@@ -69,11 +69,19 @@ export const stop = mutation({
   handler: async (ctx) => {
     if (process.env.STOP_NOT_ALLOWED) throw new Error('Stop not allowed');
     const { worldStatus, engine } = await getDefaultWorld(ctx.db);
-    if (worldStatus.status === 'inactive' || worldStatus.status === 'stoppedByDeveloper') {
+    if (worldStatus.status === 'stoppedByDeveloper') {
       if (engine.running) {
         throw new Error(`Engine ${engine._id} isn't stopped?`);
       }
-      console.debug(`World ${worldStatus.worldId} is already inactive`);
+      console.debug(`World ${worldStatus.worldId} is already stopped by developer`);
+      return;
+    }
+    if (worldStatus.status === 'inactive') {
+      if (engine.running) {
+        throw new Error(`Inactive engine ${engine._id} isn't stopped?`);
+      }
+      console.log(`Converting inactive world ${worldStatus.worldId} to a manual pause...`);
+      await ctx.db.patch(worldStatus._id, { status: 'stoppedByDeveloper' });
       return;
     }
     console.log(`Stopping engine ${engine._id}...`);

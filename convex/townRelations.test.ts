@@ -4,6 +4,7 @@ import type { Id } from './_generated/dataModel';
 import { residentLifeProfiles } from '../data/worlds/lighthouse-town/lives';
 import {
   initializeTownRelations,
+  recordInactiveRelationEvent,
   recordCompletedConversationContact,
   recordInstitutionPurchaseTrade,
   recordRelationEvent,
@@ -482,6 +483,23 @@ describe('town relationship persistence', () => {
     });
     expect(state.db.table('townRelationships')).toHaveLength(0);
     expect(state.db.table('relationshipChanges')).toHaveLength(0);
+  });
+
+  test('records background relations only for inactive worlds', async () => {
+    const inactive = fixture('inactive');
+    addAllResidents(inactive.db);
+    expect(await recordInactiveRelationEvent(inactive.ctx, event('cooperation'))).toMatchObject({
+      status: 'recorded',
+      deltas: { friendship: 1, trust: 1 },
+    });
+    expect(inactive.db.table('relationshipChanges')).toHaveLength(1);
+
+    const paused = fixture('stoppedByDeveloper');
+    addAllResidents(paused.db);
+    expect(await recordInactiveRelationEvent(paused.ctx, event('care'))).toMatchObject({
+      status: 'world-not-running',
+    });
+    expect(paused.db.table('relationshipChanges')).toHaveLength(0);
   });
 
   test('does not call memory, contact recording or a model path while paused', async () => {

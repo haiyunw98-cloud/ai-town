@@ -305,7 +305,27 @@ export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
         }
       : null,
   );
-  if (action.kind === 'none') return action;
+  if (action.kind === 'none') {
+    // An event may have advanced logically while the world was unobserved. As
+    // soon as an observer returns, idempotently materialize its current map
+    // stage so the visible world catches up without replaying past movement.
+    if (
+      worldStatus.status === 'running'
+      && existing?.dailyKey
+      && existing.status === 'running'
+    ) {
+      const persisted = await loadPersistedDailyDraft(ctx, existing._id);
+      await queuePersistedDailyStageMovement(
+        ctx,
+        worldStatus.worldId,
+        existing._id,
+        persisted.event,
+        persisted.participants,
+        now,
+      );
+    }
+    return action;
+  }
 
   if (action.kind === 'record-missed') {
     const draft = buildMissedDailyEventDraft(
@@ -346,22 +366,38 @@ export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
     });
     const eventId = await insertDailyDraft(ctx, worldStatus.worldId, draft);
     await recordDailyParticipation(ctx, worldStatus.worldId, eventId, draft.participants, now);
-    await queuePersistedDailyStageMovement(
-      ctx, worldStatus.worldId, eventId, draft.event, draft.participants, now,
-    );
+    if (worldStatus.status === 'running') {
+      await queuePersistedDailyStageMovement(
+        ctx, worldStatus.worldId, eventId, draft.event, draft.participants, now,
+      );
+    }
     if (action.stageIndex > 0) {
       await advancePersistedDailyEvent(
-        ctx, eventId, worldStatus.worldId, action.stageIndex, now, dayKey,
+        ctx,
+        eventId,
+        worldStatus.worldId,
+        action.stageIndex,
+        now,
+        dayKey,
+        worldStatus.status === 'running',
       );
-    } else {
+    } else if (worldStatus.status === 'running') {
       await ctx.scheduler.runAfter(0, internal.events.generateDailyTheme, { eventId });
     }
-    await ctx.scheduler.runAfter(0, internal.events.generateNextDecision, {});
+    if (worldStatus.status === 'running') {
+      await ctx.scheduler.runAfter(0, internal.events.generateNextDecision, {});
+    }
     return { kind: 'create' as const, dayKey, eventId, stageIndex: action.stageIndex };
   }
   if (!existing?.dailyKey) throw new Error('Legacy events are archive-only.');
   await advancePersistedDailyEvent(
-    ctx, existing._id, worldStatus.worldId, action.stageIndex, now, dayKey,
+    ctx,
+    existing._id,
+    worldStatus.worldId,
+    action.stageIndex,
+    now,
+    dayKey,
+    worldStatus.status === 'running',
   );
   return { kind: action.kind, dayKey, eventId: existing._id, stageIndex: action.stageIndex };
 }
@@ -1044,6 +1080,7 @@ async function advancePersistedDailyEvent(
   targetStageIndex: number,
   now: number,
   dayKey: string,
+  movementEnabled = true,
 ) {
   const draft = await loadPersistedDailyDraft(ctx, eventId);
   if (draft.event.dailyKey !== dayKey || draft.event.status === 'completed') return;
@@ -1060,11 +1097,13 @@ async function advancePersistedDailyEvent(
   await applyDailyDraft(ctx, eventId, persisted);
   if (persisted.event.status === 'completed') {
     await settleDailyEventRewards(ctx, { worldId, eventId, dayKey, hostServices: null, now });
-    await queuePersistedDailyReturnMovement(
-      ctx, worldId, eventId, persisted.event, persisted.participants, now,
-    );
+    if (movementEnabled) {
+      await queuePersistedDailyReturnMovement(
+        ctx, worldId, eventId, persisted.event, persisted.participants, now,
+      );
+    }
     await recordDailyReturn(ctx, worldId, eventId, persisted.participants, now, 'completed');
-  } else {
+  } else if (movementEnabled) {
     await queuePersistedDailyStageMovement(
       ctx, worldId, eventId, persisted.event, persisted.participants, now,
     );

@@ -14,6 +14,7 @@ import {
   reconcileTownEconomyAfterAgentCreation,
   shanghaiEconomyDayKey,
   settleActivity,
+  settleInactiveBackgroundEconomy,
   settleDailyEventRewards,
   validateActivityRegistration,
 } from './townEconomy';
@@ -308,6 +309,43 @@ function seedWorldStatus(
 }
 
 describe('town economy persistence', () => {
+  test('settles idempotent work only while the world is inactive', async () => {
+    const fixture = settlementContext({ status: 'inactive' });
+    const args = {
+      worldId,
+      residentId: 'p:2',
+      slot: now,
+      idempotencyKey: 'background:worlds.test:1784424600000:work',
+      action: { kind: 'work' as const },
+    };
+    expect(await settleInactiveBackgroundEconomy(fixture.ctx, args)).toMatchObject({
+      status: 'settled',
+      amount: 16,
+    });
+    expect(await settleInactiveBackgroundEconomy(fixture.ctx, args)).toMatchObject({
+      status: 'already-settled',
+      amount: 16,
+    });
+    expect(fixture.db.table('economyLedger')).toHaveLength(1);
+    expect(fixture.db.table('lifeEvents')).toContainEqual(expect.objectContaining({
+      kind: 'background-work',
+      sourceKey: `${args.idempotencyKey}:life`,
+    }));
+  });
+
+  test('manual pause forbids background settlement without initializing economy', async () => {
+    const fixture = settlementContext({ status: 'stoppedByDeveloper' });
+    expect(await settleInactiveBackgroundEconomy(fixture.ctx, {
+      worldId,
+      residentId: 'p:2',
+      slot: now,
+      idempotencyKey: 'background:worlds.test:1784424600000:work',
+      action: { kind: 'work' },
+    })).toEqual({ status: 'world-not-inactive' });
+    expect(fixture.db.table('economyLedger')).toHaveLength(0);
+    expect(fixture.db.table('townInstitutions')).toHaveLength(0);
+  });
+
   test('declares resident, institution and immutable ledger tables with lookup indexes', () => {
     const schema = readFileSync('convex/schema.ts', 'utf8');
     expect(schema).toContain('residentEconomy: defineTable');
@@ -2264,7 +2302,7 @@ type SettlementOverrides = {
   activityText?: string;
   now?: number;
   position?: { x: number; y: number };
-  status?: 'running' | 'stoppedByDeveloper';
+  status?: 'running' | 'inactive' | 'stoppedByDeveloper';
   startingBalance?: number;
   dailyAdvanced?: boolean;
 };

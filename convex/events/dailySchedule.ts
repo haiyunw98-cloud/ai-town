@@ -100,7 +100,7 @@ export function dailyEventAction(
   if (window.state === 'before' || existing?.status === 'completed') return { kind: 'none' };
 
   if (window.state === 'live') {
-    if (worldStatus !== 'running') return { kind: 'none' };
+    if (worldStatus === 'stoppedByDeveloper') return { kind: 'none' };
     if (!existing) return { kind: 'create', stageIndex: window.stageIndex };
     return existing.stageIndex < window.stageIndex
       ? { kind: 'advance', stageIndex: window.stageIndex }
@@ -108,6 +108,6 @@ export function dailyEventAction(
   }
 
   if (!existing) return { kind: 'record-missed' };
-  if (worldStatus !== 'running') return { kind: 'archive-paused' };
+  if (worldStatus === 'stoppedByDeveloper') return { kind: 'archive-paused' };
   return { kind: 'archive', stageIndex: 6 };
 }

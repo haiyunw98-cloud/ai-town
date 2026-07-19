@@ -63,8 +63,11 @@ export const heartbeatWorld = mutation({
 });
 
 export const stopInactiveWorlds = internalMutation({
-  handler: async (ctx) => {
-    const cutoff = Date.now() - IDLE_WORLD_TIMEOUT;
+  args: { now: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const now = args.now ?? Date.now();
+    if (!Number.isSafeInteger(now) || now < 0) throw new Error('Invalid inactivity clock');
+    const cutoff = now - IDLE_WORLD_TIMEOUT;
     const worlds = await ctx.db.query('worldStatus').collect();
     for (const worldStatus of worlds) {
       if (cutoff < worldStatus.lastViewed || worldStatus.status !== 'running') {

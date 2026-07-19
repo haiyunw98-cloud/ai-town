@@ -34,6 +34,7 @@ import { MAX_MONEY, MAX_STOCK } from './townEconomyRules';
 import { settlePurchase, settleWork } from './townEconomyRules';
 import { distance } from './util/geometry';
 import { recordInstitutionPurchaseTrade } from './townRelations';
+import { recordActivityFact } from './lives';
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
 // The final millisecond that still formats as a four-digit Shanghai calendar year.
@@ -353,6 +354,202 @@ export async function ensureDailyEconomyAdvanced(
   }
   await ctx.db.insert('dailyEconomyDays', { worldId, dayKey, advancedAt: now });
   return true;
+}
+
+export type BackgroundEconomyAction =
+  | { kind: 'work' }
+  | { kind: 'purchase'; institutionId: string; goodId: GoodId };
+
+export async function settleInactiveBackgroundEconomy(
+  ctx: EconomyDbContext,
+  args: {
+    worldId: Id<'worlds'>;
+    residentId: string;
+    slot: number;
+    idempotencyKey: string;
+    action: BackgroundEconomyAction;
+  },
+) {
+  assertDateTimestamp(args.slot, 'background life slot');
+  assertCanonicalKey(args.idempotencyKey, 'background life idempotencyKey');
+  const status = await ctx.db
+    .query('worldStatus')
+    .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+    .unique();
+  if (!status || status.status !== 'inactive') {
+    return { status: 'world-not-inactive' as const };
+  }
+  const prior = await ctx.db
+    .query('economyLedger')
+    .withIndex('idempotencyKey', (q) =>
+      q.eq('worldId', args.worldId).eq('idempotencyKey', args.idempotencyKey),
+    )
+    .unique();
+  if (prior) return { status: 'already-settled' as const, amount: prior.amount };
+
+  await initializeTownEconomy(ctx, args.worldId, args.slot);
+  await ensureDailyEconomyAdvanced(ctx, args.worldId, args.slot);
+  const account = await ctx.db
+    .query('residentEconomy')
+    .withIndex('resident', (q) =>
+      q.eq('worldId', args.worldId).eq('residentId', args.residentId),
+    )
+    .unique();
+  if (!account) return { status: 'resident-account-missing' as const };
+  const profile = residentProfile(account.profileId);
+  const dayKey = shanghaiEconomyDayKey(args.slot);
+  const residentIncome = account.dayKey === dayKey ? account.todayIncome : 0;
+  const residentExpense = account.dayKey === dayKey ? account.todayExpense : 0;
+  const definition = args.action.kind === 'work'
+    ? institutionDefinition(profile.institutionId)
+    : institutionDefinition(args.action.institutionId);
+  const institution = await ctx.db
+    .query('townInstitutions')
+    .withIndex('institution', (q) =>
+      q.eq('worldId', args.worldId).eq('institutionId', definition.id),
+    )
+    .unique();
+  if (!institution) return { status: 'institution-missing' as const };
+  const institutionIncome = institution.dayKey === dayKey ? institution.todayIncome : 0;
+  const institutionExpense = institution.dayKey === dayKey ? institution.todayExpense : 0;
+  const visitors = institution.dayKey === dayKey ? institution.visitorCount : 0;
+  const sourceKey = args.idempotencyKey;
+
+  if (args.action.kind === 'work') {
+    const output = profile.workOutput;
+    const counters = output.kind === 'stock'
+      ? parseCounterJson(institution.stockJson)
+      : parseCounterJson(institution.serviceCountersJson);
+    const item = output.kind === 'stock' ? output.item : output.serviceId;
+    const result = settleWork(
+      {
+        residentBalance: account.balance,
+        institutionCash: institution.cash,
+        stock: counters[item] ?? 0,
+      },
+      { pay: profile.compensation.amount, output: output.quantity },
+    );
+    if (!result.ok) return { status: 'rejected' as const, reason: 'invalid-work-state' as const };
+    const amount = result.residentBalance - account.balance;
+    counters[item] = result.stock;
+    const needs = decayResidentNeeds(account);
+    await ctx.db.patch(account._id, {
+      balance: result.residentBalance,
+      hunger: needs.hunger,
+      energy: needs.energy,
+      todayIncome: residentIncome + amount,
+      todayExpense: residentExpense,
+      dayKey,
+      updatedAt: Math.max(account.updatedAt, args.slot),
+    });
+    await ctx.db.patch(institution._id, {
+      cash: result.institutionCash,
+      ...(output.kind === 'stock'
+        ? { stockJson: JSON.stringify(counters) }
+        : { serviceCountersJson: JSON.stringify(counters) }),
+      todayIncome: institutionIncome,
+      todayExpense: institutionExpense + amount,
+      visitorCount: visitors,
+      dayKey,
+      updatedAt: Math.max(institution.updatedAt, args.slot),
+    });
+    const text = `${profile.name}在${definition.name}完成日常工作，实际获得 ${amount} 金贝。`;
+    await appendEconomyLedger(ctx, {
+      worldId: args.worldId,
+      idempotencyKey: args.idempotencyKey,
+      dayKey,
+      residentId: args.residentId,
+      institutionId: definition.id,
+      kind: 'work',
+      amount,
+      expectedAmount: profile.compensation.amount,
+      compensationKind: profile.compensation.kind,
+      item,
+      quantity: output.quantity,
+      sourceKey,
+      text,
+      createdAt: args.slot,
+    });
+    await recordActivityFact(ctx, {
+      worldId: args.worldId,
+      residentId: args.residentId,
+      kind: 'background-work',
+      text,
+      createdAt: args.slot,
+      sourceKey: `${sourceKey}:life`,
+      category: 'work',
+      landmarkId: definition.landmarkId,
+    });
+    return { status: 'settled' as const, amount };
+  }
+
+  if (args.action.kind !== 'purchase') {
+    throw new Error('Unsupported background economy action');
+  }
+  const purchaseAction = args.action;
+  const good = goods.find((candidate) => candidate.id === purchaseAction.goodId);
+  if (!good || !definition.goods.includes(good.id)) {
+    return { status: 'purchase-good-mismatch' as const };
+  }
+  const stock = parseCounterJson(institution.stockJson);
+  const result = settlePurchase(
+    {
+      residentBalance: account.balance,
+      institutionCash: institution.cash,
+      stock: stock[good.id] ?? 0,
+    },
+    { price: good.price, quantity: 1 },
+  );
+  if (!result.ok) {
+    return { status: 'rejected' as const, reason: 'insufficient-funds-or-stock' as const };
+  }
+  const amount = account.balance - result.residentBalance;
+  stock[good.id] = result.stock;
+  const needs = decayResidentNeeds(account);
+  await ctx.db.patch(account._id, {
+    balance: result.residentBalance,
+    hunger: Math.min(100, needs.hunger + (good.id === 'meal' ? 25 : 12)),
+    energy: needs.energy,
+    todayIncome: residentIncome,
+    todayExpense: residentExpense + amount,
+    dayKey,
+    updatedAt: Math.max(account.updatedAt, args.slot),
+  });
+  await ctx.db.patch(institution._id, {
+    cash: result.institutionCash,
+    stockJson: JSON.stringify(stock),
+    todayIncome: institutionIncome + amount,
+    todayExpense: institutionExpense,
+    visitorCount: visitors + 1,
+    dayKey,
+    updatedAt: Math.max(institution.updatedAt, args.slot),
+  });
+  const text = `${profile.name}在${definition.name}购买${good.name}，实际支付 ${amount} 金贝。`;
+  await appendEconomyLedger(ctx, {
+    worldId: args.worldId,
+    idempotencyKey: args.idempotencyKey,
+    dayKey,
+    residentId: args.residentId,
+    institutionId: definition.id,
+    kind: 'purchase',
+    amount,
+    item: good.id,
+    quantity: 1,
+    sourceKey,
+    text,
+    createdAt: args.slot,
+  });
+  await recordActivityFact(ctx, {
+    worldId: args.worldId,
+    residentId: args.residentId,
+    kind: 'background-purchase',
+    text,
+    createdAt: args.slot,
+    sourceKey: `${sourceKey}:life`,
+    category: 'food',
+    landmarkId: definition.landmarkId,
+  });
+  return { status: 'settled' as const, amount };
 }
 
 async function latestDailyEconomyMarker(

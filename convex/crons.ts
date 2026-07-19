@@ -14,6 +14,7 @@ crons.interval(
   'stop inactive worlds',
   { seconds: IDLE_WORLD_TIMEOUT / 1000 },
   internal.world.stopInactiveWorlds,
+  {},
 );
 
 crons.interval('restart dead worlds', { seconds: 60 }, internal.world.restartDeadWorlds);
@@ -24,6 +25,13 @@ crons.interval(
   'advance daily town economy',
   { seconds: 60 },
   internal.townEconomy.advanceDailyEconomyTick,
+  {},
+);
+
+crons.interval(
+  'advance background town life',
+  { minutes: 5 },
+  internal.backgroundLife.advanceBackgroundLifeTick,
   {},
 );
 

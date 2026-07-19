@@ -3,6 +3,7 @@ import {
   BACKGROUND_LIFE_SLOT_MS,
   backgroundLifeActionForSlot,
   backgroundLifeIdempotencyKey,
+  backgroundLifeModeForWorldStatus,
   backgroundLifeSlotsToProcess,
   floorBackgroundLifeSlot,
 } from './backgroundLifeRules';
@@ -65,6 +66,14 @@ describe('background life deterministic rules', () => {
   test('builds canonical replay-safe keys', () => {
     expect(backgroundLifeIdempotencyKey('worlds:abc', shanghaiMorning, 'work')).toBe(
       `background:worlds:abc:${floorBackgroundLifeSlot(shanghaiMorning)}:work`,
+    );
+  });
+
+  test('simulates only inactive worlds and treats manual pause as a hard stop', () => {
+    expect(backgroundLifeModeForWorldStatus('inactive')).toBe('simulate');
+    expect(backgroundLifeModeForWorldStatus('running')).toBe('foreground');
+    expect(backgroundLifeModeForWorldStatus('stoppedByDeveloper')).toBe(
+      'hold-without-catch-up',
     );
   });
 
