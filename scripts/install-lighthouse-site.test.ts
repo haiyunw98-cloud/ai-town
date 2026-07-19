@@ -15,6 +15,8 @@ describe('Lighthouse Town site installer', () => {
     expect(source).not.toContain('/Users/why');
     expect(source).toContain('command -v node');
     expect(source).toContain('command -v npm');
+    expect(source).toContain('command -v screen');
+    expect(source).toContain('command -v pgrep');
     expect(source).not.toContain('command -v npx');
   });
 
@@ -23,8 +25,8 @@ describe('Lighthouse Town site installer', () => {
     const trap = source.indexOf("trap 'restore_dist_on_exit $?' EXIT");
     const build = source.indexOf('"$NPM_BIN" run build');
     const discard = source.indexOf('rm -rf "$DIST_BACKUP"', build);
-    const stop = source.indexOf('stop_managed_process', discard);
-    const preview = source.indexOf('nohup "$NODE_BIN" "$VITE_ENTRY" preview');
+    const stop = source.indexOf('stop_managed_session', discard);
+    const preview = source.indexOf('"$SCREEN_BIN" -DmS "$FRONTEND_SESSION"', stop);
     expect(backup).toBeGreaterThan(-1);
     expect(trap).toBeGreaterThan(backup);
     expect(build).toBeGreaterThan(trap);
@@ -42,23 +44,29 @@ describe('Lighthouse Town site installer', () => {
     expect(source).toContain('BACKEND_PORT=3210');
     expect(source).not.toContain('5173');
     expect(source).not.toContain('pkill');
-    expect(source).not.toContain('screen -S');
-    expect(source).not.toContain('launchctl bootout');
+    expect(source).toContain('"$SCREEN_BIN" -S "$session" -X quit');
+    expect(source).toContain('"$SCREEN_BIN" -DmS "$BACKEND_SESSION"');
+    expect(source).toContain('"$SCREEN_BIN" -DmS "$FRONTEND_SESSION"');
+    expect(source).toContain('for _ in {1..60}');
+    expect(source).toContain('listing="$("$SCREEN_BIN" -ls 2>/dev/null || true)"');
   });
 
-  test('manages only verified pid-file processes and keeps separate logs', () => {
-    expect(source).toContain('frontend.pid');
-    expect(source).toContain('backend.pid');
-    expect(source).toContain('kill -0');
-    expect(source).toContain('ps -p');
+  test('manages only dedicated detached sessions and keeps separate logs', () => {
+    expect(source).toContain('lighthouse-town-frontend');
+    expect(source).toContain('lighthouse-town-backend');
     expect(source).toContain('frontend.log');
     expect(source).toContain('frontend-error.log');
     expect(source).toContain('backend.log');
     expect(source).toContain('backend-error.log');
+    expect(source).toContain('frontend.pid');
+    expect(source).toContain('backend.pid');
+    expect(source).toContain('ps -p "$pid" -o command=');
+    expect(source).toContain('"$PGREP_BIN" -P "$pid"');
+    expect(source).toContain('Refusing to stop unmanaged PID');
     expect(source).toContain('node_modules/convex/bin/main.js');
     expect(source).toContain('node_modules/vite/bin/vite.js');
-    expect(source).toContain('stop_managed_process "$FRONTEND_PID_FILE" "$VITE_ENTRY"');
-    expect(source).toContain('stop_managed_process "$BACKEND_PID_FILE" "$CONVEX_ENTRY"');
+    expect(source).toContain('stop_managed_session "$FRONTEND_SESSION"');
+    expect(source).toContain('stop_managed_session "$BACKEND_SESSION"');
     expect(source).not.toContain('"/node_modules/vite/bin/vite.js"');
     expect(source).not.toContain('"/node_modules/convex/bin/main.js"');
   });

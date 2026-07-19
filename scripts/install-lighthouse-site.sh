@@ -13,9 +13,14 @@ NODE_BIN="$(command -v node)"
 NPM_BIN="$(command -v npm)"
 CURL_BIN="$(command -v curl)"
 NC_BIN="$(command -v nc)"
+SCREEN_BIN="$(command -v screen)"
+PGREP_BIN="$(command -v pgrep)"
 
 CONVEX_ENTRY="$ROOT/node_modules/convex/bin/main.js"
 VITE_ENTRY="$ROOT/node_modules/vite/bin/vite.js"
+BACKEND_SESSION="lighthouse-town-backend"
+FRONTEND_SESSION="lighthouse-town-frontend"
+PROCESS_RUNNER="$SCRIPT_DIR/run-lighthouse-process.sh"
 BACKEND_PID_FILE="$STATE_DIR/backend.pid"
 FRONTEND_PID_FILE="$STATE_DIR/frontend.pid"
 DIST_DIR="$ROOT/dist"
@@ -72,6 +77,22 @@ restore_dist_on_exit() {
   exit "$status"
 }
 
+managed_session_running() {
+  local session="$1"
+  local listing
+  # macOS screen returns status 1 even when it successfully lists sessions, so
+  # inspect its output directly instead of using its exit status in a pipeline.
+  listing="$("$SCREEN_BIN" -ls 2>/dev/null || true)"
+  [[ "$listing" == *".$session"* ]]
+}
+
+stop_managed_session() {
+  local session="$1"
+  if managed_session_running "$session"; then
+    "$SCREEN_BIN" -S "$session" -X quit
+  fi
+}
+
 stop_managed_process() {
   local pid_file="$1"
   local expected_entry="$2"
@@ -83,7 +104,11 @@ stop_managed_process() {
     local command_line
     command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
     if [[ "$command_line" == *"$expected_entry"* ]]; then
-      kill "$pid"
+      local child
+      for child in "${(@f)$("$PGREP_BIN" -P "$pid" 2>/dev/null || true)}"; do
+        [[ "$child" == <-> ]] && kill "$child" 2>/dev/null || true
+      done
+      kill "$pid" 2>/dev/null || true
       for _ in {1..20}; do
         kill -0 "$pid" 2>/dev/null || break
         sleep 0.1
@@ -111,8 +136,10 @@ main() {
   trap - EXIT INT TERM
   rm -rf "$DIST_BACKUP"
 
-  # PID files are advisory: the exact absolute entry path must still match this
-  # checkout before the process may be stopped.
+  # Stop only the two named detached sessions owned by Lighthouse Town.
+  # Unrelated Vite, Convex, and Ollama processes are never searched for or killed.
+  stop_managed_session "$FRONTEND_SESSION"
+  stop_managed_session "$BACKEND_SESSION"
   stop_managed_process "$FRONTEND_PID_FILE" "$VITE_ENTRY"
   stop_managed_process "$BACKEND_PID_FILE" "$CONVEX_ENTRY"
   sleep 1
@@ -126,26 +153,18 @@ main() {
     exit 1
   fi
 
-  (
-    cd "$ROOT"
-    nohup "$NODE_BIN" "$CONVEX_ENTRY" dev --tail-logs \
-      >> "$LOGS/backend.log" 2>> "$LOGS/backend-error.log" &
-    echo $! > "$BACKEND_PID_FILE"
-  )
+  "$SCREEN_BIN" -DmS "$BACKEND_SESSION" "$PROCESS_RUNNER" \
+    "$ROOT" "$LOGS/backend.log" "$LOGS/backend-error.log" "$BACKEND_PID_FILE" \
+    "$NODE_BIN" "$CONVEX_ENTRY" dev --tail-logs &!
+  "$SCREEN_BIN" -DmS "$FRONTEND_SESSION" "$PROCESS_RUNNER" \
+    "$ROOT" "$LOGS/frontend.log" "$LOGS/frontend-error.log" "$FRONTEND_PID_FILE" \
+    "$NODE_BIN" "$VITE_ENTRY" preview --host 127.0.0.1 \
+    --port "$FRONTEND_PORT" --strictPort &!
 
-  (
-    cd "$ROOT"
-    nohup "$NODE_BIN" "$VITE_ENTRY" preview --host 127.0.0.1 \
-      --port "$FRONTEND_PORT" --strictPort \
-      >> "$LOGS/frontend.log" 2>> "$LOGS/frontend-error.log" &
-    echo $! > "$FRONTEND_PID_FILE"
-  )
-
-  for _ in {1..20}; do
-    backend_pid="$(<"$BACKEND_PID_FILE")"
-    frontend_pid="$(<"$FRONTEND_PID_FILE")"
-    if kill -0 "$backend_pid" 2>/dev/null \
-      && kill -0 "$frontend_pid" 2>/dev/null \
+  # A cold local Convex start can take more than twenty seconds on a busy laptop.
+  for _ in {1..60}; do
+    if managed_session_running "$BACKEND_SESSION" \
+      && managed_session_running "$FRONTEND_SESSION" \
       && "$CURL_BIN" -fsS "http://127.0.0.1:$FRONTEND_PORT/ai-town/" >/dev/null \
       && "$NC_BIN" -z 127.0.0.1 "$BACKEND_PORT"; then
       echo "Lighthouse Town site installed: http://localhost:$FRONTEND_PORT/ai-town"
@@ -154,6 +173,8 @@ main() {
     sleep 1
   done
 
+  stop_managed_session "$FRONTEND_SESSION"
+  stop_managed_session "$BACKEND_SESSION"
   stop_managed_process "$FRONTEND_PID_FILE" "$VITE_ENTRY"
   stop_managed_process "$BACKEND_PID_FILE" "$CONVEX_ENTRY"
   echo "Lighthouse Town site failed its startup health check" >&2

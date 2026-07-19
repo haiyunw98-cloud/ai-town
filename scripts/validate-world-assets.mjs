@@ -50,7 +50,14 @@ export function validateResidentPhotoAssets(profiles, publicDir) {
 
 export async function validateWorldAssets(root = resolve(import.meta.dirname, '..')) {
 const assetDir = resolve(root, 'public/assets/worlds/lighthouse-town');
-const requiredAssets = ['tileset.svg', 'residents.svg', 'event-poster-v1.png', 'asset-sources.md'];
+const requiredAssets = [
+  'tileset.svg',
+  'residents.svg',
+  'playable-map-v1.webp',
+  'trial-island-v1.jpg',
+  'event-poster-v1.png',
+  'asset-sources.md',
+];
 const failures = [];
 
 const chineseReadme = resolve(root, 'README.zh-CN.md');

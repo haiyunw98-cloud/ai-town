@@ -400,6 +400,34 @@ describe('event broadcast view model', () => {
     });
   });
 
+  test('keeps a missed daily window in the town chronicle instead of creating a fake past competition', () => {
+    const missed: BroadcastSnapshot = {
+      ...running,
+      event: {
+        ...running.event!,
+        name: '当日活动未举行',
+        status: 'completed',
+        phase: 'missed',
+        templateId: 'none',
+        dailyKey: '2026-07-19',
+      },
+      participants: [],
+      logs: [{
+        eventKey: '2026-07-19:missed',
+        sequence: 1,
+        kind: 'announcement',
+        text: '当日活动窗口已经错过，没有参赛者或奖金。',
+        createdAt: 80_000,
+      }],
+    };
+
+    const view = buildBroadcastView(missed, 'zh-CN', 80_000);
+    expect(view.mode).toBe('chronicle');
+    expect(view.presentation).toBe('chronicle');
+    expect(view.title).toBe('今日活动记录');
+    expect(view.history).toBeNull();
+  });
+
   test('builds a collapsed native disclosure contract with a compact winner summary', () => {
     const archive = buildCompletedArchiveView('往届赛事记录', '顾潮', 'zh-CN');
 

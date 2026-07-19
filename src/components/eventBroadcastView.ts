@@ -716,6 +716,16 @@ export function buildBroadcastView(snapshot: BroadcastSnapshot, locale: Locale, 
   const winnerName = snapshot.participants.find(
     (participant) => participant.residentId === snapshot.event?.winnerId,
   )?.displayName;
+  if (snapshot.event.templateId === 'none' || snapshot.event.phase === 'missed') {
+    return {
+      mode: 'chronicle' as const,
+      presentation: 'chronicle' as const,
+      title: locale === 'zh-CN' ? '今日活动记录' : 'Today’s Event Record',
+      live: null,
+      history: null,
+      winnerName: undefined,
+    };
+  }
   if (snapshot.event.status === 'completed') {
     const champion = winnerName ?? (locale === 'zh-CN' ? '未记录' : 'Not recorded');
     return {
