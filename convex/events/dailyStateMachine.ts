@@ -226,16 +226,84 @@ function validateState(state: DailyEventState): void {
   if (new Set(state.participants.map((participant) => participant.residentId)).size !== 9) {
     throw new TypeError('Daily event state participant IDs must remain unique.');
   }
-  if (state.log.length === 0 || state.log.some((entry) => unsafeLogText.test(entry.text))) {
-    throw new TypeError('Daily event state must contain safe factual logs.');
+  validateParticipantRoles(state);
+  if (state.log.length === 0) {
+    throw new TypeError('Daily event state must contain factual audit logs.');
   }
+  const coveredStages = new Set<number>();
   for (let index = 0; index < state.log.length; index += 1) {
     const entry = state.log[index];
     validateTimestamp(entry.createdAt);
-    if (entry.sequence !== index || (index > 0 && entry.createdAt < state.log[index - 1].createdAt)) {
-      throw new TypeError('Daily event log sequence and timestamps must be monotonic.');
+    if (!entry.text.trim() || unsafeLogText.test(entry.text)) {
+      throw new TypeError('Daily event audit log text must be non-empty and safe.');
+    }
+    if (
+      !Number.isInteger(entry.stageIndex) ||
+      entry.stageIndex < 0 ||
+      entry.stageIndex > 6 ||
+      entry.stageIndex > state.stageIndex
+    ) {
+      throw new TypeError('Daily event audit log stage is outside the current state.');
+    }
+    if (entry.sequence !== index) {
+      throw new TypeError('Daily event audit log sequence must be continuous.');
+    }
+    if (
+      index > 0 &&
+      (entry.createdAt < state.log[index - 1].createdAt ||
+        entry.stageIndex < state.log[index - 1].stageIndex)
+    ) {
+      throw new TypeError('Daily event log stages and timestamps must be monotonic.');
+    }
+    coveredStages.add(entry.stageIndex);
+  }
+  for (let stageIndex = 0; stageIndex <= state.stageIndex; stageIndex += 1) {
+    if (!coveredStages.has(stageIndex)) {
+      throw new TypeError('Daily event audit log must cover every completed stage.');
     }
   }
+}
+
+function validateParticipantRoles(state: DailyEventState): void {
+  const winners = state.participants.filter((participant) => participant.role === 'winner');
+  const competitors = state.participants.filter(
+    (participant) => participant.role === 'competitor',
+  );
+  const spectators = state.participants.filter(
+    (participant) => participant.role === 'spectator',
+  );
+  if (winners.length + competitors.length + spectators.length !== state.participants.length) {
+    throw new TypeError('Daily event state contains an unknown participant role.');
+  }
+
+  if (state.status === 'running') {
+    if (
+      state.stageIndex > 5 ||
+      winners.length !== 0 ||
+      competitors.length < 1 ||
+      competitors.some((participant) => !participant.active) ||
+      spectators.some((participant) => participant.active)
+    ) {
+      throw new TypeError('Running daily event state has inconsistent participant roles.');
+    }
+    return;
+  }
+
+  if (state.status === 'completed') {
+    if (
+      state.stageIndex !== 6 ||
+      winners.length !== 1 ||
+      !winners[0].active ||
+      competitors.length !== 0 ||
+      spectators.length !== 8 ||
+      spectators.some((participant) => participant.active)
+    ) {
+      throw new TypeError('Completed daily event state requires one winner and eight spectators.');
+    }
+    return;
+  }
+
+  throw new TypeError('Daily event state has an invalid status.');
 }
 
 function validateTemplate(template: DailyEventTemplate): void {

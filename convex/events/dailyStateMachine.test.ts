@@ -178,4 +178,104 @@ describe('daily event state machine', () => {
       omitted.participants.find((entry) => entry.residentId === 'p:0')?.score,
     );
   });
+
+  test('rejects inconsistent running status and roles before an idempotent return', () => {
+    const stageTwo = advanceDailyEventToStage(createState(), 2, start + 2_000);
+    const badStates: DailyEventState[] = [
+      { ...stageTwo, stageIndex: 6 },
+      {
+        ...stageTwo,
+        participants: stageTwo.participants.map((participant, index) =>
+          index === 0 ? { ...participant, active: true, role: 'winner' } : participant,
+        ),
+      },
+      {
+        ...stageTwo,
+        participants: stageTwo.participants.map((participant) => ({
+          ...participant,
+          active: false,
+          role: 'spectator',
+        })),
+      },
+      {
+        ...stageTwo,
+        participants: stageTwo.participants.map((participant) =>
+          participant.role === 'competitor'
+            ? { ...participant, active: false, role: 'competitor' }
+            : participant,
+        ),
+      },
+    ];
+
+    for (const badState of badStates) {
+      expect(() =>
+        advanceDailyEventToStage(badState, badState.stageIndex, start + 3_000),
+      ).toThrow(/state|running|role|participant/i);
+    }
+  });
+
+  test('rejects inconsistent completed status and roles before an idempotent return', () => {
+    const completed = advanceDailyEventToStage(createState(), 6, start + 6_000);
+    const winnerIndex = completed.participants.findIndex(
+      (participant) => participant.role === 'winner',
+    );
+    const spectatorIndex = completed.participants.findIndex(
+      (participant) => participant.role === 'spectator',
+    );
+    const badStates: DailyEventState[] = [
+      { ...completed, stageIndex: 5 },
+      {
+        ...completed,
+        participants: completed.participants.map((participant, index) =>
+          index === winnerIndex ? { ...participant, active: false } : participant,
+        ),
+      },
+      {
+        ...completed,
+        participants: completed.participants.map((participant, index) =>
+          index === spectatorIndex
+            ? { ...participant, active: true, role: 'winner' }
+            : participant,
+        ),
+      },
+      {
+        ...completed,
+        participants: completed.participants.map((participant, index) =>
+          index === spectatorIndex
+            ? { ...participant, active: true, role: 'competitor' }
+            : participant,
+        ),
+      },
+    ];
+
+    for (const badState of badStates) {
+      expect(() => advanceDailyEventToStage(badState, 6, start + 7_000)).toThrow(
+        /completed|winner|spectator|competitor|state/i,
+      );
+    }
+  });
+
+  test('rejects malformed audit logs before an idempotent return', () => {
+    const stageTwo = advanceDailyEventToStage(createState(), 2, start + 2_000);
+    const withLog = (log: DailyEventState['log']): DailyEventState => ({
+      ...stageTwo,
+      log,
+    });
+    const badStates: DailyEventState[] = [
+      withLog(stageTwo.log.map((entry, index) => (index === 1 ? { ...entry, text: '  ' } : entry))),
+      withLog(stageTwo.log.map((entry, index) => (index === 1 ? { ...entry, stageIndex: 1.5 } : entry))),
+      withLog(stageTwo.log.map((entry, index) => (index === 1 ? { ...entry, stageIndex: 7 } : entry))),
+      withLog(stageTwo.log.map((entry, index) => (index === 1 ? { ...entry, sequence: 9 } : entry))),
+      withLog(stageTwo.log.map((entry, index) => (index === 1 ? { ...entry, createdAt: start - 1 } : entry))),
+      withLog(stageTwo.log.map((entry, index) => (index === 1 ? { ...entry, stageIndex: 0 } : entry))),
+      withLog(stageTwo.log.map((entry, index) => (index === 1 ? { ...entry, stageIndex: 2 } : entry))),
+      withLog([...stageTwo.log, { ...stageTwo.log[2], sequence: 3, stageIndex: 1 }]),
+    ];
+
+    for (const badState of badStates) {
+      expect(() => advanceDailyEventToStage(badState, 2, start + 3_000)).toThrow(
+        /log|stage|sequence|timestamp|audit/i,
+      );
+    }
+  });
 });
