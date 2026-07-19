@@ -594,7 +594,8 @@ describe('event broadcast view model', () => {
     );
 
     expect(report).toContain('唐果｜工作收入 +12 金贝｜听雨茶庄');
-    expect(report).toContain('唐果 ↔ 沈砚｜友情 +1｜证据 conversation:c:4');
+    expect(report).toContain('唐果 ↔ 沈砚｜友情 +1');
+    expect(report).toContain('幂等键 conversation:c:4｜证据 conversation:c:4');
     expect(report).not.toContain('旧日工资');
   });
 
@@ -1160,7 +1161,8 @@ describe('event broadcast view model', () => {
   test('keeps complete raw message capture separate from 80-message legacy views', () => {
     const source = readFileSync(new URL('../../convex/events.ts', import.meta.url), 'utf8');
 
-    expect(source).toContain('.take(500)');
+    expect(source).toContain('.take(OBSERVER_SNAPSHOT_LIMIT + 1)');
+    expect(source).toContain('const OBSERVER_SNAPSHOT_LIMIT = 500;');
     expect(source).toContain('const legacyMessages = messages.slice(0, 80);');
     expect(source).toContain('groupConversationMessages(messages, names');
     expect(source).not.toContain('groupConversationMessages(legacyMessages, names');
