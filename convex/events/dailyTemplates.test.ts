@@ -47,4 +47,20 @@ describe('daily event templates', () => {
       ).toBe(true);
     }
   });
+
+  test('does not share mutable choice arrays or choice objects between templates', () => {
+    const firstChoices = dailyEventTemplates[0].stages[0].choices;
+    const secondChoices = dailyEventTemplates[1].stages[0].choices;
+    expect(firstChoices).not.toBe(secondChoices);
+    expect(firstChoices[0]).not.toBe(secondChoices[0]);
+    expect(Object.isFrozen(firstChoices)).toBe(true);
+    expect(Object.isFrozen(firstChoices[0])).toBe(true);
+    expect(() => {
+      (firstChoices as unknown as Array<{ id: string; label: string }>).push({
+        id: 'rewrite',
+        label: '改写规则',
+      });
+    }).toThrow(TypeError);
+    expect(secondChoices).toHaveLength(2);
+  });
 });

@@ -5,6 +5,15 @@ import {
   selectDailyTemplate,
   shanghaiEventDayKey,
 } from './dailySchedule';
+import type { ExistingDailyEvent } from './dailySchedule';
+
+function existingEvent(
+  dayKey: string,
+  status: ExistingDailyEvent['status'],
+  stageIndex: number,
+): ExistingDailyEvent {
+  return { dayKey, status, stageIndex } as ExistingDailyEvent;
+}
 
 describe('daily event Shanghai schedule', () => {
   test('uses the exact Shanghai 12:00 inclusive to 14:00 exclusive window', () => {
@@ -37,6 +46,15 @@ describe('daily event Shanghai schedule', () => {
     expect(shanghaiEventDayKey(Date.parse('2026-07-16T16:00:00Z'))).toBe('2026-07-17');
   });
 
+  test.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'rejects an invalid timestamp instead of deriving schedule state: %s',
+    (timestamp) => {
+      expect(() => shanghaiEventDayKey(timestamp)).toThrow(RangeError);
+      expect(() => dailyEventWindow(timestamp)).toThrow(RangeError);
+      expect(() => dailyEventAction(timestamp, 'running', null)).toThrow(RangeError);
+    },
+  );
+
   test('does not repeat any template used during the previous six days', () => {
     const previous = [
       'safe-survival',
@@ -47,6 +65,24 @@ describe('daily event Shanghai schedule', () => {
       'cooking-craft',
     ];
     expect(selectDailyTemplate('2026-07-17', previous)).toBe('relay-build');
+  });
+
+  test('accepts the six most recent templates returned in Convex descending order', () => {
+    const mostRecentFirst = [
+      'cooking-craft',
+      'community-service',
+      'market-business',
+      'island-resources',
+      'town-relay',
+      'safe-survival',
+    ];
+    expect(selectDailyTemplate('2026-07-17', mostRecentFirst)).toBe('relay-build');
+  });
+
+  test('rejects more than the six most recent template ids instead of slicing an unordered list', () => {
+    expect(() => selectDailyTemplate('2026-07-17', [...DAILY_TEMPLATE_IDS])).toThrow(
+      /at most six/i,
+    );
   });
 
   test('always makes a deterministic selection from the seven known templates', () => {
@@ -65,7 +101,7 @@ describe('daily event action while the world is paused or stopped', () => {
     (worldStatus) => {
       expect(dailyEventAction(live, worldStatus, null)).toEqual({ kind: 'none' });
       expect(
-        dailyEventAction(live, worldStatus, { status: 'running', stageIndex: 1 }),
+        dailyEventAction(live, worldStatus, existingEvent('2026-07-17', 'running', 1)),
       ).toEqual({ kind: 'none' });
     },
   );
@@ -76,26 +112,36 @@ describe('daily event action while the world is paused or stopped', () => {
       stageIndex: 4,
     });
     expect(
-      dailyEventAction(live, 'running', { status: 'running', stageIndex: 2 }),
+      dailyEventAction(live, 'running', existingEvent('2026-07-17', 'running', 2)),
     ).toEqual({ kind: 'advance', stageIndex: 4 });
     expect(
-      dailyEventAction(live, 'running', { status: 'running', stageIndex: 4 }),
+      dailyEventAction(live, 'running', existingEvent('2026-07-17', 'running', 4)),
     ).toEqual({ kind: 'none' });
+  });
+
+  test('rejects a previous-day event instead of advancing or archiving it as today', () => {
+    const stale = existingEvent('2026-07-16', 'running', 2);
+    expect(() => dailyEventAction(live, 'running', stale)).toThrow(/day key/i);
+    expect(() => dailyEventAction(after, 'running', stale)).toThrow(/day key/i);
   });
 
   test('records a missed day or archives after the window according to world state', () => {
     expect(dailyEventAction(after, 'running', null)).toEqual({ kind: 'record-missed' });
     expect(
-      dailyEventAction(after, 'running', { status: 'running', stageIndex: 4 }),
+      dailyEventAction(after, 'running', existingEvent('2026-07-17', 'running', 4)),
     ).toEqual({ kind: 'archive', stageIndex: 6 });
     expect(
-      dailyEventAction(after, 'inactive', { status: 'running', stageIndex: 4 }),
+      dailyEventAction(after, 'inactive', existingEvent('2026-07-17', 'running', 4)),
     ).toEqual({ kind: 'archive-paused' });
     expect(
-      dailyEventAction(after, 'stoppedByDeveloper', { status: 'running', stageIndex: 4 }),
+      dailyEventAction(
+        after,
+        'stoppedByDeveloper',
+        existingEvent('2026-07-17', 'running', 4),
+      ),
     ).toEqual({ kind: 'archive-paused' });
     expect(
-      dailyEventAction(after, 'running', { status: 'completed', stageIndex: 6 }),
+      dailyEventAction(after, 'running', existingEvent('2026-07-17', 'completed', 6)),
     ).toEqual({ kind: 'none' });
   });
 });

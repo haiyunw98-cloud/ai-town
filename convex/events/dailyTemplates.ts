@@ -11,10 +11,10 @@ export type DailyStageId =
   | 'final'
   | 'awards';
 
-export type DailyEventChoice = {
+export type DailyEventChoice = Readonly<{
   id: string;
   label: string;
-};
+}>;
 
 export type DailyEventStage = {
   id: DailyStageId;
@@ -23,7 +23,7 @@ export type DailyEventStage = {
   targetActive: number;
   checkpoints: string[];
   props: string[];
-  choices: DailyEventChoice[];
+  choices: readonly DailyEventChoice[];
 };
 
 export type DailyEventTemplate = {
@@ -160,6 +160,8 @@ export const dailyEventTemplates: DailyEventTemplate[] = configurations.map((con
     targetActive: STAGE_ACTIVE_COUNTS[index],
     checkpoints: [config.checkpoints[index]],
     props: [config.props[index]],
-    choices: STAGE_CHOICES[index],
+    choices: Object.freeze(
+      STAGE_CHOICES[index].map((choice) => Object.freeze({ ...choice })),
+    ),
   })),
 }));

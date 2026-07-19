@@ -15,12 +15,20 @@ const EVENT_START_MINUTE = 12 * 60;
 const EVENT_END_MINUTE = 14 * 60;
 const STAGE_START_MINUTES = [0, 10, 35, 60, 70, 90, 110] as const;
 
+function assertValidTimestamp(timestamp: number): void {
+  const shiftedTimestamp = timestamp + SHANGHAI_OFFSET_MILLISECONDS;
+  if (!Number.isFinite(timestamp) || Number.isNaN(new Date(shiftedTimestamp).getTime())) {
+    throw new RangeError('Daily event timestamp must be a finite valid JavaScript timestamp.');
+  }
+}
+
 export type DailyEventWindow =
   | { state: 'before'; stageIndex: -1 }
   | { state: 'live'; stageIndex: number; elapsedMinutes: number }
   | { state: 'after'; stageIndex: 7 };
 
 export function shanghaiEventDayKey(timestamp: number): string {
+  assertValidTimestamp(timestamp);
   const date = new Date(timestamp + SHANGHAI_OFFSET_MILLISECONDS);
   return [
     date.getUTCFullYear(),
@@ -30,6 +38,7 @@ export function shanghaiEventDayKey(timestamp: number): string {
 }
 
 export function dailyEventWindow(timestamp: number): DailyEventWindow {
+  assertValidTimestamp(timestamp);
   const shifted = new Date(timestamp + SHANGHAI_OFFSET_MILLISECONDS);
   const minuteOfDay = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
   if (minuteOfDay < EVENT_START_MINUTE) return { state: 'before', stageIndex: -1 };
@@ -48,7 +57,10 @@ export function selectDailyTemplate(
   dayKey: string,
   previousTemplateIds: readonly string[],
 ): DailyTemplateId {
-  const recentlyUsed = new Set(previousTemplateIds.slice(-6));
+  if (previousTemplateIds.length > 6) {
+    throw new RangeError('Expected at most six recent daily template ids.');
+  }
+  const recentlyUsed = new Set(previousTemplateIds);
   const unused = DAILY_TEMPLATE_IDS.filter((id) => !recentlyUsed.has(id));
   const candidates = unused.length > 0 ? unused : DAILY_TEMPLATE_IDS;
   let hash = 0;
@@ -61,6 +73,7 @@ export function selectDailyTemplate(
 export type WorldRunStatus = 'running' | 'inactive' | 'stoppedByDeveloper';
 
 export type ExistingDailyEvent = {
+  dayKey: string;
   status: 'running' | 'completed';
   stageIndex: number;
 };
@@ -78,6 +91,12 @@ export function dailyEventAction(
   existing: ExistingDailyEvent | null,
 ): DailyEventAction {
   const window = dailyEventWindow(timestamp);
+  const currentDayKey = shanghaiEventDayKey(timestamp);
+  if (existing && existing.dayKey !== currentDayKey) {
+    throw new Error(
+      `Existing daily event day key ${existing.dayKey} does not match ${currentDayKey}.`,
+    );
+  }
   if (window.state === 'before' || existing?.status === 'completed') return { kind: 'none' };
 
   if (window.state === 'live') {
