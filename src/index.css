@@ -743,6 +743,44 @@ p[contenteditable='true']:empty::before {
   font-weight: 800;
 }
 
+.town-camera-controls {
+  position: absolute;
+  z-index: 5;
+  top: 62px;
+  right: 18px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(238, 197, 106, 0.42);
+  border-radius: 11px;
+  background: rgba(6, 35, 39, 0.88);
+  box-shadow: 0 8px 24px rgba(1, 17, 20, 0.38);
+  backdrop-filter: blur(10px);
+}
+
+.town-camera-controls button {
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: rgba(249, 232, 188, 0.72);
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.town-camera-controls button:hover,
+.town-camera-controls button.is-active {
+  border-color: rgba(255, 220, 143, 0.5);
+  color: #fff0c6;
+  background: rgba(137, 58, 46, 0.82);
+}
+
+.town-camera-controls button:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
 .map-live-badge {
   bottom: 18px;
   display: flex;
@@ -1402,6 +1440,15 @@ p[contenteditable='true']:empty::before {
 
   .town-brand p {
     display: none;
+  }
+
+  .town-camera-controls {
+    top: 68px;
+    right: 10px;
+  }
+
+  .town-camera-controls button {
+    padding-inline: 6px;
   }
 
   .town-brand h1 {

@@ -15,6 +15,7 @@ import { useI18n } from '../i18n';
 import type { TownLandmark } from '../../data/worlds/lighthouse-town/map';
 import { townLandmarks } from '../../data/worlds/lighthouse-town/map';
 import InstitutionDetails from './InstitutionDetails';
+import type { TownCameraMode } from './cameraFrame';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
@@ -30,6 +31,7 @@ export default function Game() {
   const previousSidebarTab = useRef<'broadcast' | 'resident'>('broadcast');
   const [locationDirectoryOpen, setLocationDirectoryOpen] = useState(false);
   const [observerOpen, setObserverOpen] = useState(() => window.innerWidth >= 960);
+  const [cameraMode, setCameraMode] = useState<TownCameraMode>('town');
   const [gameWrapper, setGameWrapper] = useState<HTMLDivElement | null>(null);
   const [{ width, height }, setGameSize] = useState({ width: 0, height: 0 });
 
@@ -110,6 +112,26 @@ export default function Game() {
           >
             {observerOpen ? '◫ 扩大地图' : '▣ 打开观察台'}
           </button>
+          <div className="town-camera-controls" role="group" aria-label="地图镜头">
+            {([
+              ['town', '主镇'],
+              ['island', '试炼岛'],
+              ['overview', '全景'],
+              ['event', '活动'],
+              ['follow', '跟随'],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                className={cameraMode === mode ? 'is-active' : ''}
+                aria-pressed={cameraMode === mode}
+                disabled={mode === 'follow' && !selectedElement}
+                onClick={() => setCameraMode(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
             className="map-live-badge"
             onClick={() => setLocationDirectoryOpen((open) => !open)}
@@ -161,8 +183,10 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
                           setSidebarTab('resident');
                           setObserverOpen(true);
                         }
-                      }}
+                    }}
                     onSelectLandmark={openInstitutionDetails}
+                    cameraMode={cameraMode}
+                    selectedPlayerId={selectedElement?.id}
                   />
                 </ConvexProvider>
               </Stage>

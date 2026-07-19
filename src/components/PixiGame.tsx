@@ -17,6 +17,9 @@ import TownLandmarks from './TownLandmarks.tsx';
 import type { TownLandmark } from '../../data/worlds/lighthouse-town/map.ts';
 import { initialViewportScale } from './viewportMath.ts';
 import EventMapOverlay from './EventMapOverlay.tsx';
+import { buildEventOverlayState } from './eventMapOverlayModel.ts';
+import { cameraFrame, type TownCameraMode } from './cameraFrame.ts';
+import type { GameId } from '../../convex/aiTown/ids.ts';
 
 export const PixiGame = (props: {
   worldId: Id<'worlds'>;
@@ -27,6 +30,8 @@ export const PixiGame = (props: {
   height: number;
   setSelectedElement: SelectElement;
   onSelectLandmark: (landmark: TownLandmark) => void;
+  cameraMode: TownCameraMode;
+  selectedPlayerId?: GameId<'players'>;
 }) => {
   // PIXI setup.
   const pixiApp = useApp();
@@ -86,6 +91,10 @@ export const PixiGame = (props: {
   };
   const { width, height, tileDim } = props.game.worldMap;
   const players = [...props.game.world.players.values()];
+  const selectedPosition = props.selectedPlayerId
+    ? props.game.world.players.get(props.selectedPlayerId)?.position
+    : undefined;
+  const eventPosition = buildEventOverlayState(eventMapSnapshot).activeCheckpoint;
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -100,9 +109,35 @@ export const PixiGame = (props: {
     );
     viewport.resize(props.width, props.height, worldWidth, worldHeight);
     viewport.clampZoom({ minScale, maxScale: 3.0 });
-    viewport.setZoom(minScale, true);
-    viewport.moveCenter(worldWidth / 2, worldHeight / 2);
-  }, [props.width, props.height, width, height, tileDim]);
+    const frame = cameraFrame({
+      mode: props.cameraMode,
+      screenWidth: props.width,
+      screenHeight: props.height,
+      worldWidth,
+      worldHeight,
+      tileDim,
+      selectedPosition,
+      eventPosition,
+    });
+    viewport.animate({
+      position: { x: frame.x, y: frame.y },
+      scale: frame.scale,
+      time: 420,
+      ease: 'easeInOutSine',
+      removeOnInterrupt: true,
+    });
+  }, [
+    props.width,
+    props.height,
+    props.cameraMode,
+    width,
+    height,
+    tileDim,
+    selectedPosition?.x,
+    selectedPosition?.y,
+    eventPosition?.x,
+    eventPosition?.y,
+  ]);
 
   // Keep the full town framed after joining. The old 1.5× auto-focus hid every
   // resident outside the human spawn area and made starting conversations hard.
