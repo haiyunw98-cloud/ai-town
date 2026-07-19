@@ -98,6 +98,7 @@ export default defineSchema({
     teamId: v.optional(v.string()),
     choiceId: v.optional(v.string()),
     decisionStage: v.optional(v.number()),
+    reachedFinal: v.optional(v.boolean()),
     participationRewarded: v.optional(v.boolean()),
     finalistRewarded: v.optional(v.boolean()),
     championRewarded: v.optional(v.boolean()),

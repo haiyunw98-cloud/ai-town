@@ -585,13 +585,6 @@ export type ActivitySettlementArgs = {
   now?: number;
 };
 
-export type DailyEventRewardParticipant = Readonly<{
-  residentId: string;
-  displayName: string;
-  reachedFinal: boolean;
-  champion: boolean;
-}>;
-
 export type DailyEventHostService = Readonly<{
   residentId: string;
   institutionId: string;
@@ -604,7 +597,6 @@ export type DailyEventRewardSettlementArgs = Readonly<{
   worldId: Id<'worlds'>;
   eventId: Id<'townEvents'>;
   dayKey: string;
-  participants: readonly DailyEventRewardParticipant[];
   hostServices: readonly DailyEventHostService[] | null;
   now: number;
 }>;
@@ -634,10 +626,14 @@ export async function settleDailyEventRewards(
   if (event.dailyKey !== args.dayKey) throw new Error('Daily event reward day mismatch');
   if (event.status !== 'completed') throw new Error('Daily event rewards require a completed event');
 
-  const champion = args.participants.find((participant) => participant.champion)!;
-  if (event.winnerId !== champion.residentId) {
-    throw new Error('Daily event winner does not match the reward outcome');
-  }
+  const persistedParticipants = await ctx.db
+    .query('eventParticipants')
+    .withIndex('eventId', (q) => q.eq('eventId', args.eventId))
+    .collect();
+  const participants = validatePersistedDailyEventParticipants(
+    persistedParticipants,
+    event.winnerId,
+  );
   const world = await ctx.db.get(args.worldId);
   if (!world) throw new Error('Daily event reward world is missing');
 
@@ -656,7 +652,7 @@ export async function settleDailyEventRewards(
   }> = [];
   const allEntries: EconomyLedgerEntry[] = [];
 
-  for (const participant of args.participants) {
+  for (const participant of participants) {
     const player = world.players.find((candidate) => candidate.id === participant.residentId);
     const activeAgentCount = world.agents.filter(
       (candidate) => candidate.playerId === participant.residentId,
@@ -674,7 +670,11 @@ export async function settleDailyEventRewards(
       throw new Error(`Daily event resident account is missing: ${participant.residentId}`);
     }
     const profile = configuredProfiles.get(account.profileId);
-    if (!profile || profile.name !== participant.displayName) {
+    if (
+      !profile
+      || profile.name !== participant.displayName
+      || profile.id !== participant.identity
+    ) {
       throw new Error(`Daily event resident is not configured: ${participant.residentId}`);
     }
     if (seenProfiles.has(profile.id)) {
@@ -784,32 +784,60 @@ function validateDailyEventRewardInput(args: DailyEventRewardSettlementArgs) {
   if (shanghaiEconomyDayKey(args.now) !== args.dayKey) {
     throw new Error('Daily event reward dayKey must match now in Asia/Shanghai');
   }
-  if (args.hostServices !== null && args.hostServices.length !== 0) {
+  if (
+    args.hostServices !== null
+    && (!Array.isArray(args.hostServices) || args.hostServices.length !== 0)
+  ) {
     throw new Error('Daily event host services are not configured for settlement');
   }
-  if (!Array.isArray(args.participants) || args.participants.length !== 9) {
-    throw new Error('Daily event rewards require nine participants');
-  }
+}
+
+function validatePersistedDailyEventParticipants(
+  rows: ReadonlyArray<{
+    residentId: string;
+    displayName: string;
+    identity: string;
+    active: boolean;
+    role: string;
+    reachedFinal?: boolean;
+  }>,
+  winnerId: string | undefined,
+) {
+  if (rows.length !== 9) throw new Error('Daily event must persist exactly nine participants');
   const residentIds = new Set<string>();
-  let championCount = 0;
-  for (const participant of args.participants) {
+  const participants = rows.map((participant) => {
     assertBoundedString(participant.residentId, 80, 'Daily event residentId');
     assertBoundedString(participant.displayName, 80, 'Daily event displayName');
-    if (typeof participant.reachedFinal !== 'boolean' || typeof participant.champion !== 'boolean') {
-      throw new Error('Daily event outcome flags must be boolean');
+    assertBoundedString(participant.identity, 80, 'Daily event identity');
+    if (typeof participant.reachedFinal !== 'boolean') {
+      throw new Error('Daily event reachedFinal must be persisted as a boolean');
     }
     if (residentIds.has(participant.residentId)) {
       throw new Error(`Duplicate daily event resident: ${participant.residentId}`);
     }
     residentIds.add(participant.residentId);
-    if (participant.champion) {
-      championCount += 1;
-      if (!participant.reachedFinal) {
-        throw new Error('Daily event champion must be a finalist');
+    const champion = participant.role === 'winner';
+    if (champion) {
+      if (!participant.active || !participant.reachedFinal) {
+        throw new Error('Daily event winner must be active and must have reached the final');
       }
+    } else if (participant.role !== 'spectator' || participant.active) {
+      throw new Error('Completed daily event non-winners must be inactive spectators');
     }
+    return {
+      residentId: participant.residentId,
+      displayName: participant.displayName,
+      identity: participant.identity,
+      reachedFinal: participant.reachedFinal,
+      champion,
+    };
+  });
+  const champions = participants.filter((participant) => participant.champion);
+  if (champions.length !== 1) throw new Error('Daily event requires exactly one persisted winner');
+  if (!winnerId || champions[0].residentId !== winnerId) {
+    throw new Error('Persisted daily event winner does not match the event winner');
   }
-  if (championCount !== 1) throw new Error('Daily event requires exactly one champion');
+  return participants;
 }
 
 function dailyRewardLedgerEquivalent(
