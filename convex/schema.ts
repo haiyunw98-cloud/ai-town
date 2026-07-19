@@ -168,6 +168,18 @@ export default defineSchema({
     .index('sourceKey', ['worldId', 'sourceKey'])
     .index('worldTime', ['worldId', 'createdAt']),
 
+  backgroundLifeState: defineTable({
+    worldId: v.id('worlds'),
+    lastProcessedSlot: v.number(),
+    lastProcessedAt: v.number(),
+    rulesVersion: v.number(),
+    lastWorldStatus: v.union(
+      v.literal('running'),
+      v.literal('inactive'),
+      v.literal('stoppedByDeveloper'),
+    ),
+  }).index('worldId', ['worldId']),
+
   activityRegistrations: defineTable({
     worldId: v.id('worlds'),
     residentId: playerId,
