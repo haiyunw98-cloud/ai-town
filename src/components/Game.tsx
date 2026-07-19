@@ -14,6 +14,7 @@ import EventBroadcast from './EventBroadcast.tsx';
 import { useI18n } from '../i18n';
 import type { TownLandmark } from '../../data/worlds/lighthouse-town/map';
 import { townLandmarks } from '../../data/worlds/lighthouse-town/map';
+import InstitutionDetails from './InstitutionDetails';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
@@ -24,8 +25,9 @@ export default function Game() {
     kind: 'player';
     id: GameId<'players'>;
   }>();
-  const [sidebarTab, setSidebarTab] = useState<'broadcast' | 'resident'>('broadcast');
+  const [sidebarTab, setSidebarTab] = useState<'broadcast' | 'resident' | 'institution'>('broadcast');
   const [selectedLandmark, setSelectedLandmark] = useState<TownLandmark>();
+  const previousSidebarTab = useRef<'broadcast' | 'resident'>('broadcast');
   const [locationDirectoryOpen, setLocationDirectoryOpen] = useState(false);
   const [observerOpen, setObserverOpen] = useState(() => window.innerWidth >= 960);
   const [gameWrapper, setGameWrapper] = useState<HTMLDivElement | null>(null);
@@ -58,6 +60,18 @@ export default function Game() {
   const { historicalTime, timeManager } = useHistoricalTime(worldState?.engine);
 
   const scrollViewRef = useRef<HTMLDivElement>(null);
+
+  const openInstitutionDetails = (landmark: TownLandmark) => {
+    if (sidebarTab !== 'institution') previousSidebarTab.current = sidebarTab;
+    setSelectedLandmark(landmark);
+    setSidebarTab('institution');
+    setObserverOpen(true);
+    setLocationDirectoryOpen(false);
+  };
+  const closeInstitutionDetails = () => {
+    setSelectedLandmark(undefined);
+    setSidebarTab(previousSidebarTab.current);
+  };
 
   if (!worldId || !engineId || !game) {
     return (
@@ -113,10 +127,8 @@ export default function Game() {
                 {townLandmarks.map((landmark) => (
                   <button
                     key={landmark.id}
-                    onClick={() => {
-                      setSelectedLandmark(landmark);
-                      setLocationDirectoryOpen(false);
-                    }}
+                    onClick={() => openInstitutionDetails(landmark)}
+                    aria-label={`查看${landmark.name}机构详情`}
                   >
                     <span>{landmark.icon}</span>
                     <div><strong>{landmark.name}</strong><small>{landmark.services.join(' · ')}</small></div>
@@ -124,22 +136,6 @@ export default function Game() {
                 ))}
               </div>
             </nav>
-          )}
-          {selectedLandmark && (
-            <section className="town-landmark-card" aria-live="polite">
-              <button onClick={() => setSelectedLandmark(undefined)} aria-label="关闭地点介绍">×</button>
-              <header>
-                <span>{selectedLandmark.icon}</span>
-                <div>
-                  <h2>{selectedLandmark.name}</h2>
-                  <small>{selectedLandmark.openHours}</small>
-                </div>
-              </header>
-              <p>{selectedLandmark.description}</p>
-              <div>
-                {selectedLandmark.services.map((service) => <span key={service}>{service}</span>)}
-              </div>
-            </section>
           )}
           <div className="absolute inset-0">
             <div className="town-pixi-canvas">
@@ -159,13 +155,14 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
                     height={height}
                     historicalTime={historicalTime}
                     setSelectedElement={(selection) => {
-                      setSelectedElement(selection);
-                      if (selection) {
-                        setSidebarTab('resident');
-                        setObserverOpen(true);
-                      }
-                    }}
-                    onSelectLandmark={(landmark) => setSelectedLandmark(landmark)}
+                        setSelectedElement(selection);
+                        if (selection) {
+                          setSelectedLandmark(undefined);
+                          setSidebarTab('resident');
+                          setObserverOpen(true);
+                        }
+                      }}
+                    onSelectLandmark={openInstitutionDetails}
                   />
                 </ConvexProvider>
               </Stage>
@@ -180,7 +177,14 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
           <button className="observer-drawer-close" onClick={() => setObserverOpen(false)}>
             × 收起观察台
           </button>
-          <div className="observer-tabs" role="tablist">
+          {sidebarTab === 'institution' && selectedLandmark && (
+            <InstitutionDetails
+              worldId={worldId}
+              landmark={selectedLandmark}
+              onClose={closeInstitutionDetails}
+            />
+          )}
+          {sidebarTab !== 'institution' && <div className="observer-tabs" role="tablist">
             <button
               className={sidebarTab === 'broadcast' ? 'is-active' : ''}
               onClick={() => setSidebarTab('broadcast')}
@@ -195,16 +199,17 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
             >
               {t('event.resident')}
             </button>
-          </div>
+          </div>}
           {sidebarTab === 'broadcast' ? (
             <EventBroadcast
               worldId={worldId}
-              onSelectResident={(residentId) => {
-                setSelectedElement({ kind: 'player', id: residentId });
-                setSidebarTab('resident');
-              }}
-            />
-          ) : (
+                  onSelectResident={(residentId) => {
+                    setSelectedElement({ kind: 'player', id: residentId });
+                    setSelectedLandmark(undefined);
+                    setSidebarTab('resident');
+                  }}
+                />
+          ) : sidebarTab === 'resident' ? (
             <PlayerDetails
               worldId={worldId}
               engineId={engineId}
@@ -213,7 +218,7 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
               setSelectedElement={setSelectedElement}
               scrollViewRef={scrollViewRef}
             />
-          )}
+          ) : null}
         </aside>
       </div>
     </>

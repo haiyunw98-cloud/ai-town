@@ -2,21 +2,13 @@ import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { GameId } from '../../convex/aiTown/ids';
+import { residentStatusBanners } from './runtimeViewState';
 
 const statLabels = {
   mood: '心情',
-  energy: '精力',
   health: '健康',
-  finance: '财务',
   reputation: '声望',
   social: '社交',
-} as const;
-
-const relationLabels = {
-  friendship: '友情',
-  crush: '心动',
-  dating: '恋爱',
-  business: '商业',
 } as const;
 
 const photoLabels = ['人物近照', '工作时刻', '日常生活', '社交留影'];
@@ -33,6 +25,14 @@ export default function ResidentDossier({
     return <div className="resident-dossier-loading">正在整理人生档案…</div>;
   }
   if (dossier === null) return null;
+  const statusBanners = residentStatusBanners(dossier);
+  if (dossier.dossierStatus === 'unavailable') {
+    return (
+      <div className="resident-dossier-loading" role="status">
+        {statusBanners.top}
+      </div>
+    );
+  }
 
   return (
     <details
@@ -45,6 +45,11 @@ export default function ResidentDossier({
         <strong>{dossier.situation}</strong>
       </summary>
       <div className="resident-dossier-content">
+        {statusBanners.top && (
+          <p className="runtime-snapshot-notice">
+            {statusBanners.top}
+          </p>
+        )}
         <div className="resident-photo-gallery">
           <figure className="resident-featured-photo">
             <img
@@ -80,6 +85,46 @@ export default function ResidentDossier({
           </div>
         </div>
 
+        <section className="resident-economy" aria-label="居民真实经济状况">
+          <header>
+            <div><span>真实生活账本</span><strong>{dossier.economy.dayKey ?? '今日'}</strong></div>
+            {dossier.economy.economyStatus === 'initializing' && (
+              <em>经济运行态正在初始化 · 下列职业信息来自静态档案</em>
+            )}
+          </header>
+          <dl className="resident-economy-grid">
+            <div><dt>真实金贝</dt><dd>{formatLiveValue(dossier.economy.balance, '枚')}</dd></div>
+            <div><dt>今日收入</dt><dd className="is-income">{formatLiveValue(dossier.economy.todayIncome, '枚')}</dd></div>
+            <div><dt>今日支出</dt><dd className="is-expense">{formatLiveValue(dossier.economy.todayExpense, '枚')}</dd></div>
+            <div><dt>饥饿</dt><dd>{formatLiveValue(dossier.economy.hunger, '/ 100')}</dd></div>
+            <div><dt>精力</dt><dd>{formatLiveValue(dossier.economy.energy, '/ 100')}</dd></div>
+            <div className="is-wide">
+              <dt>职业与机构</dt>
+              <dd>{dossier.economy.occupation} · {dossier.economy.institution ?? '机构待确认'}</dd>
+            </div>
+          </dl>
+          <p className="resident-compensation">
+            {dossier.economy.compensation
+              ? `报酬方式：${compensationLabel(dossier.economy.compensation.kind)}，每次完成工作应得 ${dossier.economy.compensation.amount} 金贝（以机构现金为限）`
+              : '报酬约定正在确认'}
+          </p>
+          <div className="resident-economy-ledger">
+            <h3>最近经济事实</h3>
+            {dossier.economy.recentLedger.length === 0 ? (
+              <p>还没有已结算的工作或购买记录。</p>
+            ) : (
+              <ol>
+                {dossier.economy.recentLedger.map((entry, index) => (
+                  <li key={`${entry.sourceKey}:${index}`}>
+                    <time>{formatRecentTime(entry.createdAt)}</time>
+                    <span>{entry.text}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </section>
+
         <div className="dossier-stats" aria-label="生活属性">
           {(Object.keys(statLabels) as Array<keyof typeof statLabels>).map((key) => (
             <div key={key}>
@@ -106,21 +151,41 @@ export default function ResidentDossier({
 
         <DossierSection title="社会关系">
           <div className="dossier-relations">
-            {dossier.relationships.map((relationship, index) => (
-              <article className={`relation-${relationship.kind}`} key={`${relationship.targetId}:${relationship.kind}:${index}`}>
+            {dossier.relationshipsStatus === 'initializing' && (
+              <p className="dossier-empty">关系运行态正在初始化，暂不以静态印象代替实时数值。</p>
+            )}
+            {statusBanners.relationships && (
+              <p className="dossier-empty">
+                {statusBanners.relationships}
+              </p>
+            )}
+            {dossier.relationships.map((relationship) => (
+              <article key={relationship.targetId}>
                 <img
                   src={relationship.targetPhoto}
-                  alt=""
+                  alt={relationship.targetName}
                   loading="lazy"
                   onError={(event) => event.currentTarget.classList.add('is-missing')}
                 />
                 <div>
                   <header>
                     <strong>{relationship.targetName}</strong>
-                    <span>{relationLabels[relationship.kind]} · {relationship.label}</span>
+                    <span>{dossier.relationshipsStatus === 'live' ? '实时关系' : dossier.relationshipsStatus === 'snapshot' ? '暂停前关系' : '已载入关系'}</span>
                   </header>
-                  <p>{relationship.summary}</p>
-                  <i><em style={{ width: `${relationship.score}%` }} /></i>
+                  <dl className="relation-dimensions">
+                    <div><dt>友情</dt><dd>{relationship.friendship}</dd></div>
+                    <div><dt>信任</dt><dd>{relationship.trust}</dd></div>
+                    <div><dt>恋爱倾向</dt><dd>{relationship.attraction}</dd></div>
+                    <div><dt>商业</dt><dd>{relationship.business}</dd></div>
+                  </dl>
+                  <div className="relation-evidence">
+                    <b>最近变化依据</b>
+                    {relationship.recentChanges.length === 0 ? (
+                      <span>暂无变化记录，当前 0 值也会如实保留。</span>
+                    ) : relationship.recentChanges.map((change) => (
+                      <span key={change.sourceKey}>{change.text}</span>
+                    ))}
+                  </div>
                 </div>
               </article>
             ))}
@@ -140,6 +205,14 @@ export default function ResidentDossier({
       </div>
     </details>
   );
+}
+
+function formatLiveValue(value: number | null, suffix: string) {
+  return value === null ? '初始化中' : `${value} ${suffix}`;
+}
+
+function compensationLabel(kind: 'wage' | 'owner-draw' | 'contract-share') {
+  return kind === 'wage' ? '固定工资' : kind === 'owner-draw' ? '经营者提取' : '合作订单分成';
 }
 
 function DossierSection({ title, children }: { title: string; children: React.ReactNode }) {

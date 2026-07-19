@@ -35,7 +35,15 @@ export default function TownLandmarks({
             interactive
             hitArea={new PIXI.Rectangle(-width / 2, -16, width, 32)}
             cursor="pointer"
-            onpointerdown={() => onSelect(landmark)}
+            accessible
+            accessibleType="button"
+            accessibleTitle={`查看${landmark.name}机构详情`}
+            onpointerdown={(event) => event.stopPropagation()}
+            onpointerup={(event) => event.stopPropagation()}
+            onpointertap={(event) => {
+              event.stopPropagation();
+              onSelect(landmark);
+            }}
           >
             <Graphics
               draw={(graphics) => {

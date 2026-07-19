@@ -9,6 +9,7 @@
  */
 
 import type * as agent_conversation from "../agent/conversation.js";
+import type * as agent_conversationPolicy from "../agent/conversationPolicy.js";
 import type * as agent_embeddingsCache from "../agent/embeddingsCache.js";
 import type * as agent_memory from "../agent/memory.js";
 import type * as aiTown_agent from "../aiTown/agent.js";
@@ -46,11 +47,14 @@ import type * as music from "../music.js";
 import type * as socialObservations from "../socialObservations.js";
 import type * as testing from "../testing.js";
 import type * as townEconomy from "../townEconomy.js";
+import type * as townEconomyRules from "../townEconomyRules.js";
 import type * as townRelations from "../townRelations.js";
 import type * as util_FastIntegerCompression from "../util/FastIntegerCompression.js";
 import type * as util_assertNever from "../util/assertNever.js";
 import type * as util_asyncMap from "../util/asyncMap.js";
 import type * as util_compression from "../util/compression.js";
+import type * as util_conversationText from "../util/conversationText.js";
+import type * as util_conversationTextPolicy from "../util/conversationTextPolicy.js";
 import type * as util_embeddingDimension from "../util/embeddingDimension.js";
 import type * as util_geometry from "../util/geometry.js";
 import type * as util_isSimpleObject from "../util/isSimpleObject.js";
@@ -72,6 +76,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "agent/conversation": typeof agent_conversation;
+  "agent/conversationPolicy": typeof agent_conversationPolicy;
   "agent/embeddingsCache": typeof agent_embeddingsCache;
   "agent/memory": typeof agent_memory;
   "aiTown/agent": typeof aiTown_agent;
@@ -109,11 +114,14 @@ declare const fullApi: ApiFromModules<{
   socialObservations: typeof socialObservations;
   testing: typeof testing;
   townEconomy: typeof townEconomy;
+  townEconomyRules: typeof townEconomyRules;
   townRelations: typeof townRelations;
   "util/FastIntegerCompression": typeof util_FastIntegerCompression;
   "util/assertNever": typeof util_assertNever;
   "util/asyncMap": typeof util_asyncMap;
   "util/compression": typeof util_compression;
+  "util/conversationText": typeof util_conversationText;
+  "util/conversationTextPolicy": typeof util_conversationTextPolicy;
   "util/embeddingDimension": typeof util_embeddingDimension;
   "util/geometry": typeof util_geometry;
   "util/isSimpleObject": typeof util_isSimpleObject;

@@ -1459,6 +1459,17 @@ p[contenteditable='true']:empty::before {
   text-align: center;
 }
 
+.runtime-snapshot-notice {
+  margin: 0 0 9px;
+  padding: 9px 10px;
+  border: 1px solid rgba(231, 169, 92, 0.5);
+  border-radius: 8px;
+  color: #ffe4a8;
+  background: rgba(116, 63, 40, 0.56);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .resident-photo-gallery {
   position: relative;
   display: grid;
@@ -1649,6 +1660,81 @@ p[contenteditable='true']:empty::before {
   margin: 9px 0 14px;
 }
 
+.resident-economy {
+  margin: 9px 0 12px;
+  padding: 12px;
+  border: 1px solid rgba(229, 183, 91, 0.42);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(25, 79, 70, 0.76), rgba(5, 29, 34, 0.9));
+}
+
+.resident-economy > header {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 9px;
+}
+
+.resident-economy > header > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resident-economy > header span,
+.resident-economy-ledger h3 {
+  color: #f0ca75;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.resident-economy > header strong {
+  color: rgba(244, 236, 216, 0.62);
+  font-size: 9px;
+}
+
+.resident-economy > header em {
+  color: #f1d9a5;
+  font-size: 9px;
+  font-style: normal;
+  line-height: 1.4;
+}
+
+.resident-economy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.resident-economy-grid > div {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid rgba(238, 202, 122, 0.16);
+  border-radius: 7px;
+  background: rgba(2, 22, 27, 0.4);
+}
+
+.resident-economy-grid > div.is-wide { grid-column: span 2; }
+.resident-economy-grid dt { color: rgba(177, 223, 201, 0.72); font-size: 9px; }
+.resident-economy-grid dd { overflow-wrap: anywhere; margin: 2px 0 0; color: #fff1c7; font-size: 11px; font-weight: 800; }
+.resident-economy-grid dd.is-income { color: #92e4aa; }
+.resident-economy-grid dd.is-expense { color: #f3ae92; }
+
+.resident-compensation {
+  margin: 8px 0;
+  color: rgba(244, 236, 216, 0.75);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.resident-economy-ledger h3 { margin: 0 0 5px; }
+.resident-economy-ledger > p { margin: 0; color: rgba(244, 236, 216, 0.55); font-size: 9px; }
+.resident-economy-ledger ol { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.resident-economy-ledger li { display: grid; grid-template-columns: 55px minmax(0, 1fr); gap: 7px; font-size: 9px; line-height: 1.4; }
+.resident-economy-ledger time { color: rgba(229, 183, 91, 0.68); }
+.resident-economy-ledger span { color: rgba(244, 236, 216, 0.82); overflow-wrap: anywhere; }
+
 .dossier-stats > div {
   padding: 8px;
   border: 1px solid rgba(229, 183, 91, 0.2);
@@ -1785,6 +1871,105 @@ p[contenteditable='true']:empty::before {
   line-height: 1.35;
 }
 
+.relation-dimensions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 7px 0;
+}
+
+.relation-dimensions > div {
+  padding: 5px 3px;
+  border-radius: 5px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.relation-dimensions dt { color: rgba(174, 217, 199, 0.68); font-size: 8px; }
+.relation-dimensions dd { margin: 2px 0 0; color: #f0ca75; font-size: 11px; font-weight: 800; }
+.relation-evidence { display: grid; gap: 3px; }
+.relation-evidence b { color: rgba(244, 236, 216, 0.7); font-size: 9px; }
+.relation-evidence span { color: rgba(244, 236, 216, 0.58); font-size: 9px; line-height: 1.35; }
+.dossier-empty { color: rgba(244, 236, 216, 0.58); font-size: 10px; line-height: 1.45; }
+
+/* Runtime institution dossier lives inside the scrollable observer, not over the map. */
+.institution-details {
+  min-width: 0;
+  padding-bottom: 18px;
+  color: #f4ecd8;
+}
+
+.institution-details-heading {
+  position: sticky;
+  z-index: 2;
+  top: -16px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 9px;
+  margin: -2px 0 12px;
+  padding: 12px 4px 10px;
+  border-bottom: 1px solid rgba(229, 183, 91, 0.34);
+  background: #102f34;
+}
+
+.institution-details-heading > span {
+  display: grid;
+  place-items: center;
+  height: 38px;
+  border-radius: 9px;
+  color: #17363a;
+  background: #e9be68;
+  font-weight: 900;
+}
+
+.institution-details-heading h2 { margin: 0; color: #ffedbd; font-size: 17px; }
+.institution-details-heading small { color: rgba(244, 236, 216, 0.58); font-size: 9px; }
+.institution-details-heading button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(229, 183, 91, 0.3);
+  border-radius: 7px;
+  color: #f3d994;
+  background: rgba(5, 29, 34, 0.7);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.institution-details > section {
+  margin: 8px 0;
+  padding: 11px;
+  border: 1px solid rgba(229, 183, 91, 0.22);
+  border-radius: 10px;
+  background: rgba(5, 29, 34, 0.66);
+}
+
+.institution-details h3 { margin: 0 0 7px; color: #e5b75b; font-size: 12px; }
+.institution-details p { color: rgba(244, 236, 216, 0.76); font-size: 10px; line-height: 1.5; }
+.institution-details-status { padding: 11px; border: 1px dashed rgba(229, 183, 91, 0.35); border-radius: 9px; background: rgba(85, 57, 34, 0.28); }
+.institution-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.institution-tags span { padding: 4px 7px; border-radius: 999px; color: #d7f0e2; background: rgba(78, 143, 122, 0.34); font-size: 9px; }
+
+.institution-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.institution-metrics > div { min-width: 0; padding: 8px; border: 1px solid rgba(229, 183, 91, 0.22); border-radius: 8px; background: rgba(27, 74, 69, 0.55); }
+.institution-metrics dt { color: rgba(170, 218, 196, 0.7); font-size: 9px; }
+.institution-metrics dd { overflow-wrap: anywhere; margin: 3px 0 0; color: #ffedbd; font-size: 12px; font-weight: 800; }
+.institution-offerings { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.institution-offerings li { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 7px; border-radius: 6px; background: rgba(255, 255, 255, 0.035); font-size: 9px; }
+.institution-offerings strong { color: #f4ecd8; }
+.institution-offerings span { color: rgba(229, 183, 91, 0.82); text-align: right; }
+.institution-empty { margin: 0; color: rgba(244, 236, 216, 0.54) !important; }
+.institution-ledger ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.institution-ledger li { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 7px; font-size: 9px; line-height: 1.4; }
+.institution-ledger time { color: rgba(229, 183, 91, 0.68); }
+.institution-ledger span { color: rgba(244, 236, 216, 0.82); overflow-wrap: anywhere; }
+
 .dossier-timeline {
   display: grid;
   gap: 0;
@@ -1854,4 +2039,8 @@ p[contenteditable='true']:empty::before {
   .resident-photo-situation > strong {
     white-space: normal;
   }
+
+  .resident-economy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resident-economy-grid > div.is-wide { grid-column: 1 / -1; }
+  .relation-dimensions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

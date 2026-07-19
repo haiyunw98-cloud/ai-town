@@ -228,8 +228,7 @@ export default defineSchema({
     dayKey: v.string(),
     advancedAt: v.number(),
   })
-    .index('worldDay', ['worldId', 'dayKey'])
-    .index('worldTime', ['worldId', 'dayKey']),
+    .index('worldDay', ['worldId', 'dayKey']),
 
   // Append-only factual journal. Code writes through appendEconomyLedger, whose
   // stable idempotency key preserves the first observed settlement.
@@ -260,7 +259,9 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index('idempotencyKey', ['worldId', 'idempotencyKey'])
-    .index('day', ['worldId', 'dayKey', 'createdAt']),
+    .index('day', ['worldId', 'dayKey', 'createdAt'])
+    .index('residentTime', ['worldId', 'residentId', 'createdAt'])
+    .index('institutionTime', ['worldId', 'institutionId', 'createdAt']),
 
   townRelationships: defineTable({
     worldId: v.id('worlds'),

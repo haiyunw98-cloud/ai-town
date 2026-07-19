@@ -1,12 +1,18 @@
 import { v } from 'convex/values';
-import { internalMutation, query, type MutationCtx } from './_generated/server';
-import { playerId } from './aiTown/ids';
+import { internalMutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
+import { playerId, type GameId } from './aiTown/ids';
 import {
   getLifeProfileById,
   getLifeProfileByName,
   type LifeStats,
+  type ResidentLifeProfile,
+  residentLifeProfiles,
 } from '../data/worlds/lighthouse-town/lives';
 import { lighthouseCharacters } from '../data/worlds/lighthouse-town/characters';
+import {
+  institutions,
+  residentEconomyProfiles,
+} from '../data/worlds/lighthouse-town/economy';
 import type { Id } from './_generated/dataModel';
 
 type LiveSignals = {
@@ -15,6 +21,10 @@ type LiveSignals = {
   activity?: string;
   recentMessageCount: number;
 };
+
+const LIGHTHOUSE_ADULT_PROFILE_IDS = new Set(
+  residentLifeProfiles.filter((profile) => profile.age >= 18).map((profile) => profile.id),
+);
 
 const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 
@@ -115,22 +125,35 @@ export const residentDossier = query({
     worldId: v.id('worlds'),
     playerId,
   },
-  handler: async (ctx, args) => {
+  handler: readResidentDossier,
+});
+
+export async function readResidentDossier(
+  ctx: Pick<QueryCtx, 'db'>,
+  args: { worldId: Id<'worlds'>; playerId: GameId<'players'> },
+) {
+    const world = await ctx.db.get(args.worldId);
+    const worldStatus = await ctx.db
+      .query('worldStatus')
+      .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+      .unique();
+    if (!world || !worldStatus) return unavailableDossier('missing', 'world-missing');
+    const worldRuntimeStatus = worldStatus.status === 'running' ? 'running' as const : 'paused' as const;
+    const player = world.players.find((candidate) => candidate.id === args.playerId);
+    const residentAgents = world.agents.filter((agent) => agent.playerId === args.playerId);
+    if (!player || player.human || residentAgents.length !== 1) {
+      return unavailableDossier(worldRuntimeStatus, 'resident-runtime-identity');
+    }
     const description = await ctx.db
       .query('playerDescriptions')
       .withIndex('worldId', (q) => q.eq('worldId', args.worldId).eq('playerId', args.playerId))
       .first();
-    const characterId = description && lighthouseCharacters.find(
-      (character) => character.sprite === description.character,
-    )?.id;
-    const profile = characterId
-      ? getLifeProfileById(characterId)
-      : description && getLifeProfileByName(description.name);
-    if (!description || !profile) return null;
+    const profile = description && resolveRuntimeProfile(description);
+    if (!description || !profile) {
+      return unavailableDossier(worldRuntimeStatus, 'resident-description-profile');
+    }
 
-    const world = await ctx.db.get(args.worldId);
-    const player = world?.players.find((candidate) => candidate.id === args.playerId);
-    const conversation = world?.conversations.find((candidate) => {
+    const conversation = world.conversations.find((candidate) => {
       const member = candidate.participants.find(
         (participant) => participant.playerId === args.playerId,
       );
@@ -153,6 +176,132 @@ export const residentDossier = query({
       )
       .order('desc')
       .take(6);
+    const economyAccount = await ctx.db
+      .query('residentEconomy')
+      .withIndex('resident', (q) =>
+        q.eq('worldId', args.worldId).eq('residentId', args.playerId),
+      )
+      .unique();
+    const economyProfile = residentEconomyProfiles.find(
+      (candidate) => candidate.id === profile.id,
+    );
+    if (!economyProfile || (economyAccount && economyAccount.profileId !== economyProfile.id)) {
+      return unavailableDossier(worldRuntimeStatus, 'resident-economy-profile');
+    }
+    const institution = economyProfile && institutions.find(
+      (candidate) => candidate.id === economyProfile.institutionId,
+    );
+    const economyLedger = economyAccount
+      ? await ctx.db
+          .query('economyLedger')
+          .withIndex('residentTime', (q) =>
+            q.eq('worldId', args.worldId).eq('residentId', args.playerId),
+          )
+          .order('desc')
+          .take(5)
+      : [];
+    const [relationshipsAsA, relationshipsAsB] = await Promise.all([
+      ctx.db
+        .query('townRelationships')
+        .withIndex('worldResidentA', (q) =>
+          q.eq('worldId', args.worldId).eq('residentA', args.playerId),
+        )
+        .take(9),
+      ctx.db
+        .query('townRelationships')
+        .withIndex('worldResidentB', (q) =>
+          q.eq('worldId', args.worldId).eq('residentB', args.playerId),
+        )
+        .take(9),
+    ]);
+    const runtimeRelationships = [] as Array<{
+      targetId: GameId<'players'>;
+      targetName: string;
+      targetPhoto: string;
+      friendship: number;
+      trust: number;
+      attraction: number;
+      business: number;
+      recentChanges: Array<{
+        kind: string;
+        text: string;
+        sourceKey: string;
+        createdAt: number;
+        friendshipDelta: number;
+        trustDelta: number;
+        attractionDelta: number;
+        businessDelta: number;
+      }>;
+    }>;
+    const seenTargets = new Set<string>();
+    const seenProfileIds = new Set<string>([profile.id]);
+    let invalidRelationshipRow = false;
+    for (const relationship of [...relationshipsAsA, ...relationshipsAsB]) {
+        if (
+          relationship.residentA >= relationship.residentB
+          || (relationship.residentA !== args.playerId && relationship.residentB !== args.playerId)
+        ) {
+          invalidRelationshipRow = true;
+          continue;
+        }
+        const targetId = (relationship.residentA === args.playerId
+          ? relationship.residentB
+          : relationship.residentA) as GameId<'players'>;
+        if (seenTargets.has(targetId)) {
+          invalidRelationshipRow = true;
+          continue;
+        }
+        const targetPlayer = world.players.find((candidate) => candidate.id === targetId);
+        const targetAgents = world.agents.filter((agent) => agent.playerId === targetId);
+        const targetDescription = await ctx.db
+          .query('playerDescriptions')
+          .withIndex('worldId', (q) =>
+            q.eq('worldId', args.worldId).eq('playerId', targetId),
+          )
+          .first();
+        const targetProfile = targetDescription && resolveRuntimeProfile(targetDescription);
+        if (
+          !targetPlayer
+          || targetPlayer.human
+          || targetAgents.length !== 1
+          || !targetProfile
+          || seenProfileIds.has(targetProfile.id)
+        ) {
+          invalidRelationshipRow = true;
+          continue;
+        }
+        seenTargets.add(targetId);
+        seenProfileIds.add(targetProfile.id);
+        const recentChanges = await ctx.db
+          .query('relationshipChanges')
+          .withIndex('pairTime', (q) =>
+            q
+              .eq('worldId', args.worldId)
+              .eq('residentA', relationship.residentA)
+              .eq('residentB', relationship.residentB),
+          )
+          .order('desc')
+          .take(3);
+        runtimeRelationships.push({
+          targetId,
+          targetName: targetProfile.name,
+          targetPhoto: targetProfile.photos[0],
+          friendship: relationship.friendship,
+          trust: relationship.trust,
+          attraction: relationship.attraction,
+          business: relationship.business,
+          recentChanges: recentChanges.map((change) => ({
+            kind: change.kind,
+            text: change.text,
+            sourceKey: change.sourceKey,
+            createdAt: change.createdAt,
+            friendshipDelta: change.friendshipDelta,
+            trustDelta: change.trustDelta,
+            attractionDelta: change.attractionDelta,
+            businessDelta: change.businessDelta,
+          })),
+        });
+    }
     const activity = player?.activity && player.activity.until > Date.now()
       ? player.activity.description
       : undefined;
@@ -190,8 +339,16 @@ export const residentDossier = query({
         createdAt: null as number | null,
       })),
     ].slice(0, 6);
+    const completeAdultProfileSet = seenProfileIds.size === LIGHTHOUSE_ADULT_PROFILE_IDS.size
+      && [...LIGHTHOUSE_ADULT_PROFILE_IDS].every((profileId) => seenProfileIds.has(profileId));
+    const completeRelationships = runtimeRelationships.length === LIGHTHOUSE_ADULT_PROFILE_IDS.size - 1
+      && completeAdultProfileSet
+      && !invalidRelationshipRow;
 
     return {
+      dossierStatus: 'available' as const,
+      worldRuntimeStatus,
+      snapshotStatus: worldRuntimeStatus === 'running' ? 'current' as const : 'paused' as const,
       profile: {
         id: profile.id,
         name: profile.name,
@@ -208,19 +365,82 @@ export const residentDossier = query({
       stats,
       situation,
       recentEvents,
-      relationships: profile.relationships.flatMap((relationship) => {
-        const target = getLifeProfileById(relationship.targetId);
-        return target
-          ? [{
-              ...relationship,
-              targetName: target.name,
-              targetPhoto: target.photos[0],
-            }]
-          : [];
-      }),
+      economy: economyAccount
+        ? {
+            economyStatus: worldRuntimeStatus === 'running' ? 'live' as const : 'snapshot' as const,
+            staticFallback: false,
+            balance: economyAccount.balance,
+            todayIncome: economyAccount.todayIncome,
+            todayExpense: economyAccount.todayExpense,
+            hunger: economyAccount.hunger,
+            energy: economyAccount.energy,
+            dayKey: economyAccount.dayKey,
+            occupation: economyProfile?.occupation ?? profile.occupation,
+            institution: institution?.name ?? null,
+            compensation: economyProfile?.compensation ?? null,
+            recentLedger: economyLedger.map((entry) => ({
+              kind: entry.kind,
+              text: entry.text,
+              amount: entry.amount,
+              item: entry.item,
+              quantity: entry.quantity,
+              createdAt: entry.createdAt,
+              sourceKey: entry.sourceKey,
+            })),
+          }
+        : {
+            economyStatus: 'initializing' as const,
+            staticFallback: true,
+            balance: null,
+            todayIncome: null,
+            todayExpense: null,
+            hunger: null,
+            energy: null,
+            dayKey: null,
+            occupation: economyProfile?.occupation ?? profile.occupation,
+            institution: institution?.name ?? null,
+            compensation: economyProfile?.compensation ?? null,
+            recentLedger: [],
+          },
+      relationshipsStatus: worldRuntimeStatus === 'paused' && completeRelationships
+        ? 'snapshot' as const
+        : completeRelationships
+          ? 'live' as const
+          : runtimeRelationships.length > 0
+            ? 'partial' as const
+            : 'initializing' as const,
+      relationshipCount: runtimeRelationships.length,
+      expectedRelationshipCount: LIGHTHOUSE_ADULT_PROFILE_IDS.size - 1,
+      relationships: runtimeRelationships,
     };
-  },
-});
+}
+
+function resolveRuntimeProfile(description: { name: string; character?: string }) {
+  const nameProfile = getLifeProfileByName(description.name);
+  if (description.character) {
+    const characterProfile = getLifeProfileById(lighthouseCharacters.find(
+      (character) => character.sprite === description.character,
+    )?.id ?? '');
+    if (!nameProfile || !characterProfile || nameProfile.id !== characterProfile.id) return null;
+  }
+  return nameProfile && isConfiguredAdultProfile(nameProfile) ? nameProfile : null;
+}
+
+function isConfiguredAdultProfile(profile: ResidentLifeProfile) {
+  return profile.age >= 18 && LIGHTHOUSE_ADULT_PROFILE_IDS.has(profile.id);
+}
+
+function unavailableDossier(
+  worldRuntimeStatus: 'running' | 'paused' | 'missing',
+  unavailableReason: string,
+) {
+  return {
+    dossierStatus: 'unavailable' as const,
+    worldRuntimeStatus,
+    snapshotStatus: 'unavailable' as const,
+    unavailableReason,
+  };
+}
 
 function cleanExcerpt(text: string) {
   const cleaned = text

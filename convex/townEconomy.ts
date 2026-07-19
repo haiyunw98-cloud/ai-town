@@ -3,6 +3,7 @@ import {
   goods,
   institutions,
   residentEconomyProfiles,
+  services as townServices,
   type GoodId,
   type InstitutionDefinition,
   type ResidentEconomyProfile,
@@ -14,11 +15,21 @@ import {
 import {
   townLandmarkById,
   townLandmarks,
+  mapheight,
+  mapwidth,
+  tiledim,
+  tilesetpath,
   type TownLandmarkId,
 } from '../data/worlds/lighthouse-town/map';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
-import { internalMutation, internalQuery, type MutationCtx } from './_generated/server';
+import {
+  internalMutation,
+  internalQuery,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from './_generated/server';
 import { MAX_MONEY, MAX_STOCK } from './townEconomyRules';
 import { settlePurchase, settleWork } from './townEconomyRules';
 import { distance } from './util/geometry';
@@ -350,7 +361,7 @@ async function latestDailyEconomyMarker(
 ) {
   return ctx.db
     .query('dailyEconomyDays')
-    .withIndex('worldTime', (q) => q.eq('worldId', worldId))
+    .withIndex('worldDay', (q) => q.eq('worldId', worldId))
     .order('desc')
     .first();
 }
@@ -401,6 +412,114 @@ export const residentEconomyState = internalQuery({
     };
   },
 });
+
+export const institutionDetails = query({
+  args: { worldId: v.id('worlds'), institutionId: v.string() },
+  handler: readInstitutionDetails,
+});
+
+export async function readInstitutionDetails(
+  ctx: Pick<QueryCtx, 'db'>,
+  args: { worldId: Id<'worlds'>; institutionId: string },
+) {
+    const definition = institutions.find((candidate) => candidate.id === args.institutionId);
+    if (!definition) return null;
+    const [world, worldStatus, worldMap] = await Promise.all([
+      ctx.db.get(args.worldId),
+      ctx.db
+        .query('worldStatus')
+        .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+        .unique(),
+      ctx.db
+        .query('maps')
+        .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+        .unique(),
+    ]);
+    if (!world || !worldStatus) return unavailableInstitution('missing', 'world-missing');
+    const worldRuntimeStatus = worldStatus.status === 'running' ? 'running' as const : 'paused' as const;
+    if (
+      !worldMap
+      || worldMap.tileSetUrl !== tilesetpath
+      || worldMap.width !== mapwidth
+      || worldMap.height !== mapheight
+      || worldMap.tileDim !== tiledim
+    ) {
+      return unavailableInstitution(worldRuntimeStatus, 'foreign-world-map');
+    }
+    const landmark = townLandmarkById(definition.landmarkId as TownLandmarkId);
+    const runtime = await ctx.db
+      .query('townInstitutions')
+      .withIndex('institution', (q) =>
+        q.eq('worldId', args.worldId).eq('institutionId', args.institutionId),
+      )
+      .unique();
+    const recentLedger = runtime
+      ? await ctx.db
+          .query('economyLedger')
+          .withIndex('institutionTime', (q) =>
+            q.eq('worldId', args.worldId).eq('institutionId', args.institutionId),
+          )
+          .order('desc')
+          .take(8)
+      : [];
+    const stock = runtime ? parseCounterJson(runtime.stockJson) : {};
+    const serviceCounters = runtime ? parseCounterJson(runtime.serviceCountersJson) : {};
+    return {
+      institutionStatus: 'available' as const,
+      worldRuntimeStatus,
+      snapshotStatus: worldRuntimeStatus === 'running' ? 'current' as const : 'paused' as const,
+      institutionId: definition.id,
+      name: definition.name,
+      description: landmark.description,
+      openHours: landmark.openHours,
+      landmarkServices: landmark.services,
+      ...(runtime
+        ? { runtimeStatus: worldRuntimeStatus === 'running' ? 'live' as const : 'snapshot' as const }
+        : { runtimeStatus: 'initializing' as const }),
+      goods: definition.goods.map((goodId) => {
+        const good = goods.find((candidate) => candidate.id === goodId)!;
+        return { id: good.id, name: good.name, price: good.price, stock: runtime ? stock[goodId] ?? 0 : null };
+      }),
+      services: definition.serviceIds.map((serviceId) => {
+        const service = townServices.find((candidate) => candidate.id === serviceId)!;
+        return {
+          id: service.id,
+          name: service.name,
+          counterName: service.counterName,
+          completed: runtime ? serviceCounters[serviceId] ?? 0 : null,
+        };
+      }),
+      stock: runtime ? stock : null,
+      serviceCounters: runtime ? serviceCounters : null,
+      cash: runtime?.cash ?? null,
+      todayIncome: runtime?.todayIncome ?? null,
+      todayExpense: runtime?.todayExpense ?? null,
+      visitorCount: runtime?.visitorCount ?? null,
+      dayKey: runtime?.dayKey ?? null,
+      recentLedger: recentLedger.map((entry) => ({
+        kind: entry.kind,
+        text: entry.text,
+        amount: entry.amount,
+        item: entry.item,
+        quantity: entry.quantity,
+        residentId: entry.residentId,
+        sourceKey: entry.sourceKey,
+        createdAt: entry.createdAt,
+      })),
+    };
+}
+
+function unavailableInstitution(
+  worldRuntimeStatus: 'running' | 'paused' | 'missing',
+  unavailableReason: string,
+) {
+  return {
+    institutionStatus: 'unavailable' as const,
+    worldRuntimeStatus,
+    snapshotStatus: 'unavailable' as const,
+    unavailableReason,
+  };
+}
 
 export async function reconcileTownEconomyAfterAgentCreation(
   ctx: EconomyReconciliationContext,

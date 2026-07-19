@@ -14,6 +14,7 @@ import {
   settleActivity,
   validateActivityRegistration,
 } from './townEconomy';
+import * as townEconomyModule from './townEconomy';
 import {
   applyCompletedActivityRegistrationAcks,
   chooseResidentActivityWithLocalModel,
@@ -310,7 +311,7 @@ describe('town economy persistence', () => {
     expect(schema).toContain('townInstitutions: defineTable');
     expect(schema).toContain('economyLedger: defineTable');
     expect(schema).toContain('activityRegistrationAcks: defineTable');
-    expect(schema).toContain(".index('worldTime', ['worldId', 'dayKey'])");
+    expect(schema.match(/\['worldId', 'dayKey'\]/g)).toHaveLength(1);
     expect(schema).toContain(".index('input', ['worldId', 'inputId'])");
     expect(schema).toContain(".index('resident', ['worldId', 'residentId'])");
     expect(schema).toContain(".index('institution', ['worldId', 'institutionId'])");
@@ -2408,4 +2409,94 @@ function validInstitutionRow(overrides: Record<string, unknown> = {}) {
     updatedAt: now,
     ...overrides,
   };
+}
+
+describe('institution details query', () => {
+  const source = readFileSync(new URL('./townEconomy.ts', import.meta.url), 'utf8');
+
+  test('combines the static place definition with live counters and recent factual ledger rows', () => {
+    expect(source).toMatch(/export const institutionDetails\s*=\s*query/u);
+    expect(source).toContain("query('townInstitutions')");
+    expect(source).toContain("query('economyLedger')");
+    expect(source).toContain("withIndex('institutionTime'");
+    expect(source).toContain('runtimeStatus: worldRuntimeStatus');
+    expect(source).toContain("runtimeStatus: 'initializing'");
+    for (const field of [
+      'description', 'goods', 'services', 'stock', 'serviceCounters', 'cash',
+      'todayIncome', 'todayExpense', 'visitorCount', 'dayKey', 'recentLedger',
+    ]) {
+      expect(source).toContain(field);
+    }
+  });
+
+  test('exposes the real query handler for world-status boundary tests', () => {
+    expect(typeof (townEconomyModule as Record<string, unknown>).readInstitutionDetails)
+      .toBe('function');
+  });
+
+  test('returns frozen institution rows as a paused snapshot', async () => {
+    const fixture = institutionQueryFixture('stoppedByDeveloper');
+    const result = await townEconomyModule.readInstitutionDetails(fixture.ctx, {
+      worldId,
+      institutionId: 'tea-house',
+    });
+    expect(result).toEqual(expect.objectContaining({
+      institutionStatus: 'available',
+      worldRuntimeStatus: 'paused',
+      snapshotStatus: 'paused',
+      runtimeStatus: 'snapshot',
+      cash: 120,
+    }));
+  });
+
+  test('does not return static institution claims for an unknown world', async () => {
+    const fixture = makeContext();
+    const result = await townEconomyModule.readInstitutionDetails(fixture.ctx, {
+      worldId,
+      institutionId: 'tea-house',
+    });
+    expect(result).toEqual(expect.objectContaining({
+      institutionStatus: 'unavailable',
+      worldRuntimeStatus: 'missing',
+      snapshotStatus: 'unavailable',
+    }));
+    expect(result).not.toHaveProperty('description');
+  });
+
+  test('rejects a foreign world map instead of attaching lighthouse static details', async () => {
+    const fixture = institutionQueryFixture('running', '/foreign/tileset.svg');
+    const result = await townEconomyModule.readInstitutionDetails(fixture.ctx, {
+      worldId,
+      institutionId: 'tea-house',
+    });
+    expect(result).toEqual(expect.objectContaining({
+      institutionStatus: 'unavailable',
+      snapshotStatus: 'unavailable',
+    }));
+    expect(result).not.toHaveProperty('description');
+  });
+});
+
+function institutionQueryFixture(
+  status: 'running' | 'stoppedByDeveloper' | 'inactive',
+  tileSetUrl = '/ai-town/assets/worlds/lighthouse-town/tileset.svg',
+) {
+  const fixture = makeContext();
+  fixture.db.seed('worlds', {
+    _id: worldId,
+    nextId: 0,
+    players: [],
+    agents: [],
+    conversations: [],
+  });
+  seedWorldStatus(fixture.db, status);
+  fixture.db.seed('maps', {
+    worldId,
+    width: 40,
+    height: 30,
+    tileSetUrl,
+    tileDim: 32,
+  });
+  fixture.db.seed('townInstitutions', validInstitutionRow());
+  return fixture;
 }

@@ -19,6 +19,10 @@ describe('world art selection', () => {
   test('renders named town institutions inside the Pixi world', () => {
     const pixiGame = readFileSync(new URL('./PixiGame.tsx', import.meta.url), 'utf8');
     const game = readFileSync(new URL('./Game.tsx', import.meta.url), 'utf8');
+    const institutionDetails = readFileSync(
+      new URL('./InstitutionDetails.tsx', import.meta.url),
+      'utf8',
+    );
     const landmarkLabels = readFileSync(new URL('./TownLandmarks.tsx', import.meta.url), 'utf8');
     const landmarks = readFileSync(
       new URL('../../data/worlds/lighthouse-town/map.ts', import.meta.url),
@@ -28,17 +32,18 @@ describe('world art selection', () => {
     expect(pixiGame).toContain('<TownLandmarks');
     expect(pixiGame).toContain('viewport.resize(props.width, props.height');
     expect(landmarkLabels).toContain('onSelect(landmark)');
-    expect(landmarkLabels).toContain('onpointerdown={() => onSelect(landmark)}');
+    expect(landmarkLabels).toContain('onpointertap');
+    expect(landmarkLabels).toContain('event.stopPropagation()');
     expect(landmarkLabels).toContain('hitArea={new PIXI.Rectangle');
-    expect(game).toContain('town-landmark-card');
+    expect(game).toContain('<InstitutionDetails');
     expect(game).toContain('town-location-directory');
     expect(game).not.toContain('key={`${width}x${height}`}');
     expect(game).toContain('className="town-pixi-canvas"');
     expect(game).not.toContain('className="container"');
     expect(game).toContain('new ResizeObserver');
     expect(game).not.toContain('useElementSize');
-    expect(game).toContain('selectedLandmark.description');
-    expect(game).toContain('selectedLandmark.services.map');
+    expect(institutionDetails).toContain('details.description');
+    expect(institutionDetails).toContain('details.landmarkServices.map');
     for (const name of [
       '听雨茶庄',
       '河鲜食肆',
