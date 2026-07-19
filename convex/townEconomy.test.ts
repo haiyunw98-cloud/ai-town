@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { residentEconomyProfiles } from '../data/worlds/lighthouse-town/economy';
+import { localizedDescriptions } from '../data/worlds/lighthouse-town/characters';
 import {
   appendEconomyLedger,
   advanceDailyEconomy,
@@ -2664,6 +2665,55 @@ describe('daily event reward settlement', () => {
     }
   });
 
+  test('keeps identity as real agent persona text and rejects profile ids posing as identity', async () => {
+    const fixture = dailyRewardFixture();
+    expect(String(fixture.db.table('eventParticipants')[0].identity)).toContain('林澜');
+    fixture.db.table('eventParticipants')[0].identity = residentEconomyProfiles[0].id;
+    const before = fixture.db.snapshot();
+    await expect(settleDailyEventRewards(
+      fixture.ctx,
+      dailyRewardArgs(fixture.eventId),
+    )).rejects.toThrow(/identity/u);
+    expect(fixture.db.snapshot()).toEqual(before);
+  });
+
+  test('requires one matching player and agent description for every persisted participant', async () => {
+    const corruptions: Array<(fixture: ReturnType<typeof dailyRewardFixture>) => void> = [
+      (fixture) => {
+        const rows = fixture.db.table('playerDescriptions');
+        rows.splice(rows.findIndex((row) => row.playerId === 'p:0'), 1);
+      },
+      (fixture) => {
+        const row = fixture.db.table('playerDescriptions').find((entry) => entry.playerId === 'p:0')!;
+        fixture.db.seed('playerDescriptions', { ...row, _id: 'playerDescriptions:duplicate' });
+      },
+      (fixture) => {
+        fixture.db.table('playerDescriptions').find((row) => row.playerId === 'p:0')!.name = '错误名字';
+      },
+      (fixture) => {
+        const rows = fixture.db.table('agentDescriptions');
+        rows.splice(rows.findIndex((row) => row.agentId === 'a:0'), 1);
+      },
+      (fixture) => {
+        const row = fixture.db.table('agentDescriptions').find((entry) => entry.agentId === 'a:0')!;
+        fixture.db.seed('agentDescriptions', { ...row, _id: 'agentDescriptions:duplicate' });
+      },
+      (fixture) => {
+        fixture.db.table('agentDescriptions').find((row) => row.agentId === 'a:0')!.identity = '错误人格';
+      },
+    ];
+    for (const corrupt of corruptions) {
+      const fixture = dailyRewardFixture();
+      corrupt(fixture);
+      const before = fixture.db.snapshot();
+      await expect(settleDailyEventRewards(
+        fixture.ctx,
+        dailyRewardArgs(fixture.eventId),
+      )).rejects.toThrow();
+      expect(fixture.db.snapshot()).toEqual(before);
+    }
+  });
+
   test('preflights every collision and money boundary before patching any account', async () => {
     const collision = dailyRewardFixture();
     collision.db.seed('economyLedger', {
@@ -2694,6 +2744,22 @@ describe('daily event reward settlement', () => {
     expect(overflow.db.snapshot()).toEqual(overflowBefore);
 
   });
+
+  test('returns an exact full replay before applying current account reward boundaries', async () => {
+    const fixture = dailyRewardFixture();
+    const args = dailyRewardArgs(fixture.eventId);
+    await settleDailyEventRewards(fixture.ctx, args);
+    const champion = fixture.db.table('residentEconomy').find(
+      (row) => row.residentId === 'p:0',
+    )!;
+    champion.balance = MAX_MONEY;
+    champion.todayIncome = MAX_MONEY;
+    const before = fixture.db.snapshot();
+
+    expect(await settleDailyEventRewards(fixture.ctx, { ...args, now: now + 60_000 }))
+      .toEqual({ status: 'already-settled', ledgerEntries: 12, totalAmount: 180 });
+    expect(fixture.db.snapshot()).toEqual(before);
+  });
 });
 
 function rewardParticipants() {
@@ -2717,8 +2783,24 @@ function dailyRewardArgs(eventId: Id<'townEvents'>) {
 
 function dailyRewardFixture() {
   const fixture = makeContext();
+  fixture.db.table('economyLedger');
   seedRuntimeResidents(fixture.db);
+  const configuredDescriptions = localizedDescriptions('zh-CN');
   residentEconomyProfiles.forEach((profile, index) => {
+    const configured = configuredDescriptions.find((description) => description.name === profile.name)!;
+    Object.assign(
+      fixture.db.table('playerDescriptions').find((row) => row.playerId === `p:${index}`)!,
+      {
+        character: configured.character,
+        description: configured.identity,
+      },
+    );
+    fixture.db.seed('agentDescriptions', {
+      worldId,
+      agentId: `a:${index}`,
+      identity: configured.identity,
+      plan: configured.plan,
+    });
     fixture.db.seed('residentEconomy', {
       worldId,
       residentId: `p:${index}`,
@@ -2753,11 +2835,12 @@ function dailyRewardFixture() {
     stageIndex: 6,
   }) as StoredRow;
   residentEconomyProfiles.forEach((profile, index) => {
+    const configured = configuredDescriptions.find((description) => description.name === profile.name)!;
     fixture.db.seed('eventParticipants', {
       eventId: event._id,
       residentId: `p:${index}`,
       displayName: profile.name,
-      identity: profile.id,
+      identity: configured.identity,
       score: 100 - index,
       shells: 0,
       active: index === 0,

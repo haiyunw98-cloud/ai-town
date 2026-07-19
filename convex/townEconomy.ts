@@ -646,6 +646,7 @@ export async function settleDailyEventRewards(
   const seenProfiles = new Set<string>();
   const accountPlans: Array<{
     accountId: Id<'residentEconomy'>;
+    profileId: string;
     balance: number;
     todayIncome: number;
     todayExpense: number;
@@ -654,11 +655,35 @@ export async function settleDailyEventRewards(
 
   for (const participant of participants) {
     const player = world.players.find((candidate) => candidate.id === participant.residentId);
-    const activeAgentCount = world.agents.filter(
+    const activeAgents = world.agents.filter(
       (candidate) => candidate.playerId === participant.residentId,
-    ).length;
-    if (!player || player.human !== undefined || activeAgentCount !== 1) {
+    );
+    if (!player || player.human !== undefined || activeAgents.length !== 1) {
       throw new Error(`Daily event resident is not one active AI: ${participant.residentId}`);
+    }
+    const playerDescriptions = await ctx.db
+      .query('playerDescriptions')
+      .withIndex('worldId', (q) =>
+        q.eq('worldId', args.worldId).eq('playerId', participant.residentId),
+      )
+      .take(2);
+    if (
+      playerDescriptions.length !== 1
+      || playerDescriptions[0].name !== participant.displayName
+    ) {
+      throw new Error(`Daily event player description mismatch: ${participant.residentId}`);
+    }
+    const agentDescriptions = await ctx.db
+      .query('agentDescriptions')
+      .withIndex('worldId', (q) =>
+        q.eq('worldId', args.worldId).eq('agentId', activeAgents[0].id),
+      )
+      .take(2);
+    if (
+      agentDescriptions.length !== 1
+      || agentDescriptions[0].identity !== participant.identity
+    ) {
+      throw new Error(`Daily event agent identity mismatch: ${participant.residentId}`);
     }
     const account = await ctx.db
       .query('residentEconomy')
@@ -673,7 +698,7 @@ export async function settleDailyEventRewards(
     if (
       !profile
       || profile.name !== participant.displayName
-      || profile.id !== participant.identity
+      || playerDescriptions[0].name !== profile.name
     ) {
       throw new Error(`Daily event resident is not configured: ${participant.residentId}`);
     }
@@ -720,19 +745,13 @@ export async function settleDailyEventRewards(
     const reward = entries.reduce((sum, entry) => sum + entry.amount, 0);
     const dayIncome = account.dayKey === args.dayKey ? account.todayIncome : 0;
     const dayExpense = account.dayKey === args.dayKey ? account.todayExpense : 0;
-    if (
-      !isBoundedSafeInteger(account.balance + reward, MAX_MONEY)
-      || !isBoundedSafeInteger(dayIncome + reward, MAX_MONEY)
-      || !isBoundedSafeInteger(dayExpense, MAX_MONEY)
-    ) {
-      throw new Error(`Daily event reward money boundary exceeded: ${profile.id}`);
-    }
     for (const entry of entries) {
       validateLedgerEntryShape(entry);
       await validateLedgerContract(ctx, entry);
     }
     accountPlans.push({
       accountId: account._id,
+      profileId: profile.id,
       balance: account.balance + reward,
       todayIncome: dayIncome + reward,
       todayExpense: dayExpense,
@@ -763,6 +782,16 @@ export async function settleDailyEventRewards(
   }
   if (existingCount !== 0) {
     throw new Error('Daily event reward collision: partial prior settlement');
+  }
+
+  for (const plan of accountPlans) {
+    if (
+      !isBoundedSafeInteger(plan.balance, MAX_MONEY)
+      || !isBoundedSafeInteger(plan.todayIncome, MAX_MONEY)
+      || !isBoundedSafeInteger(plan.todayExpense, MAX_MONEY)
+    ) {
+      throw new Error(`Daily event reward money boundary exceeded: ${plan.profileId}`);
+    }
   }
 
   for (const plan of accountPlans) {
@@ -808,7 +837,7 @@ function validatePersistedDailyEventParticipants(
   const participants = rows.map((participant) => {
     assertBoundedString(participant.residentId, 80, 'Daily event residentId');
     assertBoundedString(participant.displayName, 80, 'Daily event displayName');
-    assertBoundedString(participant.identity, 80, 'Daily event identity');
+    assertBoundedString(participant.identity, 500, 'Daily event identity');
     if (typeof participant.reachedFinal !== 'boolean') {
       throw new Error('Daily event reachedFinal must be persisted as a boolean');
     }
