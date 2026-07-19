@@ -16,6 +16,7 @@ import type { ServerGame } from '../hooks/serverGame.ts';
 import TownLandmarks from './TownLandmarks.tsx';
 import type { TownLandmark } from '../../data/worlds/lighthouse-town/map.ts';
 import { initialViewportScale } from './viewportMath.ts';
+import EventMapOverlay from './EventMapOverlay.tsx';
 
 export const PixiGame = (props: {
   worldId: Id<'worlds'>;
@@ -32,6 +33,7 @@ export const PixiGame = (props: {
   const viewportRef = useRef<Viewport | undefined>();
 
   const humanTokenIdentifier = useQuery(api.world.userStatus, { worldId: props.worldId }) ?? null;
+  const eventMapSnapshot = useQuery(api.events.eventMapSnapshot, { worldId: props.worldId });
   const humanPlayerId = [...props.game.world.players.values()].find(
     (p) => p.human === humanTokenIdentifier,
   )?.id;
@@ -120,6 +122,7 @@ export const PixiGame = (props: {
         onpointerdown={onMapPointerDown}
       />
       <TownLandmarks tileDim={tileDim} onSelect={props.onSelectLandmark} />
+      <EventMapOverlay tileDim={tileDim} snapshot={eventMapSnapshot} />
       {players.map(
         (p) =>
           // Only show the path for the human player in non-debug mode.

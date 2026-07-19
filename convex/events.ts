@@ -614,6 +614,44 @@ export const observerSnapshot = query({
   },
 });
 
+export const eventMapSnapshot = query({
+  args: { worldId: v.id('worlds') },
+  handler: async (ctx, args) => {
+    const recent = await ctx.db
+      .query('townEvents')
+      .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+      .order('desc')
+      .take(20);
+    const event = recent.find((entry) => entry.dailyKey !== undefined);
+    if (!event) return null;
+    const participants = await ctx.db
+      .query('eventParticipants')
+      .withIndex('eventId', (q) => q.eq('eventId', event._id))
+      .take(10);
+    if (participants.length > 9) throw new Error('Daily event map roster exceeded its safe bound.');
+    return {
+      event: {
+        dailyKey: event.dailyKey!,
+        name: event.eventName ?? '灯塔镇每日活动',
+        status: event.status,
+        phase: event.phase,
+        stageIndex: event.stageIndex ?? 0,
+        templateId: event.templateId,
+        venueMode: event.venueMode,
+        winnerId: event.winnerId,
+      },
+      participants: participants.map((participant) => ({
+        residentId: participant.residentId,
+        displayName: participant.displayName,
+        active: participant.active,
+        role: participant.role,
+        teamId: participant.teamId,
+        rank: participant.rank,
+      })),
+    };
+  },
+});
+
 export function groupConversationMessages(
   messages: Array<{ conversationId: string; author: string; text: string; _creationTime: number }>,
   names: Map<string, string>,

@@ -230,16 +230,16 @@ export const eventCheckpoints = {
 } as const;
 
 export const trialIslandCheckpoints = {
-  arrival: { x: 50, y: 15 },
-  track: { x: 58, y: 5 },
-  bridge: { x: 70, y: 7 },
-  courtyard: { x: 57, y: 15 },
-  teamField: { x: 69, y: 15 },
-  maze: { x: 57, y: 24 },
-  resourceZone: { x: 69, y: 24 },
-  spectatorStand: { x: 79, y: 20 },
-  final: { x: 78, y: 8 },
-  awards: { x: 79, y: 15 },
+  arrival: { x: 50, y: 14 },
+  track: { x: 63, y: 10 },
+  bridge: { x: 63, y: 17 },
+  courtyard: { x: 55, y: 24 },
+  teamField: { x: 75, y: 12 },
+  maze: { x: 75, y: 24 },
+  resourceZone: { x: 53, y: 4 },
+  spectatorStand: { x: 64, y: 3 },
+  final: { x: 77, y: 15 },
+  awards: { x: 77, y: 3 },
 } as const;
 
 export const townLandmarks = [

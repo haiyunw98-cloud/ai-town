@@ -93,8 +93,14 @@ describe('daily event map movement planning', () => {
       `${command.destination.x}:${command.destination.y}`,
     )).size).toBe(9);
     for (const command of moves) expectWalkable(command.destination);
-    expect(moves.slice(0, 4).every((command) => command.destination.x < 65)).toBe(true);
-    expect(moves.slice(4).every((command) => command.destination.x >= 76)).toBe(true);
+    expect(moves.slice(0, 4).every((command) =>
+      Math.abs(command.destination.x - trialIslandCheckpoints.track.x) <= 2
+      && Math.abs(command.destination.y - trialIslandCheckpoints.track.y) <= 2,
+    )).toBe(true);
+    expect(moves.slice(4).every((command) =>
+      Math.abs(command.destination.x - trialIslandCheckpoints.spectatorStand.x) <= 2
+      && Math.abs(command.destination.y - trialIslandCheckpoints.spectatorStand.y) <= 2,
+    )).toBe(true);
   });
 
   test('preserves a slightly elapsed phase deadline for the delayed input layer to clamp', () => {

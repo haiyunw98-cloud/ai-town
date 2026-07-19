@@ -47,11 +47,15 @@ export const PixiStaticMap = PixiComponent('StaticMap', {
     const container = new PIXI.Container();
     const worldArt = worldArtForMap(map.tileSetUrl);
     if (worldArt) {
-      const art = PIXI.Sprite.from(worldArt.url);
-      art.width = screenxtiles * map.tileDim;
-      art.height = screenytiles * map.tileDim;
-      art.alpha = worldArt.backgroundAlpha;
-      container.addChild(art);
+      for (const segment of worldArt.segments) {
+        const art = PIXI.Sprite.from(segment.url);
+        art.x = segment.xTiles * map.tileDim;
+        art.y = segment.yTiles * map.tileDim;
+        art.width = segment.widthTiles * map.tileDim;
+        art.height = segment.heightTiles * map.tileDim;
+        art.alpha = segment.backgroundAlpha;
+        container.addChild(art);
+      }
     }
     const allLayers = worldArt ? [] : [...map.bgTiles, ...map.objectTiles];
 

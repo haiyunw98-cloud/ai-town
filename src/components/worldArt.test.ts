@@ -9,9 +9,24 @@ import {
 describe('world art selection', () => {
   test('uses the generated playable art only for Lighthouse Town', () => {
     expect(worldArtForMap('/ai-town/assets/worlds/lighthouse-town/tileset.svg')).toEqual({
-      url: '/ai-town/assets/worlds/lighthouse-town/playable-map-v1.webp',
-      backgroundAlpha: 1,
-      objectAlpha: 0.82,
+      segments: [
+        {
+          url: '/ai-town/assets/worlds/lighthouse-town/playable-map-v1.webp',
+          xTiles: 0,
+          yTiles: 0,
+          widthTiles: 40,
+          heightTiles: 30,
+          backgroundAlpha: 1,
+        },
+        {
+          url: '/ai-town/assets/worlds/lighthouse-town/trial-island-v1.jpg',
+          xTiles: 40,
+          yTiles: 0,
+          widthTiles: 44,
+          heightTiles: 30,
+          backgroundAlpha: 1,
+        },
+      ],
     });
     expect(worldArtForMap('/ai-town/assets/tiled/tilemap.png')).toBeUndefined();
   });

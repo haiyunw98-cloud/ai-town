@@ -108,8 +108,8 @@ const configurations: TemplateConfiguration[] = [
     id: 'island-resources',
     name: '试炼岛物资协作赛',
     venue: 'trial-island',
-    labels: ['码头集合登船', '工具搜集', '食物分配', '庭院茶歇', '团队搭建', '物资护送', '颁奖返程'],
-    checkpoints: ['old-dock', 'island-resource-zone', 'island-courtyard', 'island-courtyard', 'island-team-field', 'island-final', 'island-awards'],
+    labels: ['码头集合登船', '工具搜集', '迷宫物资搜集', '庭院茶歇', '团队搭建', '物资护送', '颁奖返程'],
+    checkpoints: ['old-dock', 'island-resource-zone', 'island-maze', 'island-courtyard', 'island-team-field', 'island-final', 'island-awards'],
     props: ['ferry', 'toolboxes', 'food-crates', 'tea-table', 'building-parts', 'supply-cart', 'podium'],
   },
   {
