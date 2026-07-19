@@ -25,6 +25,9 @@ const events = eventsModule as unknown as {
   selectDailyStateLogs: <T extends { eventKey: string; sequence: number }>(
     rows: readonly T[], dayKey: string,
   ) => T[];
+  selectInterruptedCrossDayEvent: <T extends {
+    dailyKey?: string; status: string;
+  }>(rows: readonly T[], currentDayKey: string) => T | null;
 };
 
 describe('daily model persistence eligibility', () => {
@@ -35,6 +38,29 @@ describe('daily model persistence eligibility', () => {
     expect(source).not.toContain(".filter((q) => q.eq(q.field('isDefault'), true))");
     expect(source.match(/\.withIndex\('isDefault', \(q\) => q\.eq\('isDefault', true\)\)/gu))
       .toHaveLength(6);
+  });
+
+  test('classifies exactly one older daily event while ignoring legacy and today rows', () => {
+    const legacy = { id: 'legacy', status: 'running' };
+    const today = { id: 'today', dailyKey: '2026-07-19', status: 'running' };
+    const yesterday = { id: 'yesterday', dailyKey: '2026-07-18', status: 'running' };
+    expect(events.selectInterruptedCrossDayEvent([legacy, today], '2026-07-19')).toBeNull();
+    expect(events.selectInterruptedCrossDayEvent([legacy, yesterday, today], '2026-07-19'))
+      .toBe(yesterday);
+    expect(() => events.selectInterruptedCrossDayEvent([
+      yesterday,
+      { id: 'older', dailyKey: '2026-07-17', status: 'running' },
+    ], '2026-07-19')).toThrow(/multiple|ambiguous/i);
+    expect(() => events.selectInterruptedCrossDayEvent([
+      { id: 'future', dailyKey: '2026-07-20', status: 'running' },
+    ], '2026-07-19')).toThrow(/future/i);
+  });
+
+  test('declares a bounded running-day lookup for cross-day recovery', () => {
+    const schema = readFileSync('convex/schema.ts', 'utf8');
+    const source = readFileSync('convex/events.ts', 'utf8');
+    expect(schema).toContain(".index('worldStatusDay', ['worldId', 'status', 'dailyKey'])");
+    expect(source).toContain(".withIndex('worldStatusDay', (q) =>\n      q.eq('worldId', worldStatus.worldId).eq('status', 'running'),\n    )\n    .take(4)");
   });
   test('accepts a theme only for a still-running stage-zero event on the same day', () => {
     const event = {

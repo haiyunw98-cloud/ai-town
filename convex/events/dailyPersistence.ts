@@ -97,6 +97,51 @@ export function buildMissedDailyEventDraft(
   };
 }
 
+export function archiveInterruptedDailyDraft(
+  draft: DailyEventDraft,
+  now: number,
+): DailyEventDraft {
+  if (draft.event.status === 'completed') return draft;
+  if (
+    !draft.event.dailyKey || draft.participants.length !== 9
+    || !Number.isFinite(now) || now < draft.event.updatedAt
+  ) {
+    throw new Error('Running cross-day event cannot be archived safely.');
+  }
+  const eventKey = `daily:${draft.event.dailyKey}:interrupted-cross-day`;
+  if (draft.logs.some((entry) => entry.eventKey === eventKey)) {
+    throw new Error(`Cross-day archive log collision: ${eventKey}`);
+  }
+  return {
+    event: {
+      ...draft.event,
+      status: 'completed',
+      phase: 'interrupted',
+      phaseEndsAt: now,
+      endedAt: now,
+      archiveReason: 'interrupted-cross-day',
+      winnerId: undefined,
+      updatedAt: now,
+    },
+    participants: draft.participants.map((participant) => ({
+      ...participant,
+      active: false,
+      role: 'spectator',
+    })),
+    logs: [
+      ...draft.logs,
+      {
+        eventKey,
+        sequence: draft.logs.length,
+        stageIndex: draft.event.stageIndex,
+        kind: 'interrupted-cross-day',
+        text: '昨日活动因跨日中断而安全结束，没有冠军或奖金，居民恢复普通生活。',
+        createdAt: now,
+      },
+    ],
+  };
+}
+
 export function buildDailyEventDraft(args: {
   worldId: string;
   dayKey: string;

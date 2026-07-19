@@ -24,6 +24,7 @@ import {
 import {
   buildDailyEventDraft,
   buildMissedDailyEventDraft,
+  archiveInterruptedDailyDraft,
   restoreDailyEventState,
   serializeDailyEventState,
   type DailyEventDraft,
@@ -93,6 +94,21 @@ export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
   if (defaults.length !== 1) throw new Error('Default world status is ambiguous.');
   const worldStatus = defaults[0];
   const dayKey = shanghaiEventDayKey(now);
+  const runningRows = await ctx.db
+    .query('townEvents')
+    .withIndex('worldStatusDay', (q) =>
+      q.eq('worldId', worldStatus.worldId).eq('status', 'running'),
+    )
+    .take(4);
+  if (runningRows.length === 4) {
+    throw new Error('Running daily event lookup exceeded its safe bound.');
+  }
+  const interrupted = selectInterruptedCrossDayEvent(runningRows, dayKey);
+  if (interrupted) {
+    await archiveInterruptedCrossDayEvent(
+      ctx, interrupted._id, worldStatus.worldId, now,
+    );
+  }
   const today = await ctx.db
     .query('townEvents')
     .withIndex('worldDay', (q) => q.eq('worldId', worldStatus.worldId).eq('dailyKey', dayKey))
@@ -166,6 +182,18 @@ export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
     ctx, existing._id, worldStatus.worldId, action.stageIndex, now, dayKey,
   );
   return { kind: action.kind, dayKey, eventId: existing._id, stageIndex: action.stageIndex };
+}
+
+export function selectInterruptedCrossDayEvent<T extends {
+  dailyKey?: string;
+  status: string;
+}>(rows: readonly T[], currentDayKey: string): T | null {
+  const dailyRows = rows.filter((row) => row.status === 'running' && row.dailyKey !== undefined);
+  const future = dailyRows.find((row) => row.dailyKey! > currentDayKey);
+  if (future) throw new Error(`Future running daily event detected: ${future.dailyKey}`);
+  const stale = dailyRows.filter((row) => row.dailyKey! < currentDayKey);
+  if (stale.length > 1) throw new Error('Multiple stale daily events are ambiguous.');
+  return stale[0] ?? null;
 }
 
 export const observerSnapshot = query({
@@ -818,6 +846,21 @@ async function advancePersistedDailyEvent(
   }
 }
 
+async function archiveInterruptedCrossDayEvent(
+  ctx: MutationCtx,
+  eventId: Id<'townEvents'>,
+  worldId: Id<'worlds'>,
+  now: number,
+) {
+  const draft = await loadPersistedDailyDraft(ctx, eventId);
+  const archived = archiveInterruptedDailyDraft(draft, now);
+  if (archived === draft) return;
+  await applyDailyDraft(ctx, eventId, archived);
+  await recordDailyReturn(
+    ctx, worldId, eventId, archived.participants, now, 'interrupted-cross-day',
+  );
+}
+
 async function archivePausedDailyEvent(
   ctx: MutationCtx,
   eventId: Id<'townEvents'>,
@@ -879,7 +922,7 @@ async function recordDailyReturn(
   eventId: Id<'townEvents'>,
   participants: readonly PersistedDailyParticipant[],
   now: number,
-  reason: 'completed' | 'world-paused',
+  reason: 'completed' | 'world-paused' | 'interrupted-cross-day',
 ) {
   for (const participant of participants) {
     const sourceKey = `daily-event:${eventId}:${participant.residentId}:return`;
@@ -895,7 +938,9 @@ async function recordDailyReturn(
         kind: 'daily-event-return',
         text: reason === 'completed'
           ? `${participant.displayName}结束活动并恢复普通生活。`
-          : `${participant.displayName}因小镇暂停结束活动，没有获得奖金，恢复普通生活。`,
+          : reason === 'world-paused'
+            ? `${participant.displayName}因小镇暂停结束活动，没有获得奖金，恢复普通生活。`
+            : `${participant.displayName}的昨日活动因跨日中断而结束，没有冠军或奖金，现已恢复普通生活。`,
         createdAt: now,
         sourceKey,
       });

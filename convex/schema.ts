@@ -81,6 +81,7 @@ export default defineSchema({
   })
     .index('worldId', ['worldId'])
     .index('worldDay', ['worldId', 'dailyKey'])
+    .index('worldStatusDay', ['worldId', 'status', 'dailyKey'])
     .index('status', ['status']),
 
   eventParticipants: defineTable({

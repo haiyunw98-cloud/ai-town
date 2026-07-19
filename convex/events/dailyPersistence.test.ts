@@ -7,6 +7,13 @@ import {
   serializeDailyEventState,
 } from './dailyPersistence';
 import { advanceDailyEventToStage } from './dailyStateMachine';
+import * as persistenceModule from './dailyPersistence';
+
+const persistence = persistenceModule as unknown as {
+  archiveInterruptedDailyDraft: (
+    draft: ReturnType<typeof buildDailyEventDraft>, now: number,
+  ) => ReturnType<typeof buildDailyEventDraft>;
+};
 
 const dayKey = '2026-07-19';
 const noon = Date.parse('2026-07-19T04:00:00Z');
@@ -154,5 +161,29 @@ describe('daily event persistence contract', () => {
     expect(draft.logs).toEqual([
       expect.objectContaining({ eventKey: `daily:${dayKey}:missed` }),
     ]);
+  });
+
+  test('archives a cross-day running event without winner or rewards and is idempotent', () => {
+    const draft = buildDailyEventDraft({
+      worldId: 'world', dayKey: '2026-07-18', template: dailyEventTemplates[1], theme,
+      residents, seed: 18, startedAt: noon - 24 * 60 * 60_000,
+    });
+    const interruptedAt = noon;
+    const archived = persistence.archiveInterruptedDailyDraft(draft, interruptedAt);
+
+    expect(archived.event).toEqual(expect.objectContaining({
+      dailyKey: '2026-07-18', status: 'completed', phase: 'interrupted',
+      archiveReason: 'interrupted-cross-day', endedAt: interruptedAt,
+      winnerId: undefined,
+    }));
+    expect(archived.participants).toHaveLength(9);
+    expect(archived.participants.every((entry) => !entry.active && entry.role === 'spectator'))
+      .toBe(true);
+    expect(archived.logs.at(-1)).toEqual(expect.objectContaining({
+      eventKey: 'daily:2026-07-18:interrupted-cross-day',
+      kind: 'interrupted-cross-day',
+    }));
+    expect(persistence.archiveInterruptedDailyDraft(archived, interruptedAt + 1_000))
+      .toBe(archived);
   });
 });
