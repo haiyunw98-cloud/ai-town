@@ -277,14 +277,18 @@ function validateParticipantRoles(state: DailyEventState): void {
   }
 
   if (state.status === 'running') {
+    const targetActive = DAILY_TARGET_ACTIVE[state.stageIndex];
     if (
       state.stageIndex > 5 ||
       winners.length !== 0 ||
-      competitors.length < 1 ||
+      competitors.length !== targetActive ||
+      spectators.length !== state.participants.length - targetActive ||
       competitors.some((participant) => !participant.active) ||
       spectators.some((participant) => participant.active)
     ) {
-      throw new TypeError('Running daily event state has inconsistent participant roles.');
+      throw new TypeError(
+        'Running daily event state must match the stage competitor target.',
+      );
     }
     return;
   }

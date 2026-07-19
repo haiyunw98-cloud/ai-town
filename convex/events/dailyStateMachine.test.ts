@@ -214,6 +214,47 @@ describe('daily event state machine', () => {
     }
   });
 
+  test('rejects running states whose active competitor count misses the stage target', () => {
+    const stageZero = createState();
+    const stageTwo = advanceDailyEventToStage(stageZero, 2, start + 2_000);
+    const stageTwoCompetitor = stageTwo.participants.findIndex(
+      (participant) => participant.role === 'competitor',
+    );
+    const stageTwoSpectator = stageTwo.participants.findIndex(
+      (participant) => participant.role === 'spectator',
+    );
+    const badStates: DailyEventState[] = [
+      {
+        ...stageZero,
+        participants: stageZero.participants.map((participant, index) =>
+          index === 0 ? { ...participant, active: false, role: 'spectator' } : participant,
+        ),
+      },
+      {
+        ...stageTwo,
+        participants: stageTwo.participants.map((participant, index) =>
+          index === stageTwoCompetitor
+            ? { ...participant, active: false, role: 'spectator' }
+            : participant,
+        ),
+      },
+      {
+        ...stageTwo,
+        participants: stageTwo.participants.map((participant, index) =>
+          index === stageTwoSpectator
+            ? { ...participant, active: true, role: 'competitor' }
+            : participant,
+        ),
+      },
+    ];
+
+    for (const badState of badStates) {
+      expect(() =>
+        advanceDailyEventToStage(badState, badState.stageIndex, start + 3_000),
+      ).toThrow(/target|competitor|running/i);
+    }
+  });
+
   test('rejects inconsistent completed status and roles before an idempotent return', () => {
     const completed = advanceDailyEventToStage(createState(), 6, start + 6_000);
     const winnerIndex = completed.participants.findIndex(
