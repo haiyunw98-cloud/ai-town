@@ -9,16 +9,123 @@ import { createEngine } from './aiTown/main';
 import { ENGINE_ACTION_DURATION } from './constants';
 import { detectMismatchedLLMProvider } from './util/llm';
 import { getWorldLocale } from './util/worldLocale';
-import {
-  initializeTownEconomy,
-  reconcileTownEconomyAfterAgentCreation,
-} from './townEconomy';
-import {
-  initializeTownRelations,
-  reconcileTownRelationsAfterAgentCreation,
-} from './townRelations';
+import { initializeTownEconomy, reconcileTownEconomyAfterAgentCreation } from './townEconomy';
+import { initializeTownRelations, reconcileTownRelationsAfterAgentCreation } from './townRelations';
 
 const Descriptions = localizedDescriptions(getWorldLocale());
+type ConfiguredResidentDescription = (typeof Descriptions)[number];
+
+const MAX_CONFIGURED_RESIDENTS = 32;
+
+export async function reconcileConfiguredResidentDescriptions(
+  ctx: Pick<MutationCtx, 'db'>,
+  worldId: Id<'worlds'>,
+  descriptions: readonly ConfiguredResidentDescription[] = Descriptions,
+) {
+  if (descriptions.length > MAX_CONFIGURED_RESIDENTS) {
+    throw new Error(`Too many configured residents: ${descriptions.length}`);
+  }
+  const byName = new Map<string, ConfiguredResidentDescription>();
+  const byCharacter = new Map<string, ConfiguredResidentDescription>();
+  const byIdentity = new Map<string, ConfiguredResidentDescription>();
+  for (const description of descriptions) {
+    if (byName.has(description.name)) {
+      throw new Error(`Duplicate configured resident name: ${description.name}`);
+    }
+    byName.set(description.name, description);
+    byCharacter.set(description.character, description);
+    byIdentity.set(description.identity, description);
+  }
+
+  const world = await ctx.db.get(worldId);
+  if (!world) throw new Error(`Invalid world ID: ${worldId}`);
+
+  const playerPatches: Array<{
+    id: Id<'playerDescriptions'>;
+    value: { name: string; character: string; description: string };
+  }> = [];
+  const agentPatches: Array<{
+    id: Id<'agentDescriptions'>;
+    value: { identity: string; plan: string };
+  }> = [];
+  const matchedNames = new Set<string>();
+
+  for (const player of world.players) {
+    const playerDescriptions = await ctx.db
+      .query('playerDescriptions')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId).eq('playerId', player.id))
+      .take(2);
+    const configuredRows = playerDescriptions.filter((row) => byName.has(row.name));
+    if (configuredRows.length === 0) continue;
+    if (playerDescriptions.length !== 1) {
+      throw new Error(`Duplicate player description mapping for ${player.id}`);
+    }
+
+    const playerDescription = configuredRows[0];
+    const configured = byName.get(playerDescription.name)!;
+    if (matchedNames.has(configured.name)) {
+      throw new Error(`Duplicate persisted resident name: ${configured.name}`);
+    }
+    matchedNames.add(configured.name);
+    if (player.human !== undefined) {
+      throw new Error(`Configured resident ${configured.name} belongs to a human player`);
+    }
+    const characterOwner = byCharacter.get(playerDescription.character);
+    if (characterOwner && characterOwner.name !== configured.name) {
+      throw new Error(
+        `Character/profile conflict for ${configured.name}: ${playerDescription.character}`,
+      );
+    }
+    const playerIdentityOwner = byIdentity.get(playerDescription.description);
+    if (playerIdentityOwner && playerIdentityOwner.name !== configured.name) {
+      throw new Error(`Profile identity conflict for ${configured.name}`);
+    }
+
+    const agents = world.agents.filter((agent) => agent.playerId === player.id);
+    if (agents.length !== 1) {
+      throw new Error(`Invalid agent mapping for configured resident ${configured.name}`);
+    }
+    const agent = agents[0];
+    const agentDescriptions = await ctx.db
+      .query('agentDescriptions')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId).eq('agentId', agent.id))
+      .take(2);
+    if (agentDescriptions.length !== 1) {
+      throw new Error(
+        `Invalid agent description mapping for configured resident ${configured.name}`,
+      );
+    }
+    const agentDescription = agentDescriptions[0];
+    const agentIdentityOwner = byIdentity.get(agentDescription.identity);
+    if (agentIdentityOwner && agentIdentityOwner.name !== configured.name) {
+      throw new Error(`Agent identity conflict for ${configured.name}`);
+    }
+
+    const desiredPlayer = {
+      name: configured.name,
+      character: configured.character,
+      description: configured.identity,
+    };
+    if (
+      playerDescription.name !== desiredPlayer.name ||
+      playerDescription.character !== desiredPlayer.character ||
+      playerDescription.description !== desiredPlayer.description
+    ) {
+      playerPatches.push({ id: playerDescription._id, value: desiredPlayer });
+    }
+    const desiredAgent = { identity: configured.identity, plan: configured.plan };
+    if (
+      agentDescription.identity !== desiredAgent.identity ||
+      agentDescription.plan !== desiredAgent.plan
+    ) {
+      agentPatches.push({ id: agentDescription._id, value: desiredAgent });
+    }
+  }
+
+  for (const patch of playerPatches) await ctx.db.patch(patch.id, patch.value);
+  for (const patch of agentPatches) await ctx.db.patch(patch.id, patch.value);
+  return { playerUpdates: playerPatches.length, agentUpdates: agentPatches.length };
+}
 
 const init = mutation({
   args: {
@@ -27,6 +134,7 @@ const init = mutation({
   handler: async (ctx, args) => {
     detectMismatchedLLMProvider();
     const { worldStatus, engine } = await getOrCreateDefaultWorld(ctx);
+    await reconcileConfiguredResidentDescriptions(ctx, worldStatus.worldId);
     if (worldStatus.status !== 'running') {
       console.warn(
         `Engine ${engine._id} is not active! Run "npx convex run testing:resume" to restart it.`,
@@ -52,8 +160,8 @@ const init = mutation({
     const economy = await initializeTownEconomy(ctx, worldStatus.worldId);
     const relations = await initializeTownRelations(ctx, worldStatus.worldId);
     if (
-      economy.residentCount < Descriptions.length
-      && economy.conflictingResidentNames.length === 0
+      economy.residentCount < Descriptions.length &&
+      economy.conflictingResidentNames.length === 0
     ) {
       await ctx.scheduler.runAfter(20_000, internal.init.reconcileTownEconomy, {
         worldId: worldStatus.worldId,
@@ -61,8 +169,8 @@ const init = mutation({
       });
     }
     if (
-      relations.residentCount < Descriptions.length
-      && relations.conflictingResidentNames.length === 0
+      relations.residentCount < Descriptions.length &&
+      relations.conflictingResidentNames.length === 0
     ) {
       await ctx.scheduler.runAfter(20_000, internal.init.reconcileTownRelations, {
         worldId: worldStatus.worldId,

@@ -40,6 +40,7 @@ const LEGACY_ENGLISH_PATTERNS = [
 
 const LEGACY_CHINESE_CONTEXT_PATTERNS = [
   /(?:灯塔|机关)[^。！？]{0,12}(?:谜团|谜题|之谜|谜)/u,
+  /灯塔[^。！？]{0,16}(?:每隔)?十三夜/u,
   /(?:小镇|灯塔)[^。！？]{0,20}异变/u,
   /异变[^。！？]{0,20}(?:小镇|灯塔)/u,
 ] as const;
@@ -57,6 +58,9 @@ const ARCHIVED_EVENT_PATTERNS = [
 const AUTONOMOUS_MEMORY_FORBIDDEN_PATTERNS = [
   /海洋/u,
   /灯塔谜团/u,
+  /草木(?:焦躁|躁动|异动)/u,
+  /(?:浓雾|雾气)[^。！？]{0,20}(?:草木|花木)[^。！？]{0,8}(?:生长|疯长|异动|躁动|焦躁)/u,
+  /花木生长/u,
   /心理诊断/u,
   /未说出口的感情/u,
   /\boceans?\b/iu,
@@ -67,9 +71,11 @@ const AUTONOMOUS_MEMORY_FORBIDDEN_PATTERNS = [
 
 export function containsLegacyStory(value: string): boolean {
   const normalized = value.normalize('NFKC').toLocaleLowerCase('en-US');
-  return LEGACY_CHINESE_TERMS.some((term) => normalized.includes(term))
-    || LEGACY_CHINESE_CONTEXT_PATTERNS.some((pattern) => pattern.test(normalized))
-    || LEGACY_ENGLISH_PATTERNS.some((pattern) => pattern.test(normalized));
+  return (
+    LEGACY_CHINESE_TERMS.some((term) => normalized.includes(term)) ||
+    LEGACY_CHINESE_CONTEXT_PATTERNS.some((pattern) => pattern.test(normalized)) ||
+    LEGACY_ENGLISH_PATTERNS.some((pattern) => pattern.test(normalized))
+  );
 }
 
 /** Public archive content that must not become an agent's autonomous personal memory. */
@@ -80,9 +86,11 @@ export function containsArchivedEventMemory(value: string): boolean {
 
 export function containsForbiddenAutonomousMemory(value: string): boolean {
   const normalized = value.normalize('NFKC');
-  return containsLegacyStory(normalized)
-    || containsArchivedEventMemory(normalized)
-    || AUTONOMOUS_MEMORY_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(normalized));
+  return (
+    containsLegacyStory(normalized) ||
+    containsArchivedEventMemory(normalized) ||
+    AUTONOMOUS_MEMORY_FORBIDDEN_PATTERNS.some((pattern) => pattern.test(normalized))
+  );
 }
 
 export function filterLegacyMemories<T extends { description: string }>(
@@ -91,10 +99,27 @@ export function filterLegacyMemories<T extends { description: string }>(
   return memories.filter((memory) => !containsForbiddenAutonomousMemory(memory.description));
 }
 
+/** Prompt-only isolation for stored conversation rows. The database rows are never mutated. */
+export function filterForbiddenPriorMessages<T extends { text: string }>(
+  messages: readonly T[],
+): T[] {
+  return messages.flatMap((message) => {
+    const sanitized = sanitizeConversationText(message.text);
+    const clauses = splitConversationClauses(sanitized);
+    const ordinaryClauses = clauses.filter((clause) => !containsForbiddenAutonomousMemory(clause));
+    if (ordinaryClauses.length === 0) return [];
+    if (ordinaryClauses.length === clauses.length && sanitized === message.text) return [message];
+    const chinese = /[\u3400-\u9fff]/u.test(ordinaryClauses.join(''));
+    const separator = chinese ? '。' : '. ';
+    const terminator = chinese ? '。' : '.';
+    return [{ ...message, text: ordinaryClauses.join(separator) + terminator }];
+  });
+}
+
 export function filterLegacyExperimentClauses(value: string): string {
   const clauses = splitConversationClauses(sanitizeConversationText(value));
-  const ordinaryClauses = clauses.filter((clause) =>
-    !containsLegacyStory(clause) && !containsArchivedEventMemory(clause),
+  const ordinaryClauses = clauses.filter(
+    (clause) => !containsLegacyStory(clause) && !containsArchivedEventMemory(clause),
   );
   return ordinaryClauses.length > 0 ? `${ordinaryClauses.join('。')}。` : '';
 }

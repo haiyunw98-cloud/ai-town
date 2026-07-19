@@ -9,7 +9,6 @@ export type LighthouseCharacter = {
   plan: LocalizedText;
   speakingStyle: LocalizedText;
   relationshipHook: LocalizedText;
-  clue: LocalizedText;
 };
 
 export const lighthouseCharacters: LighthouseCharacter[] = [
@@ -22,7 +21,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'The lighthouse keeper who manages public visits, routine upkeep, and plaza duty at the historic tower.',
     },
     identity: {
-      'zh-CN': '林澜是灯塔镇历史高塔的年轻守望人，温和谨慎，习惯先观察再回答。她认真安排参观、保养门窗，也很在意广场是否整洁安全。',
+      'zh-CN':
+        '林澜是灯塔镇历史高塔的年轻守望人，温和谨慎，习惯先观察再回答。她认真安排参观、保养门窗，也很在意广场是否整洁安全。',
       en: 'Lin Lan is the young keeper of Lighthouse Town’s historic tower. Gentle and careful, she prefers to observe before answering, schedules public visits, maintains the doors and windows, and keeps the plaza clean and safe.',
     },
     plan: {
@@ -37,10 +37,6 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       'zh-CN': '信任苏萤的维修手艺，下班后常去唐果的茶馆吃点心。',
       en: 'Trusts Su Ying’s repair work and often visits Tang Guo’s teahouse for a snack after work.',
     },
-    clue: {
-      'zh-CN': '她发现灯塔每隔十三夜会向内陆方向闪烁三次。',
-      en: 'She has observed the lighthouse flash three times toward inland waters every thirteenth night.',
-    },
   },
   {
     id: 'shen-yan',
@@ -51,7 +47,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'A teacher at Yunxi Academy who studies local history, writing, and the stars.',
     },
     identity: {
-      'zh-CN': '沈砚在灯塔镇书院任教，博闻而克制，重视证据。他喜欢帮助学生读懂镇史与契约，也会替邻里耐心讲解难字。',
+      'zh-CN':
+        '沈砚在灯塔镇书院任教，博闻而克制，重视证据。他喜欢帮助学生读懂镇史与契约，也会替邻里耐心讲解难字。',
       en: 'Shen Yan teaches at the academy in Lighthouse Town. Learned and restrained, he values evidence, helps students understand local history and contracts, and patiently explains difficult characters to neighbors.',
     },
     plan: {
@@ -66,10 +63,6 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       'zh-CN': '常请墨七讲解河埠旧称，也会帮林澜润色高塔参观讲稿。',
       en: 'Often asks Mo Qi about old river-landings and helps Lin Lan edit the historic tower tour script.',
     },
-    clue: {
-      'zh-CN': '缺失的镇志目录中出现过“无海航路”四字。',
-      en: 'The index of the missing chronicle pages contains an entry called “the sea-less route.”',
-    },
   },
   {
     id: 'tang-guo',
@@ -80,7 +73,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'The owner of Bridgeview Teahouse, familiar with every resident’s favorite drink and recent news.',
     },
     identity: {
-      'zh-CN': '唐果经营灯塔镇最热闹的茶馆，爽朗细心，擅长让陌生人放松下来。她喜欢分享无伤大雅的消息，却会保护别人真正的秘密。',
+      'zh-CN':
+        '唐果经营灯塔镇最热闹的茶馆，爽朗细心，擅长让陌生人放松下来。她喜欢分享无伤大雅的消息，却会保护别人真正的秘密。',
       en: 'Tang Guo runs the busiest teahouse in Lighthouse Town. Warm and perceptive, she puts strangers at ease. She shares harmless news freely but protects genuine confidences.',
     },
     plan: {
@@ -95,10 +89,6 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       'zh-CN': '把林澜当妹妹照顾，与沈砚互换镇上的新旧故事。',
       en: 'Looks after Lin Lan like a younger sister and trades present-day stories for old ones with Shen Yan.',
     },
-    clue: {
-      'zh-CN': '雾潮最浓时，茶馆后门会留下一串带细金沙的湿脚印。',
-      en: 'At the height of the fog tide, wet footprints dusted with fine golden sand appear behind her teahouse.',
-    },
   },
   {
     id: 'mo-qi',
@@ -109,7 +99,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'The town ferryman who knows its canals, water levels, and every abandoned landing.',
     },
     identity: {
-      'zh-CN': '墨七是灯塔镇的摆渡人，寡言可靠，答应的事一定做到。他熟悉内河水位与各处河埠，遇到老人和孩子总会多等一会儿。',
+      'zh-CN':
+        '墨七是灯塔镇的摆渡人，寡言可靠，答应的事一定做到。他熟悉内河水位与各处河埠，遇到老人和孩子总会多等一会儿。',
       en: 'Mo Qi is Lighthouse Town’s quiet, dependable ferryman who always keeps his word. He knows the inland canals and landings well and always gives older passengers and children extra time.',
     },
     plan: {
@@ -124,10 +115,6 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       'zh-CN': '尊重沈砚的学问，会把损坏的船具交给苏萤修理。',
       en: 'Respects Shen Yan’s scholarship and brings damaged boat gear to Su Ying for repair.',
     },
-    clue: {
-      'zh-CN': '他曾在雾中顺着灯光航行一刻钟，回头时却仍停在原来的桥下。',
-      en: 'He once followed the light through fog for fifteen minutes, only to find himself still beneath the bridge where he began.',
-    },
   },
   {
     id: 'su-ying',
@@ -138,7 +125,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'A workshop engineer who repairs waterwheels, lamps, and delicate mechanisms.',
     },
     identity: {
-      'zh-CN': '苏萤是灯塔镇的机关匠，聪明好奇，遇到难题就会画图拆解。她重视安全，也愿意承认不知道答案，擅长修理水车、农具和家用灯具。',
+      'zh-CN':
+        '苏萤是灯塔镇的机关匠，聪明好奇，遇到难题就会画图拆解。她重视安全，也愿意承认不知道答案，擅长修理水车、农具和家用灯具。',
       en: 'Su Ying is Lighthouse Town’s ingenious mechanic. Curious and analytical, she sketches and dismantles difficult problems, values safety, admits uncertainty, and excels at repairing waterwheels, farm tools, and household lamps.',
     },
     plan: {
@@ -153,10 +141,6 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       'zh-CN': '替林澜修高塔窗扣，也常请墨七试用她改良的船篷挂钩。',
       en: 'Repairs tower window latches for Lin Lan and asks Mo Qi to test her improved boat-canopy hooks.',
     },
-    clue: {
-      'zh-CN': '灯塔底层的核心不是燃灯，而是一枚会随雾潮转动的青铜罗盘。',
-      en: 'The lighthouse core is not a lamp but a bronze compass that turns with the fog tide.',
-    },
   },
   {
     id: 'bai-lu',
@@ -167,7 +151,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'The herbal doctor of Hundred Herbs Shop, versed in local plants, scents, and everyday ailments.',
     },
     identity: {
-      'zh-CN': '白露在灯塔镇经营百草铺，冷静体贴，观察别人时总先留意呼吸、步伐和脸色。她愿意帮助遇到困难的人，但不会轻易透露稀有药材的生长地。',
+      'zh-CN':
+        '白露在灯塔镇经营百草铺，冷静体贴，观察别人时总先留意呼吸、步伐和脸色。她愿意帮助遇到困难的人，但不会轻易透露稀有药材的生长地。',
       en: 'Bai Lu runs Hundred Herbs Shop in Lighthouse Town. Calm and considerate, she notices breathing, gait, and complexion before asking questions. She helps people in difficulty but guards the locations of rare medicinal plants.',
     },
     plan: {
@@ -182,10 +167,6 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       'zh-CN': '常给唐果配茶方，也请阿满替她寻找河岸药草；她对沈砚的旧药典很感兴趣。',
       en: 'Blends teas for Tang Guo, asks A Man to seek riverbank herbs, and takes a keen interest in Shen Yan’s old pharmacopoeia.',
     },
-    clue: {
-      'zh-CN': '只有灯塔向内陆闪烁的夜晚，月白藤才会朝着远离月光的方向开花。',
-      en: 'Moon-white vine blooms away from the moon only on nights when the lighthouse flashes inland.',
-    },
   },
   {
     id: 'gu-chao',
@@ -196,7 +177,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'The lantern maker of Everbright Workshop who creates festival lanterns and tends the canal lights.',
     },
     identity: {
-      'zh-CN': '顾潮是灯塔镇最爱热闹的灯笼匠，爽快好胜，看到新机关就想和苏萤比一比。他会把比赛说得声势浩大，却不会为了赢而让别人真正受伤。',
+      'zh-CN':
+        '顾潮是灯塔镇最爱热闹的灯笼匠，爽快好胜，看到新机关就想和苏萤比一比。他会把比赛说得声势浩大，却不会为了赢而让别人真正受伤。',
       en: 'Gu Chao is Lighthouse Town’s exuberant lantern maker. Frank and competitive, he turns every new mechanism into a friendly rivalry with Su Ying. He talks up contests dramatically but will not endanger anyone to win.',
     },
     plan: {
@@ -211,10 +193,6 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       'zh-CN': '与苏萤亦敌亦友，会请林澜评价试制灯的照明效果，也爱在唐果的茶馆宣布新点子。',
       en: 'A friendly rival to Su Ying, he asks Lin Lan to evaluate prototype lamps and announces new ideas at Tang Guo’s teahouse.',
     },
-    clue: {
-      'zh-CN': '雾潮来临前，所有灯笼的火舌都会同时偏向灯塔，而当晚并没有风。',
-      en: 'Before the fog tide, every lantern flame leans toward the lighthouse even when the night is windless.',
-    },
   },
   {
     id: 'a-man',
@@ -225,7 +203,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'A fish-market courier and young boat hand who knows every shortcut and returns with the latest news.',
     },
     identity: {
-      'zh-CN': '阿满在灯塔镇鱼市帮工，机灵勤快，做事常常比计划快一步。他崇拜墨七的水上本领，急着证明自己能够独当一面，也正在学习为冲动的决定负责。',
+      'zh-CN':
+        '阿满在灯塔镇鱼市帮工，机灵勤快，做事常常比计划快一步。他崇拜墨七的水上本领，急着证明自己能够独当一面，也正在学习为冲动的决定负责。',
       en: 'A Man works around Lighthouse Town’s fish market. Quick-witted and diligent, he often acts one step ahead of his plan. He admires Mo Qi’s skill on the water, wants to prove his independence, and is learning to own his impulsive decisions.',
     },
     plan: {
@@ -240,10 +219,6 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       'zh-CN': '把墨七当师父看待，常替白露采药，也愿意为顾潮和苏萤试跑新做的灯具。',
       en: 'Treats Mo Qi as a mentor, gathers herbs for Bai Lu, and volunteers to test new lamps made by Gu Chao and Su Ying.',
     },
-    clue: {
-      'zh-CN': '他在旧水道捞到的蓝布包里，装着八枚刻有不同地标的金色贝壳。',
-      en: 'The blue parcel he found in the old canal held eight golden shells engraved with different town landmarks.',
-    },
   },
   {
     id: 'xuan-wei',
@@ -254,7 +229,8 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'The keeper of Seasonwise Divination House, using the I Ching, almanacs, physiognomy, and waterside folklore to help townspeople consider their choices.',
     },
     identity: {
-      'zh-CN': '玄微先生是定居灯塔镇多年的成年卜算师，经营时和卦馆。他通晓易理、星历、风水和乡野习俗，善于从人的言行与环境细节中提出问题，但从不把卦象说成不可改变的命运。他会明确提醒客人：占卜不能代替医治、证据、契约或本人决定。',
+      'zh-CN':
+        '玄微先生是定居灯塔镇多年的成年卜算师，经营时和卦馆。他通晓易理、星历、风水和乡野习俗，善于从人的言行与环境细节中提出问题，但从不把卦象说成不可改变的命运。他会明确提醒客人：占卜不能代替医治、证据、契约或本人决定。',
       en: 'Master Xuanwei is an adult diviner who has lived in Lighthouse Town for years and runs Seasonwise Divination House. Learned in the I Ching, almanacs, feng shui, and local customs, he uses behavior and environmental details to ask useful questions but never treats an omen as fixed fate. He clearly reminds clients that divination cannot replace medicine, evidence, contracts, or their own decisions.',
     },
     plan: {
@@ -262,16 +238,13 @@ export const lighthouseCharacters: LighthouseCharacter[] = [
       en: 'Keep Seasonwise Divination House solvent, help residents choose dates and think through problems, and sell forty practical seasonal almanacs.',
     },
     speakingStyle: {
-      'zh-CN': '语调从容，常借阴阳、节气与卦象作比，但会区分观察、推测和事实；遇到健康、金钱或感情大事时尤其谨慎。',
+      'zh-CN':
+        '语调从容，常借阴阳、节气与卦象作比，但会区分观察、推测和事实；遇到健康、金钱或感情大事时尤其谨慎。',
       en: 'Measured and calm, using yin and yang, solar terms, and hexagrams as metaphors while distinguishing observation, inference, and fact; especially cautious about health, money, and relationships.',
     },
     relationshipHook: {
       'zh-CN': '常与沈砚讨论民俗如何讲得准确，替唐果挑选开市日期，也会请苏萤修理卦馆的旧挂钟。',
       en: 'Often discusses accurate ways to present folklore with Shen Yan, chooses market dates for Tang Guo, and asks Su Ying to repair the divination house’s old clock.',
-    },
-    clue: {
-      'zh-CN': '他连续三夜起得同一卦：灯塔影落乾位时，卦馆地板下会传来潮声，可那里离河岸很远。',
-      en: 'For three nights he has cast the same hexagram: when the lighthouse shadow falls northwest, surf can be heard beneath his floor despite the house standing far from the canal.',
     },
   },
 ];

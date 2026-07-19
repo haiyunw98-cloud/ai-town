@@ -1,5 +1,6 @@
 import {
   containsLegacyStory,
+  filterForbiddenPriorMessages,
   filterLegacyMemories,
   selectConversationTopic,
   TOPIC_DETAILS,
@@ -7,6 +8,7 @@ import {
 } from './conversationPolicy';
 import type { ReplyContext, TopicCategory } from './conversationPolicy';
 import * as conversationPolicy from './conversationPolicy';
+import { readFileSync } from 'node:fs';
 
 const length = (value: string) => Array.from(value).length;
 
@@ -98,6 +100,54 @@ describe('selectConversationTopic', () => {
 });
 
 describe('legacy story isolation', () => {
+  test('filters stored messages at both prompt formatting boundaries', () => {
+    const conversationSource = readFileSync(new URL('./conversation.ts', import.meta.url), 'utf8');
+    expect(
+      conversationSource.match(
+        /formatPreviousMessages\(filterForbiddenPriorMessages\(prevMessages\)/gu,
+      ),
+    ).toHaveLength(2);
+  });
+
+  test('filters forbidden prior-message clauses without mutating stored conversation rows', () => {
+    const ordinary = Object.freeze({ author: 'p:1', text: '今天茶馆新到了点心。' });
+    const mixed = Object.freeze({
+      author: 'p:2',
+      text: '我明早去码头交货。灯塔每隔十三夜会闪烁。午后回来核对账本。',
+    });
+    const ecological = Object.freeze({ author: 'p:1', text: '浓雾引发草木焦躁和花木生长。' });
+    const archived = Object.freeze({ author: 'p:2', text: '我赢得百万金贝寻宝赛。' });
+    const stored = Object.freeze([ordinary, mixed, ecological, archived] as const);
+
+    const filtered = filterForbiddenPriorMessages(stored);
+
+    expect(filtered).toEqual([
+      ordinary,
+      { author: 'p:2', text: '我明早去码头交货。午后回来核对账本。' },
+    ]);
+    expect(filtered[0]).toBe(ordinary);
+    expect(stored).toEqual([ordinary, mixed, ecological, archived]);
+  });
+
+  test.each(['草木焦躁', '草木躁动', '草木异动', '浓雾引发草木生长', '雾气让花木生长', '花木生长'])(
+    'rejects the observed autonomous ecological motif %s',
+    (motif) => {
+      const memory = { description: `居民声称${motif}。` };
+      expect(filterLegacyMemories([memory])).toEqual([]);
+      expect(filterForbiddenPriorMessages([{ author: 'p:1', text: memory.description }])).toEqual(
+        [],
+      );
+    },
+  );
+
+  test.each(['我给花木浇了水。', '晨雾散后我去河埠交货。', '草木铺今天进了新药材。'])(
+    'keeps an ordinary factual daily message: %s',
+    (text) => {
+      const message = { author: 'p:1', text };
+      expect(filterForbiddenPriorMessages([message])).toEqual([message]);
+    },
+  );
+
   test.each([
     '百万金贝大奖',
     '一百万金贝寻宝比赛',
@@ -180,11 +230,13 @@ describe('legacy story isolation', () => {
     'The community treasure hunt starts today.',
   ])('allows ordinary English text that shares a generic word: %s', (text) => {
     expect(containsLegacyStory(text)).toBe(false);
-    expect(validateResidentReply(text, {
-      kind: 'continue',
-      topic: 'local-news',
-      observerAskedAboutSea: false,
-    })).toEqual({ accepted: true, text });
+    expect(
+      validateResidentReply(text, {
+        kind: 'continue',
+        topic: 'local-news',
+        observerAskedAboutSea: false,
+      }),
+    ).toEqual({ accepted: true, text });
   });
 
   test('filters matching memories without mutation and preserves order and identity', () => {

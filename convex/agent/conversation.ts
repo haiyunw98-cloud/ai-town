@@ -12,6 +12,7 @@ import { getWorldLocale } from '../util/worldLocale';
 import {
   conversationPromptRules,
   deriveTopicSelectionInput,
+  filterForbiddenPriorMessages,
   filterLegacyMemories,
   isTopicDetail,
   observerSeaCorrectionInstruction,
@@ -311,7 +312,7 @@ export async function continueConversationMessage(
       role: 'system',
       content: prompt.join('\n'),
     },
-    ...formatPreviousMessages(prevMessages, player, otherPlayer),
+    ...formatPreviousMessages(filterForbiddenPriorMessages(prevMessages), player, otherPlayer),
   ];
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   llmMessages.push({ role: 'user', content: lastPrompt });
@@ -384,7 +385,7 @@ export async function leaveConversationMessage(
       role: 'system',
       content: prompt.join('\n'),
     },
-    ...formatPreviousMessages(prevMessages, player, otherPlayer),
+    ...formatPreviousMessages(filterForbiddenPriorMessages(prevMessages), player, otherPlayer),
   ];
   const lastPrompt = `${player.name} to ${otherPlayer.name}:`;
   llmMessages.push({ role: 'user', content: lastPrompt });

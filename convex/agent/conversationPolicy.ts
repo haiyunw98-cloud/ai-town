@@ -5,9 +5,7 @@ import {
   sanitizeConversationText,
   segmentConversationGraphemes,
 } from '../util/conversationText';
-import {
-  containsForbiddenAutonomousMemory,
-} from '../util/conversationTextPolicy';
+import { containsForbiddenAutonomousMemory } from '../util/conversationTextPolicy';
 
 export {
   sanitizeConversationText,
@@ -18,6 +16,7 @@ export {
   containsArchivedEventMemory,
   containsForbiddenAutonomousMemory,
   containsLegacyStory,
+  filterForbiddenPriorMessages,
   filterLegacyMemories,
 } from '../util/conversationTextPolicy';
 

@@ -6,9 +6,12 @@ import { townLandmarks } from './map';
 import { readFileSync } from 'node:fs';
 
 const forbiddenGlobalStory = /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮/u;
-const forbiddenAutonomousStory = /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮|航标|夜航/u;
+const forbiddenAutonomousStory =
+  /海潮|潮汐|海风|海浪|无海航路|异常闪光|灯塔谜|机关谜|线索交汇|雾潮|航标|夜航/u;
 const forbiddenEnglishAutonomousStory =
   /fog tide|lost route|sea-less route|night navigation|sea navigation|ocean navigation|lighthouse myster(?:y|ies)/iu;
+const forbiddenLegacyResidentMotifs =
+  /每隔十三夜|浓雾|草木焦躁|草木躁动|草木异动|花木生长|sea-less route|every thirteenth night/iu;
 
 describe('Lighthouse Town content', () => {
   test('defines the approved world identity in both languages', () => {
@@ -45,7 +48,7 @@ describe('Lighthouse Town content', () => {
       expect(character.speakingStyle['zh-CN']).toBeTruthy();
       expect(character.speakingStyle.en).toBeTruthy();
       expect(character.relationshipHook['zh-CN']).toBeTruthy();
-      expect(character.clue['zh-CN']).toBeTruthy();
+      expect(character).not.toHaveProperty('clue');
     }
   });
 
@@ -68,26 +71,17 @@ describe('Lighthouse Town content', () => {
     expect(localizedDescriptions('en')[0].name).toBe('Lin Lan');
   });
 
-  test('keeps archived clues out of runtime resident identities', () => {
-    const runtimeResidents = localizedDescriptions('zh-CN');
+  test('contains no archived clue field or mystery and ecology motifs in resident source', () => {
+    const characterSource = readFileSync(new URL('./characters.ts', import.meta.url), 'utf8');
+    const runtimeResidents = JSON.stringify([
+      ...localizedDescriptions('zh-CN'),
+      ...localizedDescriptions('en'),
+    ]);
 
-    expect(lighthouseCharacters.every((character) => character.clue['zh-CN'].length > 0)).toBe(true);
-    expect(lighthouseCharacters.some((character) => character.clue['zh-CN'].includes('无海航路'))).toBe(true);
-    expect(JSON.stringify(runtimeResidents)).not.toContain('无海航路');
-    for (const [index, character] of lighthouseCharacters.entries()) {
-      expect(runtimeResidents[index].identity).not.toContain(character.clue['zh-CN']);
-    }
-  });
-
-  test('keeps English clue archives out of English runtime identities', () => {
-    const runtimeResidents = localizedDescriptions('en');
-
-    expect(lighthouseCharacters.every((character) => character.clue.en.length > 0)).toBe(true);
-    expect(lighthouseCharacters.some((character) => character.clue.en.includes('sea-less route'))).toBe(true);
-    expect(JSON.stringify(runtimeResidents)).not.toMatch(forbiddenEnglishAutonomousStory);
-    for (const [index, character] of lighthouseCharacters.entries()) {
-      expect(runtimeResidents[index].identity).not.toContain(character.clue.en);
-    }
+    expect(characterSource).not.toMatch(/\bclue\s*:/u);
+    expect(characterSource).not.toMatch(forbiddenLegacyResidentMotifs);
+    expect(runtimeResidents).not.toMatch(forbiddenLegacyResidentMotifs);
+    expect(runtimeResidents).not.toMatch(forbiddenEnglishAutonomousStory);
   });
 
   test('grounds all runtime context in ordinary inland Jiangnan life', () => {
@@ -141,7 +135,10 @@ describe('Lighthouse Town content', () => {
       new URL('../../../convex/agent/conversation.ts', import.meta.url),
       'utf8',
     );
-    const memory = readFileSync(new URL('../../../convex/agent/memory.ts', import.meta.url), 'utf8');
+    const memory = readFileSync(
+      new URL('../../../convex/agent/memory.ts', import.meta.url),
+      'utf8',
+    );
     expect(agentInputs).toContain('localizedDescriptions(getWorldLocale())');
     expect(conversation.match(/const locale = getWorldLocale\(\)/gu)).toHaveLength(3);
     expect(conversation.match(/buildWorldPrompt\(locale\)/gu)).toHaveLength(3);
