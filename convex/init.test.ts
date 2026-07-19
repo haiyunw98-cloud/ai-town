@@ -323,4 +323,36 @@ describe('persisted resident description migration', () => {
     ).rejects.toThrow(/duplicate persisted resident name/iu);
     expect(persistedDuplicate.db.patches).toHaveLength(0);
   });
+
+  test.each([
+    {
+      field: 'character',
+      configured: [
+        descriptions[0],
+        { ...descriptions[1], character: descriptions[0].character },
+      ],
+      error: /duplicate configured resident character/iu,
+    },
+    {
+      field: 'identity',
+      configured: [
+        descriptions[0],
+        { ...descriptions[1], identity: descriptions[0].identity },
+      ],
+      error: /duplicate configured resident identity/iu,
+    },
+  ])('rejects duplicate configured $field before any patch', async ({ configured, error }) => {
+    const duplicate = fixture();
+
+    await expect(
+      reconcileConfiguredResidentDescriptions(
+        { db: duplicate.db } as never,
+        duplicate.world._id as never,
+        configured,
+      ),
+    ).rejects.toThrow(error);
+
+    expect(duplicate.db.patches).toHaveLength(0);
+    expect(duplicate.db.table('playerDescriptions')[0].description).toContain('十三夜');
+  });
 });

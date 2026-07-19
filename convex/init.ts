@@ -32,6 +32,12 @@ export async function reconcileConfiguredResidentDescriptions(
     if (byName.has(description.name)) {
       throw new Error(`Duplicate configured resident name: ${description.name}`);
     }
+    if (byCharacter.has(description.character)) {
+      throw new Error(`Duplicate configured resident character: ${description.character}`);
+    }
+    if (byIdentity.has(description.identity)) {
+      throw new Error(`Duplicate configured resident identity: ${description.name}`);
+    }
     byName.set(description.name, description);
     byCharacter.set(description.character, description);
     byIdentity.set(description.identity, description);
