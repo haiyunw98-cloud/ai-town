@@ -3,6 +3,7 @@ import {
   requestEventDecision,
 } from './model';
 import { LLMConfig } from '../util/llmConfig';
+import { dailyEventTemplates } from './dailyTemplates';
 
 const input = {
   residentId: 'p:1',
@@ -74,4 +75,58 @@ describe('event model boundary', () => {
     expect(malformedResult.source).toBe('fallback');
     expect(Array.from(malformedResult.publicQuote).length).toBeLessThanOrEqual(60);
   });
+
+  test('accepts readonly daily-stage choices without mutating them', async () => {
+    const stage = dailyEventTemplates[0].stages[1];
+    const result = await requestEventDecision(
+      {
+        residentId: 'p:lin',
+        displayName: '林澜',
+        identity: '谨慎而愿意合作。',
+        phase: stage.id,
+        choices: stage.choices,
+      },
+      {
+        getConfig: () => ollamaConfig,
+        complete: async () => ({
+          content: '{"choiceId":"steady","publicQuote":"我先看清脚下，再跟上大家。"}',
+        }),
+      },
+    );
+
+    expect(result).toEqual({
+      choiceId: 'steady',
+      publicQuote: '我先看清脚下，再跟上大家。',
+      source: 'model',
+    });
+    expect(stage.choices).toEqual([
+      { id: 'steady', label: '稳步完成' },
+      { id: 'sprint', label: '加快节奏' },
+    ]);
+  });
+
+  test.each(['有人受伤才算赢。', '这关要流血才刺激。', '淘汰者会被处决。', '死亡也无所谓。'])(
+    'rejects unsafe model quote: %s',
+    async (publicQuote) => {
+      const stage = dailyEventTemplates[0].stages[1];
+      const result = await requestEventDecision(
+        {
+          residentId: 'p:lin',
+          displayName: '林澜',
+          identity: '谨慎而愿意合作。',
+          phase: stage.id,
+          choices: stage.choices,
+        },
+        {
+          getConfig: () => ollamaConfig,
+          complete: async () => ({
+            content: JSON.stringify({ choiceId: 'steady', publicQuote }),
+          }),
+        },
+      );
+
+      expect(result.source).toBe('fallback');
+      expect(result.publicQuote).not.toMatch(/死亡|受伤|处决|流血/u);
+    },
+  );
 });

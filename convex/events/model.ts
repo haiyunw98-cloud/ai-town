@@ -4,19 +4,20 @@ import {
   getLLMConfig,
   LLMConfig,
 } from '../util/llm';
+import type { DailyStageId } from './dailyTemplates';
 import { EventPhase } from './types';
 
-export type EventChoice = {
+export type EventChoice = Readonly<{
   id: string;
   label: string;
-};
+}>;
 
 export type EventDecisionInput = {
   residentId: string;
   displayName: string;
   identity: string;
-  phase: EventPhase;
-  choices: EventChoice[];
+  phase: EventPhase | DailyStageId;
+  choices: readonly EventChoice[];
 };
 
 export type EventDecision = {
@@ -39,6 +40,8 @@ const defaultDependencies: EventModelDependencies = {
   getConfig: getLLMConfig,
   complete: (body) => chatCompletion({ ...body, stream: false }),
 };
+
+const unsafePublicQuote = /死亡|死伤|伤亡|受伤|处决|流血|血腥|杀死|毙命/u;
 
 export function buildEventDecisionPrompt(input: EventDecisionInput) {
   const choices = input.choices.map((choice) => `- ${choice.id}: ${choice.label}`).join('\n');
@@ -77,8 +80,7 @@ export async function requestEventDecision(
     if (
       typeof parsed.choiceId !== 'string' ||
       !input.choices.some((choice) => choice.id === parsed.choiceId) ||
-      typeof parsed.publicQuote !== 'string' ||
-      !parsed.publicQuote.trim()
+      !isSafePublicQuote(parsed.publicQuote)
     ) {
       return fallbackDecision(input);
     }
@@ -92,11 +94,15 @@ export async function requestEventDecision(
   }
 }
 
-function validateChoices(choices: EventChoice[]) {
+function validateChoices(choices: readonly EventChoice[]) {
   if (choices.length < 2) throw new Error('Event decisions require at least two choices.');
   if (new Set(choices.map((choice) => choice.id)).size !== choices.length) {
     throw new Error('Event choice IDs must be unique.');
   }
+}
+
+function isSafePublicQuote(value: unknown): value is string {
+  return typeof value === 'string' && !!value.trim() && !unsafePublicQuote.test(value);
 }
 
 function fallbackDecision(input: EventDecisionInput): EventDecision {
