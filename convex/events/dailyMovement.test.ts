@@ -31,17 +31,14 @@ const movement = eventsModule as unknown as {
     participants: readonly Participant[],
     now: number,
   ) => Command[];
-  executeDailyMovementBatch: (
+  dailyMovementCommandKey: (
     markerKey: string,
-    commands: readonly Command[],
-    fallbackKind: 'move' | 'transfer',
-    io: {
-      markerCount: (key: string) => Promise<number>;
-      enqueue: (command: Command) => Promise<void>;
-      recordFailure: (key: string, residentId: string, error: unknown) => Promise<void>;
-      recordMarker: (key: string) => Promise<void>;
-    },
-  ) => Promise<{ status: string; queued: number; failures: number }>;
+    commandIndex: number,
+    command: Pick<Command, 'kind' | 'residentId'>,
+  ) => string;
+  dailyMovementBatchStatus: (
+    outcomes: readonly ('success' | 'pending' | 'failed')[],
+  ) => 'pending' | 'failed' | 'completed';
 };
 
 const participants: Participant[] = Array.from({ length: 9 }, (_, index) => ({
@@ -159,78 +156,23 @@ describe('daily event map movement planning', () => {
     for (const command of mainTown) expectWalkable(command.destination);
   });
 
-  test('queues one idempotent movement batch and skips the repeated cron pass', async () => {
+  test('builds stable, per-command idempotency keys for transfer and movement recovery', () => {
     const commands = movement.buildDailyStageMovementCommands(
-      dailyEventTemplates[1], 2, participants, now, phaseEndsAt, false,
+      dailyEventTemplates[0], 1, participants, now, phaseEndsAt, true,
     );
-    const markers = new Set<string>();
-    const queued: Command[] = [];
-    const io = {
-      markerCount: async (key: string) => Number(markers.has(key)),
-      enqueue: async (command: Command) => { queued.push(command); },
-      recordFailure: async () => undefined,
-      recordMarker: async (key: string) => { markers.add(key); },
-    };
-    const markerKey = 'daily:2026-07-19:movement:stage:2';
-    await expect(movement.executeDailyMovementBatch(
-      markerKey, commands, 'move', io,
-    )).resolves.toEqual({ status: 'queued', queued: 9, failures: 0 });
-    await expect(movement.executeDailyMovementBatch(
-      markerKey, commands, 'move', io,
-    )).resolves.toEqual({ status: 'already-queued', queued: 0, failures: 0 });
-    expect(queued).toHaveLength(9);
+    const batchKey = 'daily:2026-07-19:movement:stage:1';
+    const keys = commands.map((command, index) =>
+      movement.dailyMovementCommandKey(batchKey, index, command));
+    expect(new Set(keys).size).toBe(18);
+    expect(keys[0]).toBe(`${batchKey}:command:0:transfer:p:0`);
+    expect(keys[9]).toBe(`${batchKey}:command:9:move:p:0`);
+    expect(movement.dailyMovementCommandKey(batchKey, 0, commands[0])).toBe(keys[0]);
   });
 
-  test('isolates one resident insertion failure, attempts a dock fallback, and still marks the batch', async () => {
-    const commands = movement.buildDailyStageMovementCommands(
-      dailyEventTemplates[0], 4, participants, now, phaseEndsAt, false,
-    );
-    const attempts: Command[] = [];
-    const failures: string[] = [];
-    const markers: string[] = [];
-    let failedOnce = false;
-    const io = {
-      markerCount: async () => 0,
-      enqueue: async (command: Command) => {
-        attempts.push(command);
-        if (command.residentId === 'p:2' && !failedOnce) {
-          failedOnce = true;
-          throw new Error('engine input unavailable');
-        }
-      },
-      recordFailure: async (key: string, residentId: string) => {
-        failures.push(`${key}:${residentId}`);
-      },
-      recordMarker: async (key: string) => { markers.push(key); },
-    };
-    await expect(movement.executeDailyMovementBatch(
-      'daily:2026-07-19:movement:stage:4', commands, 'transfer', io,
-    )).resolves.toEqual({ status: 'queued', queued: 8, failures: 1 });
-    expect(attempts).toHaveLength(10);
-    expect(attempts.at(-1)).toEqual(expect.objectContaining({
-      kind: 'transfer', residentId: 'p:2', destination: eventCheckpoints.dock,
-    }));
-    expect(failures).toEqual([
-      'daily:2026-07-19:movement:stage:4:failure:p:2',
-    ]);
-    expect(markers).toEqual(['daily:2026-07-19:movement:stage:4']);
-  });
-
-  test('does not swallow a structural movement-marker collision', async () => {
-    let enqueued = false;
-    await expect(movement.executeDailyMovementBatch(
-      'daily:2026-07-19:movement:stage:1',
-      movement.buildDailyStageMovementCommands(
-        dailyEventTemplates[0], 1, participants, now, phaseEndsAt, true,
-      ),
-      'transfer',
-      {
-        markerCount: async () => 2,
-        enqueue: async () => { enqueued = true; },
-        recordFailure: async () => undefined,
-        recordMarker: async () => undefined,
-      },
-    )).rejects.toThrow(/collision|ambiguous|duplicate/iu);
-    expect(enqueued).toBe(false);
+  test('confirms a batch only after every individual engine input succeeds or recovers', () => {
+    expect(movement.dailyMovementBatchStatus(['success', 'success'])).toBe('completed');
+    expect(movement.dailyMovementBatchStatus(['success', 'pending'])).toBe('pending');
+    expect(movement.dailyMovementBatchStatus(['success', 'failed'])).toBe('failed');
+    expect(movement.dailyMovementBatchStatus([])).toBe('pending');
   });
 });

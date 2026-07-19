@@ -60,6 +60,18 @@ export function prepareEventTransfer(
   };
 }
 
+function cancelResidentOperation(
+  game: Pick<import('./game').Game, 'world'>,
+  residentId: string,
+) {
+  for (const agent of game.world.agents.values()) {
+    if (agent.playerId === residentId) {
+      delete agent.inProgressOperation;
+      return;
+    }
+  }
+}
+
 export const agentInputs = {
   eventTransfer: inputHandler({
     args: {
@@ -73,6 +85,7 @@ export const agentInputs = {
       if (!player) throw new Error(`Event transfer resident not found: ${args.playerId}`);
       if (player.human) throw new Error('Event transfer is restricted to AI residents.');
       const transfer = prepareEventTransfer(game, now, args);
+      cancelResidentOperation(game, player.id);
       delete player.pathfinding;
       player.position = transfer.destination;
       player.speed = 0;
@@ -94,6 +107,8 @@ export const agentInputs = {
     handler: (game, now, args) => {
       const player = game.world.players.get(parseGameId('players', args.playerId));
       if (!player) return null;
+      if (player.human) throw new Error('Event movement is restricted to AI residents.');
+      cancelResidentOperation(game, player.id);
       movePlayer(game, now, player, args.destination);
       player.activity = { description: args.description, until: args.until };
       return null;

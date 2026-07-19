@@ -91,11 +91,20 @@ function ferryGame(playerOverrides: Record<string, unknown> = {}) {
     speed: 1,
     ...playerOverrides,
   };
+  const agent = {
+    id: 'a:1',
+    playerId: player.id,
+    inProgressOperation: { name: 'agentDoSomething', operationId: 'o:late', started: 999_000 },
+  };
   const game = {
-    world: { players: new Map([[player.id, player]]) },
+    world: {
+      players: new Map([[player.id, player]]),
+      agents: new Map([[agent.id, agent]]),
+      conversations: new Map(),
+    },
     worldMap: { width: mapwidth, height: mapheight, objectTiles: objmap },
   };
-  return { game, player };
+  return { game, player, agent };
 }
 
 describe('controlled daily event ferry transfer', () => {
@@ -105,7 +114,7 @@ describe('controlled daily event ferry transfer', () => {
   }).eventTransfer;
 
   test('moves an AI resident only to the island allowlist and clears stale pathfinding', () => {
-    const { game, player } = ferryGame();
+    const { game, player, agent } = ferryGame();
     const description = `${'协'.repeat(79)}👩‍👩‍👧‍👦多余`;
 
     expect(transfer().handler(game as never, appliedAt, {
@@ -116,6 +125,7 @@ describe('controlled daily event ferry transfer', () => {
     })).toBeNull();
 
     expect(player.position).toEqual(trialIslandCheckpoints.arrival);
+    expect(agent).not.toHaveProperty('inProgressOperation');
     expect(player).not.toHaveProperty('pathfinding');
     expect(player.speed).toBe(0);
     expect(player).toEqual(expect.objectContaining({
@@ -125,6 +135,32 @@ describe('controlled daily event ferry transfer', () => {
         until: appliedAt + 120_000,
       },
     }));
+  });
+
+  test('event movement cancels a pending AI operation so its late result cannot overwrite the event', () => {
+    const { game, player, agent } = ferryGame();
+    const move = agentInputs.eventMove;
+    expect(move.handler(game as never, appliedAt, {
+      playerId: 'p:1' as never,
+      destination: { x: 22, y: 15 },
+      description: '前往集合点',
+      until: appliedAt + 60_000,
+    })).toBeNull();
+    expect(agent).not.toHaveProperty('inProgressOperation');
+
+    const debug = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    try {
+      expect(agentInputs.finishDoSomething.handler(game as never, appliedAt + 1, {
+        operationId: 'o:late',
+        agentId: 'a:1' as never,
+        destination: { x: 4, y: 4 },
+      })).toBeNull();
+      expect(player.pathfinding).toEqual(expect.objectContaining({
+        destination: { x: 22, y: 15 },
+      }));
+    } finally {
+      debug.mockRestore();
+    }
   });
 
   test.each([

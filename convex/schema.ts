@@ -117,6 +117,34 @@ export default defineSchema({
     .index('eventId', ['eventId'])
     .index('eventKey', ['eventId', 'eventKey']),
 
+  eventMovementInputs: defineTable({
+    eventId: v.id('townEvents'),
+    batchKey: v.string(),
+    commandKey: v.string(),
+    residentId: v.string(),
+    commandIndex: v.number(),
+    stageIndex: v.number(),
+    commandKind: v.union(v.literal('move'), v.literal('transfer')),
+    fallbackKind: v.union(v.literal('move'), v.literal('transfer')),
+    destination: v.object({ x: v.number(), y: v.number() }),
+    description: v.string(),
+    until: v.number(),
+    inputId: v.optional(v.id('inputs')),
+    state: v.union(
+      v.literal('retry-original'),
+      v.literal('queued'),
+      v.literal('fallback-queued'),
+      v.literal('succeeded'),
+      v.literal('recovered'),
+      v.literal('failed'),
+    ),
+    attempts: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index('commandKey', ['eventId', 'commandKey'])
+    .index('batchKey', ['eventId', 'batchKey']),
+
   lifeEvents: defineTable({
     worldId: v.id('worlds'),
     residentId: playerId,

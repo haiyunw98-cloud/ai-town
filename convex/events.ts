@@ -1,6 +1,6 @@
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
-import { Id } from './_generated/dataModel';
+import { Doc, Id } from './_generated/dataModel';
 import {
   internalAction,
   internalMutation,
@@ -195,58 +195,22 @@ export function buildDailyReturnMovementCommands(
   }));
 }
 
-type DailyMovementBatchIO = {
-  markerCount: (key: string) => Promise<number>;
-  enqueue: (command: DailyMovementCommand) => Promise<void>;
-  recordFailure: (key: string, residentId: string, error: unknown) => Promise<void>;
-  recordMarker: (key: string) => Promise<void>;
-};
-
-export async function executeDailyMovementBatch(
-  markerKey: string,
-  commands: readonly DailyMovementCommand[],
-  fallbackKind: 'move' | 'transfer',
-  io: DailyMovementBatchIO,
+export function dailyMovementCommandKey(
+  batchKey: string,
+  commandIndex: number,
+  command: Pick<DailyMovementCommand, 'kind' | 'residentId'>,
 ) {
-  const markerCount = await io.markerCount(markerKey);
-  if (markerCount > 1) throw new Error(`Daily movement marker collision: ${markerKey}`);
-  if (markerCount === 1) {
-    return { status: 'already-queued' as const, queued: 0, failures: 0 };
+  return `${batchKey}:command:${commandIndex}:${command.kind}:${command.residentId}`;
+}
+
+export function dailyMovementBatchStatus(
+  outcomes: readonly ('success' | 'pending' | 'failed')[],
+) {
+  if (outcomes.length === 0 || outcomes.some((outcome) => outcome === 'pending')) {
+    return 'pending' as const;
   }
-  let queued = 0;
-  const failedResidents = new Set<string>();
-  const fallbacks: DailyMovementCommand[] = [];
-  for (const command of commands) {
-    if (failedResidents.has(command.residentId)) continue;
-    try {
-      await io.enqueue(command);
-      queued += 1;
-    } catch (error) {
-      failedResidents.add(command.residentId);
-      await io.recordFailure(`${markerKey}:failure`, command.residentId, error);
-      fallbacks.push({
-        kind: fallbackKind,
-        residentId: command.residentId,
-        destination: { ...eventCheckpoints.dock },
-        description: '活动移动失败，返回旧水码头恢复普通生活',
-        until: command.until,
-      });
-    }
-  }
-  for (const fallback of fallbacks) {
-    try {
-      await io.enqueue(fallback);
-    } catch {
-      // The stable failure record above is the audit trail; a second engine-input
-      // outage must not roll back rewards or other residents' successful moves.
-    }
-  }
-  await io.recordMarker(markerKey);
-  return {
-    status: 'queued' as const,
-    queued,
-    failures: failedResidents.size,
-  };
+  if (outcomes.some((outcome) => outcome === 'failed')) return 'failed' as const;
+  return 'completed' as const;
 }
 
 export function boundObserverRows<T>(rows: readonly T[], limit = OBSERVER_SNAPSHOT_LIMIT) {
@@ -318,6 +282,18 @@ export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
     .take(2);
   if (today.length > 1) throw new Error(`Daily event collision for ${dayKey}.`);
   const existing = today[0];
+  if (existing) {
+    const movement = await reconcileEventMovementInputs(
+      ctx, worldStatus.worldId, existing._id, now,
+    );
+    if ((movement.pending || movement.failed) && worldStatus.status === 'running') {
+      await ctx.scheduler.runAfter(
+        movement.pending ? 2_000 : MOVEMENT_RECOVERY_BACKOFF,
+        internal.events.reconcileMovementInputs,
+        { worldId: worldStatus.worldId, eventId: existing._id },
+      );
+    }
+  }
   const action = dailyEventAction(
     now,
     worldStatus.status,
@@ -1150,6 +1126,222 @@ async function insertUniqueMovementLog(
   });
 }
 
+const MAX_MOVEMENT_INPUT_ATTEMPTS = 3;
+const MOVEMENT_RECOVERY_BACKOFF = 30_000;
+
+async function enqueueDailyMovementCommand(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  command: DailyMovementCommand,
+) {
+  const args = {
+    playerId: parseGameId('players', command.residentId),
+    destination: command.destination,
+    description: command.description,
+    until: command.until,
+  };
+  return command.kind === 'transfer'
+    ? await insertInput(ctx, worldId, 'eventTransfer', args)
+    : await insertInput(ctx, worldId, 'eventMove', args);
+}
+
+async function recordMovementFailure(
+  ctx: MutationCtx,
+  eventId: Id<'townEvents'>,
+  commandKey: string,
+  stageIndex: number,
+  attempt: number,
+  residentId: string,
+  error: unknown,
+  now: number,
+) {
+  const detail = error instanceof Error ? error.message : '未知输入错误';
+  await insertUniqueMovementLog(
+    ctx,
+    eventId,
+    `${commandKey}:failure:${attempt}`,
+    stageIndex,
+    'movement-failure',
+    `居民 ${residentId} 的活动移动第 ${attempt + 1} 次执行失败：${detail.replace(/\s+/gu, ' ').slice(0, 80)}`,
+    now,
+  );
+}
+
+function movementFallbackCommand(
+  row: Doc<'eventMovementInputs'>,
+  now: number,
+): DailyMovementCommand {
+  return {
+    kind: row.fallbackKind,
+    residentId: row.residentId,
+    destination: { ...eventCheckpoints.dock },
+    description: '活动移动失败，返回旧水码头恢复普通生活',
+    until: Math.max(now, row.until),
+  };
+}
+
+async function enqueueTrackedMovement(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  row: Doc<'eventMovementInputs'>,
+  command: DailyMovementCommand,
+  state: 'queued' | 'fallback-queued',
+  now: number,
+) {
+  const attempt = row.attempts + 1;
+  try {
+    const inputId = await enqueueDailyMovementCommand(ctx, worldId, command);
+    await ctx.db.patch(row._id, { inputId, state, attempts: attempt, updatedAt: now });
+    return 'pending' as const;
+  } catch (error) {
+    await recordMovementFailure(
+      ctx, row.eventId, row.commandKey, row.stageIndex, attempt - 1,
+      row.residentId, error, now,
+    );
+    const failed = attempt >= MAX_MOVEMENT_INPUT_ATTEMPTS;
+    await ctx.db.patch(row._id, {
+      inputId: undefined,
+      state: failed ? 'failed' : state,
+      attempts: attempt,
+      updatedAt: now,
+    });
+    return failed ? 'failed' as const : 'pending' as const;
+  }
+}
+
+async function reconcileMovementRow(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  row: Doc<'eventMovementInputs'>,
+  now: number,
+) {
+  if (row.state === 'succeeded' || row.state === 'recovered') return 'success' as const;
+  if (row.state === 'failed') {
+    if (now < row.updatedAt + MOVEMENT_RECOVERY_BACKOFF) return 'failed' as const;
+    await ctx.db.patch(row._id, {
+      inputId: undefined,
+      state: 'fallback-queued',
+      attempts: 0,
+      updatedAt: now,
+    });
+    return await enqueueTrackedMovement(
+      ctx,
+      worldId,
+      { ...row, inputId: undefined, state: 'fallback-queued', attempts: 0 },
+      movementFallbackCommand(row, now),
+      'fallback-queued',
+      now,
+    );
+  }
+  if (!row.inputId) {
+    const command = row.state === 'retry-original'
+      ? {
+          kind: row.commandKind,
+          residentId: row.residentId,
+          destination: row.destination,
+          description: row.description,
+          until: row.until,
+        } satisfies DailyMovementCommand
+      : movementFallbackCommand(row, now);
+    return await enqueueTrackedMovement(
+      ctx,
+      worldId,
+      row,
+      command,
+      row.state === 'retry-original' ? 'queued' : 'fallback-queued',
+      now,
+    );
+  }
+
+  const input = await ctx.db.get(row.inputId);
+  if (!input?.returnValue) return 'pending' as const;
+  if (input.returnValue.kind === 'ok') {
+    await ctx.db.patch(row._id, {
+      state: row.state === 'fallback-queued' ? 'recovered' : 'succeeded',
+      updatedAt: now,
+    });
+    return 'success' as const;
+  }
+
+  await recordMovementFailure(
+    ctx, row.eventId, row.commandKey, row.stageIndex, row.attempts - 1,
+    row.residentId, new Error(input.returnValue.message), now,
+  );
+  if (row.attempts >= MAX_MOVEMENT_INPUT_ATTEMPTS) {
+    await ctx.db.patch(row._id, { state: 'failed', updatedAt: now });
+    return 'failed' as const;
+  }
+  return await enqueueTrackedMovement(
+    ctx,
+    worldId,
+    row,
+    movementFallbackCommand(row, now),
+    'fallback-queued',
+    now,
+  );
+}
+
+async function reconcileEventMovementInputs(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  eventId: Id<'townEvents'>,
+  now: number,
+) {
+  const rows = await ctx.db
+    .query('eventMovementInputs')
+    .withIndex('batchKey', (q) => q.eq('eventId', eventId))
+    .take(201);
+  if (rows.length > 200) throw new Error('Daily movement input audit exceeded its safe bound.');
+  const outcomes = new Map<string, Array<'success' | 'pending' | 'failed'>>();
+  for (const row of rows) {
+    const outcome = await reconcileMovementRow(ctx, worldId, row, now);
+    const batch = outcomes.get(row.batchKey) ?? [];
+    batch.push(outcome);
+    outcomes.set(row.batchKey, batch);
+  }
+  let pending = false;
+  let failed = false;
+  for (const [batchKey, batchOutcomes] of outcomes) {
+    const status = dailyMovementBatchStatus(batchOutcomes);
+    if (status === 'pending') pending = true;
+    if (status === 'failed') failed = true;
+    if (status === 'completed') {
+      const first = rows.find((row) => row.batchKey === batchKey)!;
+      await insertUniqueMovementLog(
+        ctx,
+        eventId,
+        batchKey,
+        first.stageIndex,
+        'movement-marker',
+        '本阶段全部居民的地图移动已由引擎确认完成。',
+        now,
+      );
+    }
+  }
+  return { pending, failed };
+}
+
+export const reconcileMovementInputs = internalMutation({
+  args: { worldId: v.id('worlds'), eventId: v.id('townEvents') },
+  handler: async (ctx, args) => {
+    const status = await ctx.db
+      .query('worldStatus')
+      .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+      .unique();
+    if (!status) return;
+    const result = await reconcileEventMovementInputs(
+      ctx, args.worldId, args.eventId, Date.now(),
+    );
+    if ((result.pending || result.failed) && status.status === 'running') {
+      await ctx.scheduler.runAfter(
+        result.pending ? 2_000 : MOVEMENT_RECOVERY_BACKOFF,
+        internal.events.reconcileMovementInputs,
+        args,
+      );
+    }
+  },
+});
+
 async function runPersistedDailyMovementBatch(
   ctx: MutationCtx,
   worldId: Id<'worlds'>,
@@ -1160,42 +1352,61 @@ async function runPersistedDailyMovementBatch(
   fallbackKind: 'move' | 'transfer',
   now: number,
 ) {
-  return await executeDailyMovementBatch(markerKey, commands, fallbackKind, {
-    markerCount: async (key) => (await ctx.db
-      .query('eventLog')
-      .withIndex('eventKey', (q) => q.eq('eventId', eventId).eq('eventKey', key))
-      .take(2)).length,
-    enqueue: async (command) => {
-      const args = {
-        playerId: parseGameId('players', command.residentId),
-        destination: command.destination,
-        description: command.description,
-        until: command.until,
-      };
-      if (command.kind === 'transfer') {
-        await insertInput(ctx, worldId, 'eventTransfer', args);
-      } else {
-        await insertInput(ctx, worldId, 'eventMove', args);
-      }
-    },
-    recordFailure: async (prefix, residentId, error) => {
-      const detail = error instanceof Error ? error.message : '未知输入错误';
-      await insertUniqueMovementLog(
-        ctx,
-        eventId,
-        `${prefix}:${residentId}`,
-        stageIndex,
-        'movement-failure',
-        `居民 ${residentId} 的活动移动未能排队：${detail.replace(/\s+/gu, ' ').slice(0, 80)}`,
-        now,
-      );
-    },
-    recordMarker: async (key) => {
-      await insertUniqueMovementLog(
-        ctx, eventId, key, stageIndex, 'movement-marker', '本阶段地图移动已经排队。', now,
-      );
-    },
+  const markers = await ctx.db
+    .query('eventLog')
+    .withIndex('eventKey', (q) => q.eq('eventId', eventId).eq('eventKey', markerKey))
+    .take(2);
+  if (markers.length > 1) throw new Error(`Daily movement marker collision: ${markerKey}`);
+  if (markers.length === 1) {
+    return { status: 'completed' as const, queued: 0, failures: 0 };
+  }
+
+  let queued = 0;
+  let failures = 0;
+  for (const [commandIndex, command] of commands.entries()) {
+    const commandKey = dailyMovementCommandKey(markerKey, commandIndex, command);
+    const existing = await ctx.db
+      .query('eventMovementInputs')
+      .withIndex('commandKey', (q) =>
+        q.eq('eventId', eventId).eq('commandKey', commandKey))
+      .take(2);
+    if (existing.length > 1) throw new Error(`Daily movement input collision: ${commandKey}`);
+    if (existing[0]) continue;
+
+    let inputId: Id<'inputs'> | undefined;
+    let state: Doc<'eventMovementInputs'>['state'] = 'queued';
+    try {
+      inputId = await enqueueDailyMovementCommand(ctx, worldId, command);
+      queued += 1;
+    } catch (error) {
+      state = 'retry-original';
+      failures += 1;
+      await recordMovementFailure(ctx, eventId, commandKey, stageIndex, 0, command.residentId, error, now);
+    }
+    await ctx.db.insert('eventMovementInputs', {
+      eventId,
+      batchKey: markerKey,
+      commandKey,
+      residentId: command.residentId,
+      commandIndex,
+      stageIndex,
+      commandKind: command.kind,
+      fallbackKind,
+      destination: command.destination,
+      description: command.description,
+      until: command.until,
+      inputId,
+      state,
+      attempts: inputId ? 1 : 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  await ctx.scheduler.runAfter(1_000, internal.events.reconcileMovementInputs, {
+    worldId,
+    eventId,
   });
+  return { status: 'pending' as const, queued, failures };
 }
 
 async function queuePersistedDailyStageMovement(
@@ -1231,7 +1442,7 @@ async function queuePersistedDailyStageMovement(
     `daily:${event.dailyKey}:movement:stage:${event.stageIndex}`,
     event.stageIndex,
     commands,
-    template.venue === 'trial-island' ? 'transfer' : 'move',
+    'transfer',
     now,
   );
 }
@@ -1255,7 +1466,7 @@ async function queuePersistedDailyReturnMovement(
     `daily:${event.dailyKey}:movement:return`,
     event.stageIndex,
     commands,
-    event.venueMode === 'trial-island' ? 'transfer' : 'move',
+    'transfer',
     now,
   );
 }
