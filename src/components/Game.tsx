@@ -16,6 +16,7 @@ import type { TownLandmark } from '../../data/worlds/lighthouse-town/map';
 import { townLandmarks } from '../../data/worlds/lighthouse-town/map';
 import InstitutionDetails from './InstitutionDetails';
 import type { TownCameraMode } from './cameraFrame';
+import PixiRuntimeGate from './PixiRuntimeGate';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
@@ -132,6 +133,12 @@ export default function Game() {
               </button>
             ))}
           </div>
+          {worldStatus.status === 'stoppedByDeveloper' && (
+            <div className="town-pause-state" role="status">
+              <strong>小镇已暂停</strong>
+              <span>居民、经济、比赛与新模型请求均已休息</span>
+            </div>
+          )}
           <button
             className="map-live-badge"
             onClick={() => setLocationDirectoryOpen((open) => !open)}
@@ -169,6 +176,7 @@ export default function Game() {
                 {/* Re-propagate context because contexts are not shared between renderers.
 https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-531549215 */}
                 <ConvexProvider client={convex}>
+                  <PixiRuntimeGate worldStatus={worldStatus.status} />
                   <PixiGame
                     game={game}
                     worldId={worldId}

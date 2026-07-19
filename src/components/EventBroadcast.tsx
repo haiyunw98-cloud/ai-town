@@ -17,6 +17,7 @@ import {
   getSocialReportExportStore,
 } from './reportExportController';
 import type { GameId } from '../../convex/aiTown/ids';
+import { inauguralEventMemory } from '../../data/worlds/lighthouse-town/history';
 
 export default function EventBroadcast({
   worldId,
@@ -42,9 +43,10 @@ export default function EventBroadcast({
   );
   const reportActions = buildReportActionsView(socialReportPending);
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    const live = snapshot?.event?.status === 'running';
+    const timer = window.setInterval(() => setNow(Date.now()), live ? 1_000 : 30_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [snapshot?.event?.status]);
 
   if (!snapshot) {
     return <div className="event-empty">{t('event.loading')}</div>;
@@ -219,6 +221,14 @@ export default function EventBroadcast({
           title={view.title}
           emptyLabel={t('event.noEntries')}
           history={view.history}
+        />
+      )}
+      {(!snapshot.event || snapshot.event.dailyKey !== undefined) && (
+        <CompletedEventArchive
+          locale={locale}
+          title="往届赛事记忆"
+          emptyLabel={t('event.noEntries')}
+          history={inauguralEventMemory}
         />
       )}
     </section>

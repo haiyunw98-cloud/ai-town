@@ -429,7 +429,7 @@ export const observerSnapshot = query({
       }));
     const messageRows = boundObserverRows(await ctx.db
       .query('messages')
-      .filter((q) => q.eq(q.field('worldId'), worldId))
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
       .order('desc')
       .take(OBSERVER_SNAPSHOT_LIMIT + 1));
     const messages = messageRows.rows;

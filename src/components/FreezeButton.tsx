@@ -2,6 +2,7 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import Button from './buttons/Button';
 import { useI18n } from '../i18n';
+import starImg from '../../assets/star.svg';
 
 export default function FreezeButton() {
   const { t } = useI18n();
@@ -27,9 +28,8 @@ export default function FreezeButton() {
     <>
       <Button
         onClick={() => void flipSwitch()}
-        className="hidden lg:block"
         title={t('action.freezeHint')}
-        imgUrl="/assets/star.svg"
+        imgUrl={starImg}
       >
         {t(frozen ? 'action.unfreeze' : 'action.freeze')}
       </Button>

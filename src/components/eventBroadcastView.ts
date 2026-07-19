@@ -12,6 +12,10 @@ export type BroadcastSnapshot = {
     phaseEndsAt: number;
     winnerId?: string;
     prize: string;
+    dailyKey?: string;
+    templateId?: string;
+    venueMode?: string;
+    stageIndex?: number;
   };
   participants: Array<{
     residentId: string;
