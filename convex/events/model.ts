@@ -4,7 +4,9 @@ import {
   getLLMConfig,
   LLMConfig,
 } from '../util/llm';
+import { segmentConversationGraphemes } from '../util/conversationText';
 import type { DailyStageId } from './dailyTemplates';
+import { isLocalDailyEventGemma } from './localGemmaPolicy';
 import { EventPhase } from './types';
 
 export type EventChoice = Readonly<{
@@ -60,9 +62,9 @@ export async function requestEventDecision(
   dependencies: EventModelDependencies = defaultDependencies,
 ): Promise<EventDecision> {
   validateChoices(input.choices);
-  const config = dependencies.getConfig();
-  if (config.provider !== 'ollama') return fallbackDecision(input);
   try {
+    const config = dependencies.getConfig();
+    if (!isLocalDailyEventGemma(config)) return fallbackDecision(input);
     const result = await dependencies.complete({
       model: config.chatModel,
       messages: [
@@ -86,7 +88,7 @@ export async function requestEventDecision(
     }
     return {
       choiceId: parsed.choiceId,
-      publicQuote: truncatePublicQuote(parsed.publicQuote),
+      publicQuote: parsed.publicQuote.trim(),
       source: 'model',
     };
   } catch {
@@ -102,7 +104,13 @@ function validateChoices(choices: readonly EventChoice[]) {
 }
 
 function isSafePublicQuote(value: unknown): value is string {
-  return typeof value === 'string' && !!value.trim() && !unsafePublicQuote.test(value);
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim();
+  return (
+    !!normalized &&
+    !unsafePublicQuote.test(normalized) &&
+    segmentConversationGraphemes(normalized).length <= 60
+  );
 }
 
 function fallbackDecision(input: EventDecisionInput): EventDecision {
@@ -110,13 +118,9 @@ function fallbackDecision(input: EventDecisionInput): EventDecision {
   const choice = input.choices[index];
   return {
     choiceId: choice.id,
-    publicQuote: truncatePublicQuote(`${input.displayName}点点头：“先把眼前这一关做好。”`),
+    publicQuote: '我点点头：“先把眼前这一关做好。”',
     source: 'fallback',
   };
-}
-
-function truncatePublicQuote(value: string) {
-  return Array.from(value.trim()).slice(0, 60).join('');
 }
 
 function stableIndex(value: string, modulo: number) {

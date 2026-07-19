@@ -5,6 +5,7 @@ import {
   type LLMConfig,
 } from '../util/llm';
 import type { DailyEventTemplate } from './dailyTemplates';
+import { isLocalDailyEventGemma } from './localGemmaPolicy';
 
 export type DailyTheme = {
   name: string;
@@ -56,9 +57,7 @@ export async function requestDailyTheme(
   const fallback = fallbackDailyTheme(template);
   try {
     const config = dependencies.getConfig();
-    if (config.provider !== 'ollama' || !isApprovedGemmaModel(config.chatModel)) {
-      return fallback;
-    }
+    if (!isLocalDailyEventGemma(config)) return fallback;
 
     const response = await dependencies.complete({
       model: config.chatModel,
@@ -92,9 +91,4 @@ export async function requestDailyTheme(
 function hasLengthWithin(value: string, minimum: number, maximum: number): boolean {
   const length = Array.from(value).length;
   return length >= minimum && length <= maximum;
-}
-
-function isApprovedGemmaModel(model: string): boolean {
-  const normalized = model.trim().toLowerCase().split('/').at(-1);
-  return normalized === 'gemma4:12b';
 }

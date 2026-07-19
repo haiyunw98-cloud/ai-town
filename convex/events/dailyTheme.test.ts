@@ -52,6 +52,13 @@ describe('daily event theme boundary', () => {
     ['paid provider', { ...ollamaGemma, provider: 'openai' as const }],
     ['custom provider', { ...ollamaGemma, provider: 'custom' as const }],
     ['a non-Gemma Ollama model', { ...ollamaGemma, chatModel: 'qwen3.5:9b' }],
+    ['a remotely prefixed model', { ...ollamaGemma, chatModel: 'remote/gemma4:12b' }],
+    ['a case-variant model', { ...ollamaGemma, chatModel: 'Gemma4:12b' }],
+    ['an HTTPS endpoint', { ...ollamaGemma, url: 'https://127.0.0.1:11434' }],
+    ['a remote IPv4 endpoint', { ...ollamaGemma, url: 'http://192.168.1.8:11434' }],
+    ['a remote hostname', { ...ollamaGemma, url: 'http://ollama.example.com:11434' }],
+    ['a localhost suffix trap', { ...ollamaGemma, url: 'http://localhost.example.com' }],
+    ['an endpoint with remote userinfo', { ...ollamaGemma, url: 'http://remote@localhost:11434' }],
   ])('does not call the model for %s', async (_label, config) => {
     let calls = 0;
     await expect(
@@ -64,6 +71,26 @@ describe('daily event theme boundary', () => {
       }),
     ).resolves.toEqual(fallbackDailyTheme(template));
     expect(calls).toBe(0);
+  });
+
+  test.each([
+    'http://127.0.0.1:11434',
+    'http://localhost:11434/v1',
+    'http://[::1]:11434/ollama',
+  ])('allows the exact Gemma model at local endpoint %s', async (url) => {
+    let calls = 0;
+    const result = await requestDailyTheme(template, '2026-07-17', {
+      getConfig: () => ({ ...ollamaGemma, url }),
+      complete: async () => {
+        calls += 1;
+        return {
+          content:
+            '{"name":"荷香协作赛","announcement":"安全完成每一关，退出比赛的居民会进入观众席。"}',
+        };
+      },
+    });
+    expect(calls).toBe(1);
+    expect(result.source).toBe('model');
   });
 
   test.each([

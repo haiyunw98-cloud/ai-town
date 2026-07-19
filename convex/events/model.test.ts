@@ -76,6 +76,72 @@ describe('event model boundary', () => {
     expect(Array.from(malformedResult.publicQuote).length).toBeLessThanOrEqual(60);
   });
 
+  test.each([
+    ['paid provider', { ...ollamaConfig, provider: 'openai' as const }],
+    ['non-Gemma model', { ...ollamaConfig, chatModel: 'qwen3.5:9b' }],
+    ['remote model prefix', { ...ollamaConfig, chatModel: 'remote/gemma4:12b' }],
+    ['HTTPS loopback', { ...ollamaConfig, url: 'https://127.0.0.1:11434' }],
+    ['remote IPv4', { ...ollamaConfig, url: 'http://10.0.0.2:11434' }],
+    ['remote hostname', { ...ollamaConfig, url: 'http://example.com:11434' }],
+    ['localhost suffix trap', { ...ollamaConfig, url: 'http://localhost.example.com' }],
+  ])('never calls completion for %s', async (_label, config) => {
+    let calls = 0;
+    const result = await requestEventDecision(input, {
+      getConfig: () => config,
+      complete: async () => {
+        calls += 1;
+        return { content: '{}' };
+      },
+    });
+    expect(calls).toBe(0);
+    expect(result.source).toBe('fallback');
+  });
+
+  test('falls back when configuration lookup throws', async () => {
+    let calls = 0;
+    await expect(
+      requestEventDecision(input, {
+        getConfig: () => {
+          throw new Error('config unavailable');
+        },
+        complete: async () => {
+          calls += 1;
+          return { content: '{}' };
+        },
+      }),
+    ).resolves.toMatchObject({ source: 'fallback' });
+    expect(calls).toBe(0);
+  });
+
+  test.each(['', '   ', '好'.repeat(61), '👨‍👩‍👧‍👦'.repeat(61)])(
+    'rejects empty or over-60-grapheme model quote',
+    async (publicQuote) => {
+      const result = await requestEventDecision(input, {
+        getConfig: () => ollamaConfig,
+        complete: async () => ({
+          content: JSON.stringify({ choiceId: 'share', publicQuote }),
+        }),
+      });
+      expect(result.source).toBe('fallback');
+      const graphemeLength = Array.from(
+        new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(result.publicQuote),
+      ).length;
+      expect(graphemeLength).toBeLessThanOrEqual(60);
+      expect(result.publicQuote).not.toMatch(/死亡|受伤|处决|流血/u);
+    },
+  );
+
+  test('accepts exactly sixty graphemes without truncation', async () => {
+    const publicQuote = '好'.repeat(60);
+    const result = await requestEventDecision(input, {
+      getConfig: () => ({ ...ollamaConfig, url: 'http://[::1]:11434/v1' }),
+      complete: async () => ({
+        content: JSON.stringify({ choiceId: 'share', publicQuote }),
+      }),
+    });
+    expect(result).toEqual({ choiceId: 'share', publicQuote, source: 'model' });
+  });
+
   test('accepts readonly daily-stage choices without mutating them', async () => {
     const stage = dailyEventTemplates[0].stages[1];
     const result = await requestEventDecision(
