@@ -8,6 +8,7 @@ LOGS="${LIGHTHOUSE_TOWN_LOG_DIR:-$HOME/Library/Logs/LighthouseTown}"
 STATE_DIR="${LIGHTHOUSE_TOWN_STATE_DIR:-$HOME/Library/Application Support/LighthouseTown}"
 FRONTEND_PORT="${LIGHTHOUSE_TOWN_PORT:-4174}"
 BACKEND_PORT=3210
+ARCHIVE_ROOT="${LIGHTHOUSE_IMA_ARCHIVE_DIR:-$HOME/Documents/灯塔镇研究档案/IMA导入}"
 
 NODE_BIN="$(command -v node)"
 NPM_BIN="$(command -v npm)"
@@ -20,9 +21,13 @@ CONVEX_ENTRY="$ROOT/node_modules/convex/bin/main.js"
 VITE_ENTRY="$ROOT/node_modules/vite/bin/vite.js"
 BACKEND_SESSION="lighthouse-town-backend"
 FRONTEND_SESSION="lighthouse-town-frontend"
+ARCHIVE_SESSION="lighthouse-town-archive"
 PROCESS_RUNNER="$SCRIPT_DIR/run-lighthouse-process.sh"
 BACKEND_PID_FILE="$STATE_DIR/backend.pid"
 FRONTEND_PID_FILE="$STATE_DIR/frontend.pid"
+ARCHIVE_PID_FILE="$STATE_DIR/archive.pid"
+ARCHIVE_ENTRY="$ROOT/scripts/run-lighthouse-archive.ts"
+ARCHIVE_HEARTBEAT="$ARCHIVE_ROOT/.archive-heartbeat.json"
 DIST_DIR="$ROOT/dist"
 DIST_BACKUP="$STATE_DIR/dist-backup.$$"
 DIST_RESTORE="$ROOT/.dist-restore.$$"
@@ -136,10 +141,12 @@ main() {
   trap - EXIT INT TERM
   rm -rf "$DIST_BACKUP"
 
-  # Stop only the two named detached sessions owned by Lighthouse Town.
+  # Stop only the three named detached sessions owned by Lighthouse Town.
   # Unrelated Vite, Convex, and Ollama processes are never searched for or killed.
+  stop_managed_session "$ARCHIVE_SESSION"
   stop_managed_session "$FRONTEND_SESSION"
   stop_managed_session "$BACKEND_SESSION"
+  stop_managed_process "$ARCHIVE_PID_FILE" "$ARCHIVE_ENTRY"
   stop_managed_process "$FRONTEND_PID_FILE" "$VITE_ENTRY"
   stop_managed_process "$BACKEND_PID_FILE" "$CONVEX_ENTRY"
   sleep 1
@@ -160,21 +167,32 @@ main() {
     "$ROOT" "$LOGS/frontend.log" "$LOGS/frontend-error.log" "$FRONTEND_PID_FILE" \
     "$NODE_BIN" "$VITE_ENTRY" preview --host 127.0.0.1 \
     --port "$FRONTEND_PORT" --strictPort &!
+  rm -f "$ARCHIVE_HEARTBEAT"
+  "$SCREEN_BIN" -DmS "$ARCHIVE_SESSION" "$PROCESS_RUNNER" \
+    "$ROOT" "$LOGS/archive.log" "$LOGS/archive-error.log" "$ARCHIVE_PID_FILE" \
+    "$NODE_BIN" --loader ts-node/esm --experimental-specifier-resolution=node \
+    "$ARCHIVE_ENTRY" &!
 
   # A cold local Convex start can take more than twenty seconds on a busy laptop.
   for _ in {1..60}; do
     if managed_session_running "$BACKEND_SESSION" \
       && managed_session_running "$FRONTEND_SESSION" \
+      && managed_session_running "$ARCHIVE_SESSION" \
       && "$CURL_BIN" -fsS "http://127.0.0.1:$FRONTEND_PORT/ai-town/" >/dev/null \
-      && "$NC_BIN" -z 127.0.0.1 "$BACKEND_PORT"; then
+      && "$NC_BIN" -z 127.0.0.1 "$BACKEND_PORT" \
+      && [[ -f "$ARCHIVE_HEARTBEAT" ]] \
+      && grep -q '"ok": true' "$ARCHIVE_HEARTBEAT"; then
       echo "Lighthouse Town site installed: http://localhost:$FRONTEND_PORT/ai-town"
+      echo "Research archive: $ARCHIVE_ROOT"
       return 0
     fi
     sleep 1
   done
 
+  stop_managed_session "$ARCHIVE_SESSION"
   stop_managed_session "$FRONTEND_SESSION"
   stop_managed_session "$BACKEND_SESSION"
+  stop_managed_process "$ARCHIVE_PID_FILE" "$ARCHIVE_ENTRY"
   stop_managed_process "$FRONTEND_PID_FILE" "$VITE_ENTRY"
   stop_managed_process "$BACKEND_PID_FILE" "$CONVEX_ENTRY"
   echo "Lighthouse Town site failed its startup health check" >&2
