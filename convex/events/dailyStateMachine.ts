@@ -11,6 +11,7 @@ export type DailyEventParticipant = {
   score: number;
   active: boolean;
   role: 'competitor' | 'spectator' | 'winner';
+  reachedFinal: boolean;
 };
 
 export type DailyEventLogEntry = {
@@ -83,6 +84,7 @@ export function createDailyEventState(
       score: 0,
       active: true,
       role: 'competitor',
+      reachedFinal: false,
     })),
     log: [
       {
@@ -145,6 +147,7 @@ export function advanceDailyEventToStage(
         score: scoreByResident.get(participant.residentId) ?? participant.score,
         active,
         role: active ? ('competitor' as const) : ('spectator' as const),
+        reachedFinal: participant.reachedFinal || (stageIndex === 4 && active),
       };
     });
 
