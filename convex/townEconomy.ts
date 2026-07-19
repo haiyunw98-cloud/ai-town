@@ -585,6 +585,248 @@ export type ActivitySettlementArgs = {
   now?: number;
 };
 
+export type DailyEventRewardParticipant = Readonly<{
+  residentId: string;
+  displayName: string;
+  reachedFinal: boolean;
+  champion: boolean;
+}>;
+
+export type DailyEventHostService = Readonly<{
+  residentId: string;
+  institutionId: string;
+  serviceId: string;
+  amount: number;
+  quantity: number;
+}>;
+
+export type DailyEventRewardSettlementArgs = Readonly<{
+  worldId: Id<'worlds'>;
+  eventId: Id<'townEvents'>;
+  dayKey: string;
+  participants: readonly DailyEventRewardParticipant[];
+  hostServices: readonly DailyEventHostService[] | null;
+  now: number;
+}>;
+
+const DAILY_EVENT_REWARD_TIERS = [
+  { key: 'participation', amount: 10, label: '参与' },
+  { key: 'finalist', amount: 20, label: '晋级' },
+  { key: 'champion', amount: 50, label: '冠军' },
+] as const;
+
+/**
+ * Settles the factual reward rows for one completed daily event. The caller is
+ * expected to persist the event state in the same mutation and may call this
+ * helper directly from that internal mutation.
+ */
+export async function settleDailyEventRewards(
+  ctx: EconomyDbContext,
+  args: DailyEventRewardSettlementArgs,
+) {
+  validateDailyEventRewardInput(args);
+  const event = await ctx.db.get(args.eventId);
+  if (!event) throw new Error('Daily event reward event is missing');
+  if (event.worldId !== args.worldId) throw new Error('Daily event reward world mismatch');
+  if (event.dailyKey === undefined) {
+    throw new Error('Legacy event without dailyKey cannot settle daily rewards');
+  }
+  if (event.dailyKey !== args.dayKey) throw new Error('Daily event reward day mismatch');
+  if (event.status !== 'completed') throw new Error('Daily event rewards require a completed event');
+
+  const champion = args.participants.find((participant) => participant.champion)!;
+  if (event.winnerId !== champion.residentId) {
+    throw new Error('Daily event winner does not match the reward outcome');
+  }
+  const world = await ctx.db.get(args.worldId);
+  if (!world) throw new Error('Daily event reward world is missing');
+
+  const configuredProfiles = new Map(
+    residentEconomyProfiles.map((profile) => [profile.id, profile]),
+  );
+  if (configuredProfiles.size !== 9) {
+    throw new Error('Daily event rewards require exactly nine configured residents');
+  }
+  const seenProfiles = new Set<string>();
+  const accountPlans: Array<{
+    accountId: Id<'residentEconomy'>;
+    balance: number;
+    todayIncome: number;
+    todayExpense: number;
+  }> = [];
+  const allEntries: EconomyLedgerEntry[] = [];
+
+  for (const participant of args.participants) {
+    const player = world.players.find((candidate) => candidate.id === participant.residentId);
+    const activeAgentCount = world.agents.filter(
+      (candidate) => candidate.playerId === participant.residentId,
+    ).length;
+    if (!player || player.human !== undefined || activeAgentCount !== 1) {
+      throw new Error(`Daily event resident is not one active AI: ${participant.residentId}`);
+    }
+    const account = await ctx.db
+      .query('residentEconomy')
+      .withIndex('resident', (q) =>
+        q.eq('worldId', args.worldId).eq('residentId', participant.residentId),
+      )
+      .unique();
+    if (!account) {
+      throw new Error(`Daily event resident account is missing: ${participant.residentId}`);
+    }
+    const profile = configuredProfiles.get(account.profileId);
+    if (!profile || profile.name !== participant.displayName) {
+      throw new Error(`Daily event resident is not configured: ${participant.residentId}`);
+    }
+    if (seenProfiles.has(profile.id)) {
+      throw new Error(`Daily event resident profile is ambiguous: ${profile.id}`);
+    }
+    seenProfiles.add(profile.id);
+    if (
+      account.initialBalance === undefined
+      || account.initializationSourceKey === undefined
+      || account.initializedAt === undefined
+    ) {
+      throw new Error(`Daily event resident account is not fully initialized: ${profile.id}`);
+    }
+    validatePersistedResident({
+      ...account,
+      initialBalance: account.initialBalance,
+      initializationSourceKey: account.initializationSourceKey,
+      initializedAt: account.initializedAt,
+    }, new Map([[profile.id, { playerId: participant.residentId }]]));
+    if (args.now < account.updatedAt) {
+      throw new Error(`Daily event reward timestamp precedes resident state: ${profile.id}`);
+    }
+
+    const earnedTiers = DAILY_EVENT_REWARD_TIERS.filter((tier) =>
+      tier.key === 'participation'
+      || (tier.key === 'finalist' && participant.reachedFinal)
+      || (tier.key === 'champion' && participant.champion),
+    );
+    const entries = earnedTiers.map((tier): EconomyLedgerEntry => {
+      const key = `event:${args.eventId}:${participant.residentId}:${tier.key}`;
+      return {
+        worldId: args.worldId,
+        idempotencyKey: key,
+        dayKey: args.dayKey,
+        residentId: participant.residentId,
+        kind: 'event-reward',
+        amount: tier.amount,
+        sourceKey: key,
+        text: `${participant.displayName}获得每日活动${tier.label}奖励 ${tier.amount} 金贝。`,
+        createdAt: args.now,
+      };
+    });
+    const reward = entries.reduce((sum, entry) => sum + entry.amount, 0);
+    const dayIncome = account.dayKey === args.dayKey ? account.todayIncome : 0;
+    const dayExpense = account.dayKey === args.dayKey ? account.todayExpense : 0;
+    if (
+      !isBoundedSafeInteger(account.balance + reward, MAX_MONEY)
+      || !isBoundedSafeInteger(dayIncome + reward, MAX_MONEY)
+      || !isBoundedSafeInteger(dayExpense, MAX_MONEY)
+    ) {
+      throw new Error(`Daily event reward money boundary exceeded: ${profile.id}`);
+    }
+    for (const entry of entries) {
+      validateLedgerEntryShape(entry);
+      await validateLedgerContract(ctx, entry);
+    }
+    accountPlans.push({
+      accountId: account._id,
+      balance: account.balance + reward,
+      todayIncome: dayIncome + reward,
+      todayExpense: dayExpense,
+    });
+    allEntries.push(...entries);
+  }
+  if (seenProfiles.size !== configuredProfiles.size) {
+    throw new Error('Daily event participants do not cover every configured resident');
+  }
+
+  const existingEntries = [];
+  for (const entry of allEntries) {
+    const existing = await ctx.db
+      .query('economyLedger')
+      .withIndex('idempotencyKey', (q) =>
+        q.eq('worldId', args.worldId).eq('idempotencyKey', entry.idempotencyKey),
+      )
+      .unique();
+    if (existing && !dailyRewardLedgerEquivalent(existing, entry, args.now)) {
+      throw new Error(`Daily event reward collision: ${entry.idempotencyKey}`);
+    }
+    existingEntries.push(existing);
+  }
+  const existingCount = existingEntries.filter(Boolean).length;
+  const totalAmount = allEntries.reduce((sum, entry) => sum + entry.amount, 0);
+  if (existingCount === allEntries.length) {
+    return { status: 'already-settled' as const, ledgerEntries: allEntries.length, totalAmount };
+  }
+  if (existingCount !== 0) {
+    throw new Error('Daily event reward collision: partial prior settlement');
+  }
+
+  for (const plan of accountPlans) {
+    await ctx.db.patch(plan.accountId, {
+      balance: plan.balance,
+      todayIncome: plan.todayIncome,
+      todayExpense: plan.todayExpense,
+      dayKey: args.dayKey,
+      updatedAt: args.now,
+    });
+  }
+  for (const entry of allEntries) await ctx.db.insert('economyLedger', entry);
+  return { status: 'settled' as const, ledgerEntries: allEntries.length, totalAmount };
+}
+
+function validateDailyEventRewardInput(args: DailyEventRewardSettlementArgs) {
+  assertDateTimestamp(args.now, 'Daily event reward now');
+  assertDayKey(args.dayKey, 'Daily event reward dayKey');
+  if (shanghaiEconomyDayKey(args.now) !== args.dayKey) {
+    throw new Error('Daily event reward dayKey must match now in Asia/Shanghai');
+  }
+  if (args.hostServices !== null && args.hostServices.length !== 0) {
+    throw new Error('Daily event host services are not configured for settlement');
+  }
+  if (!Array.isArray(args.participants) || args.participants.length !== 9) {
+    throw new Error('Daily event rewards require nine participants');
+  }
+  const residentIds = new Set<string>();
+  let championCount = 0;
+  for (const participant of args.participants) {
+    assertBoundedString(participant.residentId, 80, 'Daily event residentId');
+    assertBoundedString(participant.displayName, 80, 'Daily event displayName');
+    if (typeof participant.reachedFinal !== 'boolean' || typeof participant.champion !== 'boolean') {
+      throw new Error('Daily event outcome flags must be boolean');
+    }
+    if (residentIds.has(participant.residentId)) {
+      throw new Error(`Duplicate daily event resident: ${participant.residentId}`);
+    }
+    residentIds.add(participant.residentId);
+    if (participant.champion) {
+      championCount += 1;
+      if (!participant.reachedFinal) {
+        throw new Error('Daily event champion must be a finalist');
+      }
+    }
+  }
+  if (championCount !== 1) throw new Error('Daily event requires exactly one champion');
+}
+
+function dailyRewardLedgerEquivalent(
+  existing: Record<string, unknown>,
+  expected: EconomyLedgerEntry,
+  replayedAt: number,
+) {
+  validateLedgerEntryShape(existing as unknown as EconomyLedgerEntry);
+  if (typeof existing.createdAt !== 'number' || existing.createdAt > replayedAt) return false;
+  return [
+    'worldId', 'idempotencyKey', 'dayKey', 'residentId', 'institutionId', 'kind',
+    'amount', 'expectedAmount', 'compensationKind', 'item', 'quantity', 'sourceKey', 'text',
+  ].every(
+    (field) => existing[field] === (expected as unknown as Record<string, unknown>)[field],
+  );
+}
+
 export function validateActivityRegistration(
   args: Omit<ActivitySettlementArgs, 'now' | 'terminalFailureReason'>,
   createdAt: number,
@@ -1638,7 +1880,7 @@ async function validateLedgerContract(ctx: EconomyDbContext, entry: EconomyLedge
     }
     case 'event-reward':
       await requireResidentAccount(ctx, entry);
-      if (![10, 30, 80].includes(entry.amount)) {
+      if (![10, 20, 50].includes(entry.amount)) {
         throw new Error('event reward amount must be an earned configured tier');
       }
       return;

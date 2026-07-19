@@ -12,6 +12,7 @@ import {
   reconcileTownEconomyAfterAgentCreation,
   shanghaiEconomyDayKey,
   settleActivity,
+  settleDailyEventRewards,
   validateActivityRegistration,
 } from './townEconomy';
 import * as townEconomyModule from './townEconomy';
@@ -2499,4 +2500,227 @@ function institutionQueryFixture(
   });
   fixture.db.seed('townInstitutions', validInstitutionRow());
   return fixture;
+}
+
+describe('daily event reward settlement', () => {
+  test('keeps daily event persistence additive and compatible with legacy rows', () => {
+    const schema = readFileSync('convex/schema.ts', 'utf8');
+    for (const field of [
+      'dailyKey', 'templateId', 'eventName', 'announcement', 'venueMode',
+      'startedAt', 'endedAt', 'archiveReason', 'stageIndex', 'themeSource',
+      'teamId', 'choiceId', 'decisionStage', 'participationRewarded',
+      'finalistRewarded', 'championRewarded',
+    ]) {
+      expect(schema).toContain(`${field}: v.optional(`);
+    }
+    expect(schema).toContain(".index('worldDay', ['worldId', 'dailyKey'])");
+  });
+
+  test('pays nine residents through separate 10, 20 and 50 ledgers exactly once', async () => {
+    const fixture = dailyRewardFixture();
+    const args = dailyRewardArgs(fixture.eventId);
+
+    expect(await settleDailyEventRewards(fixture.ctx, args)).toEqual({
+      status: 'settled',
+      ledgerEntries: 12,
+      totalAmount: 180,
+    });
+    const accounts = fixture.db.table('residentEconomy');
+    expect(accounts.find((row) => row.residentId === 'p:0')).toEqual(expect.objectContaining({
+      balance: 200,
+      todayIncome: 80,
+      dayKey: '2026-07-19',
+    }));
+    expect(accounts.find((row) => row.residentId === 'p:1')).toEqual(expect.objectContaining({
+      balance: 162,
+      todayIncome: 30,
+    }));
+    expect(accounts.find((row) => row.residentId === 'p:2')).toEqual(expect.objectContaining({
+      balance: 160,
+      todayIncome: 10,
+    }));
+    expect(fixture.db.table('economyLedger')).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        idempotencyKey: `event:${fixture.eventId}:p:0:participation`,
+        amount: 10,
+      }),
+      expect.objectContaining({
+        idempotencyKey: `event:${fixture.eventId}:p:0:finalist`,
+        amount: 20,
+      }),
+      expect.objectContaining({
+        idempotencyKey: `event:${fixture.eventId}:p:0:champion`,
+        amount: 50,
+      }),
+    ]));
+
+    const snapshot = fixture.db.snapshot();
+    expect(await settleDailyEventRewards(fixture.ctx, {
+      ...args,
+      now: now + 60_000,
+    })).toEqual({ status: 'already-settled', ledgerEntries: 12, totalAmount: 180 });
+    expect(fixture.db.snapshot()).toEqual(snapshot);
+  });
+
+  test('rejects legacy, cross-world, cross-day and malformed outcomes before any write', async () => {
+    const mutations: Array<(fixture: ReturnType<typeof dailyRewardFixture>) => void> = [
+      (fixture) => { delete fixture.event.dailyKey; },
+      (fixture) => { fixture.event.worldId = 'worlds:foreign'; },
+      (fixture) => { fixture.event.dailyKey = '2026-07-18'; },
+      (fixture) => { fixture.event.status = 'running'; },
+      (fixture) => { fixture.event.winnerId = 'p:8'; },
+    ];
+    for (const mutate of mutations) {
+      const fixture = dailyRewardFixture();
+      mutate(fixture);
+      const before = fixture.db.snapshot();
+      await expect(settleDailyEventRewards(
+        fixture.ctx,
+        dailyRewardArgs(fixture.eventId),
+      )).rejects.toThrow();
+      expect(fixture.db.snapshot()).toEqual(before);
+    }
+
+    const malformedInputs = [
+      (participants: ReturnType<typeof rewardParticipants>) => participants.slice(0, 8),
+      (participants: ReturnType<typeof rewardParticipants>) => [participants[0], ...participants.slice(0, 8)],
+      (participants: ReturnType<typeof rewardParticipants>) => participants.map((entry) => ({ ...entry, champion: false })),
+      (participants: ReturnType<typeof rewardParticipants>) => participants.map((entry, index) => ({ ...entry, champion: index < 2, reachedFinal: index < 2 })),
+      (participants: ReturnType<typeof rewardParticipants>) => participants.map((entry, index) => index === 0 ? { ...entry, reachedFinal: false } : entry),
+    ];
+    for (const mutate of malformedInputs) {
+      const fixture = dailyRewardFixture();
+      const before = fixture.db.snapshot();
+      await expect(settleDailyEventRewards(fixture.ctx, {
+        ...dailyRewardArgs(fixture.eventId),
+        participants: mutate(rewardParticipants()),
+      })).rejects.toThrow();
+      expect(fixture.db.snapshot()).toEqual(before);
+    }
+  });
+
+  test('fails closed for nonconfigured, human, ambiguous-agent or missing-account residents', async () => {
+    const corruptions: Array<(fixture: ReturnType<typeof dailyRewardFixture>) => void> = [
+      (fixture) => {
+        const world = fixture.db.table('worlds')[0];
+        const player = (world.players as Array<Record<string, unknown>>)[0];
+        player.human = 'user:test';
+      },
+      (fixture) => {
+        const world = fixture.db.table('worlds')[0];
+        (world.agents as Array<Record<string, unknown>>).push({ id: 'a:duplicate', playerId: 'p:0' });
+      },
+      (fixture) => {
+        fixture.db.table('residentEconomy').splice(0, 1);
+      },
+      (fixture) => {
+        fixture.db.table('residentEconomy')[0].profileId = 'not-configured';
+      },
+    ];
+    for (const corrupt of corruptions) {
+      const fixture = dailyRewardFixture();
+      corrupt(fixture);
+      const before = fixture.db.snapshot();
+      await expect(settleDailyEventRewards(
+        fixture.ctx,
+        dailyRewardArgs(fixture.eventId),
+      )).rejects.toThrow();
+      expect(fixture.db.snapshot()).toEqual(before);
+    }
+  });
+
+  test('preflights every collision and money boundary before patching any account', async () => {
+    const collision = dailyRewardFixture();
+    collision.db.seed('economyLedger', {
+      worldId,
+      idempotencyKey: `event:${collision.eventId}:p:8:participation`,
+      dayKey: '2026-07-19',
+      residentId: 'p:8',
+      kind: 'event-reward',
+      amount: 20,
+      sourceKey: `event:${collision.eventId}:p:8:participation`,
+      text: '冲突行。',
+      createdAt: now,
+    });
+    const collisionBefore = collision.db.snapshot();
+    await expect(settleDailyEventRewards(
+      collision.ctx,
+      dailyRewardArgs(collision.eventId),
+    )).rejects.toThrow(/collision/u);
+    expect(collision.db.snapshot()).toEqual(collisionBefore);
+
+    const overflow = dailyRewardFixture();
+    overflow.db.table('residentEconomy')[8].balance = MAX_MONEY;
+    const overflowBefore = overflow.db.snapshot();
+    await expect(settleDailyEventRewards(
+      overflow.ctx,
+      dailyRewardArgs(overflow.eventId),
+    )).rejects.toThrow(/boundary/u);
+    expect(overflow.db.snapshot()).toEqual(overflowBefore);
+
+  });
+});
+
+function rewardParticipants() {
+  return residentEconomyProfiles.map((profile, index) => ({
+    residentId: `p:${index}`,
+    displayName: profile.name,
+    reachedFinal: index < 2,
+    champion: index === 0,
+  }));
+}
+
+function dailyRewardArgs(eventId: Id<'townEvents'>) {
+  return {
+    worldId,
+    eventId,
+    dayKey: '2026-07-19',
+    participants: rewardParticipants(),
+    hostServices: null,
+    now,
+  };
+}
+
+function dailyRewardFixture() {
+  const fixture = makeContext();
+  seedRuntimeResidents(fixture.db);
+  residentEconomyProfiles.forEach((profile, index) => {
+    fixture.db.seed('residentEconomy', {
+      worldId,
+      residentId: `p:${index}`,
+      profileId: profile.id,
+      balance: profile.startingBalance,
+      initialBalance: profile.startingBalance,
+      hunger: 100,
+      energy: 100,
+      todayIncome: 0,
+      todayExpense: 0,
+      dayKey: '2026-07-19',
+      initializationSourceKey: `economy-definition:resident:${profile.id}:v1`,
+      initializedAt: now,
+      updatedAt: now,
+    });
+  });
+  const event = fixture.db.seed('townEvents', {
+    _id: 'daily-event:2026-07-19',
+    worldId,
+    status: 'completed',
+    phase: 'awards',
+    seed: 19,
+    phaseEndsAt: now,
+    winnerId: 'p:0',
+    updatedAt: now,
+    dailyKey: '2026-07-19',
+    templateId: 'town-relay',
+    eventName: '灯塔镇接力赛',
+    venueMode: 'town',
+    startedAt: now - 2 * 60 * 60 * 1_000,
+    endedAt: now,
+    stageIndex: 6,
+  }) as StoredRow;
+  return {
+    ...fixture,
+    event,
+    eventId: event._id as Id<'townEvents'>,
+  };
 }

@@ -57,6 +57,16 @@ export default defineSchema({
 
   townEvents: defineTable({
     worldId: v.id('worlds'),
+    dailyKey: v.optional(v.string()),
+    templateId: v.optional(v.string()),
+    eventName: v.optional(v.string()),
+    announcement: v.optional(v.string()),
+    venueMode: v.optional(v.string()),
+    startedAt: v.optional(v.number()),
+    endedAt: v.optional(v.number()),
+    archiveReason: v.optional(v.string()),
+    stageIndex: v.optional(v.number()),
+    themeSource: v.optional(v.string()),
     status: v.union(
       v.literal('scheduled'),
       v.literal('announced'),
@@ -70,6 +80,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index('worldId', ['worldId'])
+    .index('worldDay', ['worldId', 'dailyKey'])
     .index('status', ['status']),
 
   eventParticipants: defineTable({
@@ -84,6 +95,12 @@ export default defineSchema({
     rank: v.optional(v.number()),
     quote: v.optional(v.string()),
     decisionPhase: v.optional(v.string()),
+    teamId: v.optional(v.string()),
+    choiceId: v.optional(v.string()),
+    decisionStage: v.optional(v.number()),
+    participationRewarded: v.optional(v.boolean()),
+    finalistRewarded: v.optional(v.boolean()),
+    championRewarded: v.optional(v.boolean()),
   }).index('eventId', ['eventId']),
 
   eventLog: defineTable({
@@ -93,6 +110,7 @@ export default defineSchema({
     kind: v.string(),
     text: v.string(),
     createdAt: v.number(),
+    stageIndex: v.optional(v.number()),
   })
     .index('eventId', ['eventId'])
     .index('eventKey', ['eventId', 'eventKey']),
