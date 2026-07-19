@@ -123,6 +123,9 @@ export function advanceDailyEventToStage(
   for (let offset = 1; offset <= stageCount; offset += 1) {
     const stageIndex = state.stageIndex + offset;
     const stage = state.template.stages[stageIndex];
+    const decisionChoices = offset === 1
+      ? state.template.stages[state.stageIndex].choices
+      : [];
     const ranked = participants
       .filter((participant) => participant.active)
       .map((participant) => ({
@@ -130,7 +133,7 @@ export function advanceDailyEventToStage(
         score:
           participant.score +
           stableScore(`${state.seed}:${state.template.id}:${stage.id}:${participant.residentId}`) +
-          finiteChoiceBonus(stage.choices, decisions[participant.residentId]),
+          finiteChoiceBonus(decisionChoices, decisions[participant.residentId]),
       }))
       .sort((left, right) => right.score - left.score || left.residentId.localeCompare(right.residentId));
     const remainingIds = new Set(

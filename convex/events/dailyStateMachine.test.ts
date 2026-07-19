@@ -164,19 +164,26 @@ describe('daily event state machine', () => {
     expect(decisions).toEqual(decisionsBefore);
   });
 
-  test('only current-stage finite choice IDs can affect deterministic scoring', () => {
+  test('uses the current-stage choice contract when advancing into the next task', () => {
     const state = createState();
     const omitted = advanceDailyEventToStage(state, 1, start + 1_000);
     const invalid = advanceDailyEventToStage(state, 1, start + 1_000, {
-      'p:0': 'invented-choice',
-      outsider: 'steady',
+      'p:0': 'steady',
+      outsider: 'observe',
     });
-    const valid = advanceDailyEventToStage(state, 1, start + 1_000, { 'p:0': 'steady' });
+    const encourage = advanceDailyEventToStage(state, 1, start + 1_000, {
+      'p:0': 'encourage',
+    });
+    const observe = advanceDailyEventToStage(state, 1, start + 1_000, {
+      'p:0': 'observe',
+    });
 
     expect(invalid).toEqual(omitted);
-    expect(valid.participants.find((entry) => entry.residentId === 'p:0')?.score).not.toBe(
-      omitted.participants.find((entry) => entry.residentId === 'p:0')?.score,
-    );
+    const score = (candidate: DailyEventState) =>
+      candidate.participants.find((entry) => entry.residentId === 'p:0')?.score;
+    expect(score(encourage)).toBe((score(omitted) ?? 0) + 1);
+    expect(score(observe)).toBe((score(omitted) ?? 0) + 2);
+    expect(score(encourage)).not.toBe(score(observe));
   });
 
   test('rejects inconsistent running status and roles before an idempotent return', () => {
