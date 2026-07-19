@@ -12,6 +12,7 @@ import {
 import { insertInput } from './aiTown/insertInput';
 import { parseGameId } from './aiTown/ids';
 import { eventCheckpoints } from '../data/worlds/lighthouse-town/map';
+import { institutions } from '../data/worlds/lighthouse-town/economy';
 import { requestEventDecision } from './events/model';
 import { advanceEvent, createInitialEvent } from './events/stateMachine';
 import { EventPhase, TownEventState } from './events/types';
@@ -105,6 +106,9 @@ export const observerSnapshot = query({
         residentActivity: [],
         dailyLifeEvents: [],
         dailyMessages: [],
+        dailyEconomyLedger: [],
+        institutionStates: [],
+        dailyRelationshipChanges: [],
       };
     }
     const descriptions = await ctx.db
@@ -148,6 +152,75 @@ export const observerSnapshot = query({
     }));
     const observerNow = Date.now();
     const observerDayKey = resolveObserverDayKey(args.dayKey, observerNow);
+    const institutionNames = new Map<string, string>(
+      institutions.map((institution) => [institution.id, institution.name]),
+    );
+    const dailyEconomyLedger = (await ctx.db
+      .query('economyLedger')
+      .withIndex('day', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))
+      .order('asc')
+      .take(500))
+      .filter((entry) => shanghaiDayKey(entry.createdAt) === observerDayKey)
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .map((entry) => ({
+        idempotencyKey: entry.idempotencyKey,
+        residentId: entry.residentId,
+        residentName: entry.residentId ? names.get(entry.residentId) ?? '居民' : undefined,
+        institutionId: entry.institutionId,
+        institutionName: entry.institutionId
+          ? institutionNames.get(entry.institutionId) ?? entry.institutionId
+          : undefined,
+        kind: entry.kind,
+        amount: entry.amount,
+        expectedAmount: entry.expectedAmount,
+        compensationKind: entry.compensationKind,
+        item: entry.item,
+        quantity: entry.quantity,
+        sourceKey: entry.sourceKey,
+        text: entry.text,
+        createdAt: entry.createdAt,
+      }));
+    const institutionStates = (await ctx.db
+      .query('townInstitutions')
+      .withIndex('world', (q) => q.eq('worldId', worldId))
+      .collect())
+      .filter((state) =>
+        state.dayKey === observerDayKey && shanghaiDayKey(state.updatedAt) === observerDayKey,
+      )
+      .sort((left, right) => left.updatedAt - right.updatedAt || left.institutionId.localeCompare(right.institutionId))
+      .slice(0, 50)
+      .map((state) => ({
+        institutionId: state.institutionId,
+        institutionName: institutionNames.get(state.institutionId) ?? state.institutionId,
+        cash: state.cash,
+        todayIncome: state.todayIncome,
+        todayExpense: state.todayExpense,
+        visitorCount: state.visitorCount,
+        dayKey: state.dayKey,
+        updatedAt: state.updatedAt,
+      }));
+    const dailyRelationshipChanges = (await ctx.db
+      .query('relationshipChanges')
+      .withIndex('worldDay', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))
+      .order('asc')
+      .take(500))
+      .filter((change) => shanghaiDayKey(change.createdAt) === observerDayKey)
+      .sort((left, right) => left.createdAt - right.createdAt)
+      .map((change) => ({
+        idempotencyKey: change.idempotencyKey,
+        residentA: change.residentA,
+        residentAName: names.get(change.residentA) ?? '居民',
+        residentB: change.residentB,
+        residentBName: names.get(change.residentB) ?? '居民',
+        kind: change.kind,
+        friendshipDelta: change.friendshipDelta,
+        trustDelta: change.trustDelta,
+        attractionDelta: change.attractionDelta,
+        businessDelta: change.businessDelta,
+        sourceKey: change.sourceKey,
+        text: change.text,
+        createdAt: change.createdAt,
+      }));
     const conversations = groupConversationMessages(messages, names,
       world?.conversations ?? [],
       observerNow,
@@ -167,6 +240,9 @@ export const observerSnapshot = query({
         residentActivity,
         dailyLifeEvents,
         dailyMessages,
+        dailyEconomyLedger,
+        institutionStates,
+        dailyRelationshipChanges,
         logs: legacyMessages.map((message, index) => ({
           eventKey: `message:${message._id}`,
           sequence: index,
@@ -212,6 +288,9 @@ export const observerSnapshot = query({
       residentActivity,
       dailyLifeEvents,
       dailyMessages,
+      dailyEconomyLedger,
+      institutionStates,
+      dailyRelationshipChanges,
     };
   },
 });

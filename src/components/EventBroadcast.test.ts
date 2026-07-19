@@ -510,6 +510,7 @@ describe('event broadcast view model', () => {
       '## 活动分类',
       '## 当日对话',
       '## 赛事与公共事件',
+      '## 经济与关系事实',
       '## 生活记录附录',
       '## 原始对话附录',
       '## 数据说明',
@@ -551,6 +552,50 @@ describe('event broadcast view model', () => {
     expect(report).toContain('不补全缺失事实');
     expect(report).toContain('不推断原因或动机');
     expect(report).not.toMatch(/因此导致|内心认为|形成派系|社会中心|证明了/);
+  });
+
+  test('records exact same-day economy and relationship changes from structured rows', () => {
+    const now = Date.parse('2026-07-17T04:00:00Z');
+    const report = buildDailyReport(
+      {
+        event: null,
+        participants: [],
+        logs: [],
+        conversations: [],
+        residentActivity: [],
+        dailyMessages: [],
+        dailyLifeEvents: [],
+        dailyEconomyLedger: [
+          {
+            idempotencyKey: 'activity:work:4', residentId: 'tang-guo', residentName: '唐果',
+            institutionId: 'tingyu-teahouse', institutionName: '听雨茶庄', kind: 'work', amount: 12,
+            sourceKey: 'activity:work:4', text: '唐果完成茶庄工作。',
+            createdAt: Date.parse('2026-07-17T01:00:00Z'),
+          },
+          {
+            idempotencyKey: 'old:work', residentId: 'tang-guo', residentName: '唐果',
+            institutionId: 'tingyu-teahouse', institutionName: '听雨茶庄', kind: 'work', amount: 99,
+            sourceKey: 'old:work', text: '旧日工资。',
+            createdAt: Date.parse('2026-07-16T01:00:00Z'),
+          },
+        ],
+        dailyRelationshipChanges: [
+          {
+            idempotencyKey: 'conversation:c:4', residentA: 'tang-guo', residentAName: '唐果',
+            residentB: 'shen-yan', residentBName: '沈砚', kind: 'conversation',
+            friendshipDelta: 1, trustDelta: 0, attractionDelta: 0, businessDelta: 0,
+            sourceKey: 'conversation:c:4', text: '完成对话。',
+            createdAt: Date.parse('2026-07-17T01:01:00Z'),
+          },
+        ],
+      },
+      'zh-CN',
+      now,
+    );
+
+    expect(report).toContain('唐果｜工作收入 +12 金贝｜听雨茶庄');
+    expect(report).toContain('唐果 ↔ 沈砚｜友情 +1｜证据 conversation:c:4');
+    expect(report).not.toContain('旧日工资');
   });
 
   test('maps runtime resident ids from localized activity names before attributing records', () => {
@@ -1121,6 +1166,22 @@ describe('event broadcast view model', () => {
     expect(source).not.toContain('groupConversationMessages(legacyMessages, names');
     expect(source).toContain('logs: legacyMessages.map((message, index) => ({');
     expect(source).toContain('const dailyMessages = messages.map((message) => ({');
+  });
+
+  test('includes bounded, chronological Shanghai-day economy and relationship rows in the observer snapshot', () => {
+    const source = readFileSync(new URL('../../convex/events.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain("query('economyLedger')");
+    expect(source).toContain("withIndex('day', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))");
+    expect(source).toContain("query('relationshipChanges')");
+    expect(source).toContain("withIndex('worldDay', (q) => q.eq('worldId', worldId).eq('dayKey', observerDayKey))");
+    expect(source).toContain("query('townInstitutions')");
+    expect(source).toContain('.take(500)');
+    expect(source).toContain('shanghaiDayKey(entry.createdAt) === observerDayKey');
+    expect(source).toContain('shanghaiDayKey(change.createdAt) === observerDayKey');
+    expect(source).toContain('dailyEconomyLedger,');
+    expect(source).toContain('institutionStates,');
+    expect(source).toContain('dailyRelationshipChanges,');
   });
 
   test('renders the exact daily empty state in the production fast-summary component', () => {

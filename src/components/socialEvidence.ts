@@ -20,6 +20,9 @@ export type {
 type DailyMessage = BroadcastSnapshot['dailyMessages'][number];
 type LifeEvent = NonNullable<BroadcastSnapshot['dailyLifeEvents']>[number];
 type PublicLog = BroadcastSnapshot['logs'][number];
+type EconomyLedger = NonNullable<BroadcastSnapshot['dailyEconomyLedger']>[number];
+type InstitutionState = NonNullable<BroadcastSnapshot['institutionStates']>[number];
+type RelationshipChange = NonNullable<BroadcastSnapshot['dailyRelationshipChanges']>[number];
 
 type SourceRecord = {
   key: string;
@@ -31,6 +34,9 @@ type EvidenceSources = {
   message: ReadonlyMap<DailyMessage, SourceRecord>;
   life: ReadonlyMap<LifeEvent, SourceRecord>;
   log: ReadonlyMap<PublicLog, SourceRecord>;
+  ledger: ReadonlyMap<EconomyLedger, SourceRecord>;
+  institution: ReadonlyMap<InstitutionState, SourceRecord>;
+  relationship: ReadonlyMap<RelationshipChange, SourceRecord>;
 };
 
 type EvidenceDraft = Omit<ObservationEvidence, 'evidenceId'> & {
@@ -134,6 +140,9 @@ function buildEvidenceSources(
   messages: readonly DailyMessage[],
   lifeEvents: readonly LifeEvent[],
   publicLogs: readonly PublicLog[],
+  economyLedger: readonly EconomyLedger[] = [],
+  institutionStates: readonly InstitutionState[] = [],
+  relationshipChanges: readonly RelationshipChange[] = [],
   semanticMessageText: ReadonlyMap<DailyMessage, string> = new Map(),
 ): EvidenceSources {
   return {
@@ -159,6 +168,24 @@ function buildEvidenceSources(
       tieKey: [normalizeText(log.kind), normalizeText(log.text)].join('\u0000'),
       createdAt: log.createdAt,
       text: normalizeText(log.text),
+    })),
+    ledger: assignAuditSources(economyLedger, (entry) => ({
+      baseKey: `ledger:${safeKeyPart(entry.idempotencyKey)}`,
+      tieKey: [entry.sourceKey, entry.kind, String(entry.amount), entry.residentId ?? '', entry.institutionId ?? ''].join('\u0000'),
+      createdAt: entry.createdAt,
+      text: normalizeText(entry.text),
+    })),
+    institution: assignAuditSources(institutionStates, (state) => ({
+      baseKey: `institution:${safeKeyPart(state.institutionId)}:${safeKeyPart(state.dayKey)}`,
+      tieKey: [state.institutionName, String(state.cash), String(state.todayIncome), String(state.todayExpense), String(state.visitorCount)].join('\u0000'),
+      createdAt: state.updatedAt,
+      text: state.institutionName,
+    })),
+    relationship: assignAuditSources(relationshipChanges, (change) => ({
+      baseKey: `relationship:${safeKeyPart(change.idempotencyKey)}`,
+      tieKey: [change.sourceKey, change.residentA, change.residentB, change.kind].join('\u0000'),
+      createdAt: change.createdAt,
+      text: normalizeText(change.text),
     })),
   };
 }
@@ -511,9 +538,79 @@ function buildInstitutionDraft(
   };
 }
 
+function signedAmount(amount: number) {
+  return `${amount >= 0 ? '+' : ''}${amount}`;
+}
+
+function ledgerKindLabel(kind: string) {
+  if (kind === 'work') return '工作收入';
+  if (kind === 'purchase') return '消费';
+  if (kind === 'restock') return '补货与运营成本';
+  if (kind === 'event-reward') return '活动奖励';
+  if (kind === 'event-service') return '活动服务收入';
+  return kind;
+}
+
+function ledgerSignedAmount(entry: EconomyLedger) {
+  return entry.kind === 'purchase' || entry.kind === 'restock'
+    ? -Math.abs(entry.amount)
+    : entry.amount;
+}
+
+function buildLaborCommerceDraft(
+  economyLedger: readonly EconomyLedger[],
+  institutionStates: readonly InstitutionState[],
+  sources: EvidenceSources,
+): EvidenceDraft {
+  const kinds = new Map<string, { amount: number; count: number }>();
+  const institutions = new Map<string, number>();
+  for (const entry of economyLedger) {
+    const label = ledgerKindLabel(entry.kind);
+    const aggregate = kinds.get(label) ?? { amount: 0, count: 0 };
+    aggregate.amount += ledgerSignedAmount(entry);
+    aggregate.count += 1;
+    kinds.set(label, aggregate);
+    const institution = entry.institutionName ?? entry.institutionId;
+    if (institution) institutions.set(institution, (institutions.get(institution) ?? 0) + 1);
+  }
+  const kindSummary = [...kinds.entries()]
+    .map(([label, aggregate]) => `${label} ${signedAmount(aggregate.amount)} 金贝（${aggregate.count} 笔）`)
+    .join('、');
+  const institutionSummary = [...institutions.entries()]
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([name, count]) => `${name} ${count} 笔`)
+    .join('、');
+  const stateSummary = institutionStates
+    .map((state) => `${state.institutionName} 收入 ${state.todayIncome} 金贝、支出 ${state.todayExpense} 金贝、客流 ${state.visitorCount}`)
+    .join('；');
+  const matchingSources = [
+    ...economyLedger.map((entry) => sourceFor(sources.ledger, entry)),
+    ...institutionStates.map((state) => sourceFor(sources.institution, state)),
+  ];
+  const coverage = assessCoverage(
+    new Set(economyLedger.flatMap((entry) => entry.residentId ? [entry.residentId] : [])).size,
+    new Set(matchingSources.map((source) => source.key)).size,
+    matchingSources.map((source) => source.createdAt),
+    kinds.size + institutions.size,
+  );
+  return {
+    category: 'labor-commerce',
+    statement: `当日经济账本：${kindSummary || '无记录'}；机构账本：${institutionSummary || '无记录'}；当日机构状态：${stateSummary || '无记录'}。`,
+    sourceKeys: uniqueSourceKeys(matchingSources),
+    confidence: coverage.confidence,
+    limitations: ['收入、消费、库存相关金额和机构日状态只取结构化经济账本与机构状态，不从活动或对话文本推定。'],
+    findingClaim: economyLedger.length > 0
+      ? `当日结构化经济账本记录 ${economyLedger.length} 笔，并按机构汇总其可见流向。`
+      : '当日快照未记录结构化经济账本，不能从文本补充收入或消费变化。',
+    alternativeExplanation: '未结算、未写入账本或跨日的经济活动不会出现在此处。',
+    coverageScore: coverage.score,
+  };
+}
+
 function buildRelationshipDraft(
   messages: readonly DailyMessage[],
   lifeEvents: readonly LifeEvent[],
+  relationshipChanges: readonly RelationshipChange[],
   sources: EvidenceSources,
 ): EvidenceDraft {
   const records = [
@@ -554,6 +651,47 @@ function buildRelationshipDraft(
       matchingResidents.add(record.residentId);
     }
   }
+  const changesByPair = new Map<string, {
+    residentAName: string;
+    residentBName: string;
+    friendship: number;
+    trust: number;
+    attraction: number;
+    business: number;
+    count: number;
+  }>();
+  for (const change of relationshipChanges) {
+    const key = [change.residentA, change.residentB].sort(compareText).join('\u0000');
+    const current = changesByPair.get(key) ?? {
+      residentAName: change.residentAName,
+      residentBName: change.residentBName,
+      friendship: 0,
+      trust: 0,
+      attraction: 0,
+      business: 0,
+      count: 0,
+    };
+    current.friendship += change.friendshipDelta;
+    current.trust += change.trustDelta;
+    current.attraction += change.attractionDelta;
+    current.business += change.businessDelta;
+    current.count += 1;
+    changesByPair.set(key, current);
+    matchingSources.push(sourceFor(sources.relationship, change));
+  }
+  const relationshipChangeSummary = [...changesByPair.entries()]
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([, change]) => {
+      const deltas = [
+        ['友情', change.friendship],
+        ['信任', change.trust],
+        ['亲密倾向', change.attraction],
+        ['商业合作', change.business],
+      ].filter(([, amount]) => amount !== 0)
+        .map(([label, amount]) => `${label} ${signedAmount(amount as number)}`);
+      return `${change.residentAName} ↔ ${change.residentBName}｜${deltas.join('、') || '数值变化 0'}（${change.count} 笔）`;
+    })
+    .join('；');
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
   const coveredCategories = Object.values(counts).filter((count) => count > 0).length;
   const coverage = assessCoverage(
@@ -564,10 +702,10 @@ function buildRelationshipDraft(
   );
   return {
     category: 'relationship-signal',
-    statement: `当日文本中的明确迹象：友情 ${counts.friendship} 条、亲密 ${counts.intimacy} 条、合作 ${counts.cooperation} 条、照护 ${counts.care} 条、交易 ${counts.trade} 条、分歧 ${counts.dispute} 条。`,
+    statement: `当日关系变更：${relationshipChangeSummary || '无记录'}；当日文本中的明确迹象：友情 ${counts.friendship} 条、亲密 ${counts.intimacy} 条、合作 ${counts.cooperation} 条、照护 ${counts.care} 条、交易 ${counts.trade} 条、分歧 ${counts.dispute} 条。`,
     sourceKeys: uniqueSourceKeys(matchingSources),
     confidence: coverage.confidence,
-    limitations: ['只计数逐分句确认的当前或过往明确词语；否定、条件、计划、可能性、引语和转述不计入，同一记录可包含多类迹象。'],
+    limitations: ['关系数值变化只取结构化关系变化行；文本仅作逐分句确认的迹象计数，否定、条件、计划、可能性、引语和转述不计入，同一记录可包含多类迹象。'],
     findingClaim: total > 0
       ? `当日明确文本迹象中，友情 ${counts.friendship} 条、亲密 ${counts.intimacy} 条、合作 ${counts.cooperation} 条、照护 ${counts.care} 条、交易 ${counts.trade} 条、分歧 ${counts.dispute} 条。`
       : '当日快照未记录到明确的友情、亲密、合作、照护、交易或分歧迹象。',
@@ -736,7 +874,21 @@ export function buildSocialEvidence(
       text: filterLegacyExperimentClauses(log.text),
     }))
     .filter((log) => log.text.length > 0);
-  const sources = buildEvidenceSources(messages, lifeEvents, publicLogs, semanticMessageText);
+  const economyLedger = (snapshot.dailyEconomyLedger ?? [])
+    .filter((entry) => isCurrentDay(entry.createdAt, now));
+  const institutionStates = (snapshot.institutionStates ?? [])
+    .filter((state) => state.dayKey === shanghaiDayKey(now) && isCurrentDay(state.updatedAt, now));
+  const relationshipChanges = (snapshot.dailyRelationshipChanges ?? [])
+    .filter((change) => isCurrentDay(change.createdAt, now));
+  const sources = buildEvidenceSources(
+    messages,
+    lifeEvents,
+    publicLogs,
+    economyLedger,
+    institutionStates,
+    relationshipChanges,
+    semanticMessageText,
+  );
   messages.sort((left, right) =>
     compareSource(sourceFor(sources.message, left), sourceFor(sources.message, right))
   );
@@ -746,11 +898,23 @@ export function buildSocialEvidence(
   publicLogs.sort((left, right) =>
     compareSource(sourceFor(sources.log, left), sourceFor(sources.log, right))
   );
+  economyLedger.sort((left, right) =>
+    compareSource(sourceFor(sources.ledger, left), sourceFor(sources.ledger, right))
+  );
+  institutionStates.sort((left, right) =>
+    compareSource(sourceFor(sources.institution, left), sourceFor(sources.institution, right))
+  );
+  relationshipChanges.sort((left, right) =>
+    compareSource(sourceFor(sources.relationship, left), sourceFor(sources.relationship, right))
+  );
 
   const allSources = [
     ...messages.map((message) => sourceFor(sources.message, message)),
     ...lifeEvents.map((event) => sourceFor(sources.life, event)),
     ...publicLogs.map((log) => sourceFor(sources.log, log)),
+    ...economyLedger.map((entry) => sourceFor(sources.ledger, entry)),
+    ...institutionStates.map((state) => sourceFor(sources.institution, state)),
+    ...relationshipChanges.map((change) => sourceFor(sources.relationship, change)),
     ...snapshot.residentActivity
       .filter((resident) => !resident.observerControlled)
       .map((resident) => ({
@@ -764,8 +928,9 @@ export function buildSocialEvidence(
   const drafts = [
     buildNetworkDraft(snapshot, messages, sources),
     buildActivityDraft(lifeEvents, sources),
+    buildLaborCommerceDraft(economyLedger, institutionStates, sources),
     buildInstitutionDraft(lifeEvents, sources),
-    buildRelationshipDraft(semanticMessages, lifeEvents, sources),
+    buildRelationshipDraft(semanticMessages, lifeEvents, relationshipChanges, sources),
     buildObserverDraft(messages, lifeEvents, publicLogs, sources),
     buildPublicLifeDraft(semanticMessages, lifeEvents, publicLogs, sources),
   ];
@@ -806,6 +971,7 @@ export function buildSocialEvidence(
       '仅覆盖输入快照中属于同一上海日期的带时间戳记录。',
       '没有跨日基线，不能据此描述上升、下降或长期趋势。',
       '显式关系迹象来自保守关键词计数，不补全未写入记录的行为。',
+      '收入、消费与关系数值变化只使用同日结构化账本或变化行，不从散文推定。',
     ],
     followUps: [
       '继续记录未出现居民间互动的居民是否在其他时段参与互动。',

@@ -64,6 +64,47 @@ export type BroadcastSnapshot = {
     text: string;
     createdAt: number;
   }>;
+  dailyEconomyLedger?: Array<{
+    idempotencyKey: string;
+    residentId?: string;
+    residentName?: string;
+    institutionId?: string;
+    institutionName?: string;
+    kind: string;
+    amount: number;
+    expectedAmount?: number;
+    compensationKind?: string;
+    item?: string;
+    quantity?: number;
+    sourceKey: string;
+    text: string;
+    createdAt: number;
+  }>;
+  institutionStates?: Array<{
+    institutionId: string;
+    institutionName: string;
+    cash: number;
+    todayIncome: number;
+    todayExpense: number;
+    visitorCount: number;
+    dayKey: string;
+    updatedAt: number;
+  }>;
+  dailyRelationshipChanges?: Array<{
+    idempotencyKey: string;
+    residentA: string;
+    residentAName: string;
+    residentB: string;
+    residentBName: string;
+    kind: string;
+    friendshipDelta: number;
+    trustDelta: number;
+    attractionDelta: number;
+    businessDelta: number;
+    sourceKey: string;
+    text: string;
+    createdAt: number;
+  }>;
 };
 
 export type ResolvedSocialNarrative = {
@@ -116,6 +157,9 @@ const escapeMarkdown = (value: string) => value
 type LifeEvent = NonNullable<BroadcastSnapshot['dailyLifeEvents']>[number];
 type DailyMessage = BroadcastSnapshot['dailyMessages'][number];
 type EventLog = BroadcastSnapshot['logs'][number];
+type EconomyLedger = NonNullable<BroadcastSnapshot['dailyEconomyLedger']>[number];
+type InstitutionState = NonNullable<BroadcastSnapshot['institutionStates']>[number];
+type RelationshipChange = NonNullable<BroadcastSnapshot['dailyRelationshipChanges']>[number];
 
 type ReportConversation = {
   conversationId: string;
@@ -134,6 +178,9 @@ type DailyReportData = {
   dailyMessages: DailyMessage[];
   conversations: ReportConversation[];
   logs: EventLog[];
+  economyLedger: EconomyLedger[];
+  institutionStates: InstitutionState[];
+  relationshipChanges: RelationshipChange[];
   residentProfileIdsByRuntimeId: Map<string, string>;
   observerControlledResidentIds: Set<string>;
 };
@@ -166,6 +213,9 @@ function reportRecordRange(data: DailyReportData) {
     ...data.lifeEvents.map((event) => event.createdAt),
     ...data.dailyMessages.map((message) => message.createdAt),
     ...data.logs.map((log) => log.createdAt),
+    ...data.economyLedger.map((entry) => entry.createdAt),
+    ...data.institutionStates.map((state) => state.updatedAt),
+    ...data.relationshipChanges.map((change) => change.createdAt),
   ];
   if (timestamps.length === 0) return '当日无记录';
   return `${formatReportTime(Math.min(...timestamps), data.locale)}–${formatReportTime(Math.max(...timestamps), data.locale)}`;
@@ -188,6 +238,8 @@ function buildOverviewSection(data: DailyReportData) {
     `- 当日对话：${data.conversations.length} 组`,
     `- 当日原始消息：${data.dailyMessages.length} 条`,
     `- 当日公共事件日志：${data.logs.length} 条`,
+    `- 当日经济流水：${data.economyLedger.length} 笔`,
+    `- 当日关系变化：${data.relationshipChanges.length} 笔`,
   ]);
 }
 
@@ -466,6 +518,62 @@ function buildPublicEventsSection(data: DailyReportData) {
   return reportSection('赛事与公共事件', lines);
 }
 
+function signedAmount(amount: number) {
+  return `${amount >= 0 ? '+' : ''}${amount}`;
+}
+
+function economyFactLabel(entry: EconomyLedger) {
+  if (entry.kind === 'work') return `工作收入 ${signedAmount(entry.amount)} 金贝`;
+  if (entry.kind === 'purchase') return `消费 -${Math.abs(entry.amount)} 金贝`;
+  if (entry.kind === 'restock') return `补货与运营成本 -${Math.abs(entry.amount)} 金贝`;
+  if (entry.kind === 'event-reward') return `活动奖励 ${signedAmount(entry.amount)} 金贝`;
+  if (entry.kind === 'event-service') return `活动服务收入 ${signedAmount(entry.amount)} 金贝`;
+  return `${entry.kind} ${signedAmount(entry.amount)} 金贝`;
+}
+
+function relationshipDeltaLabels(change: RelationshipChange) {
+  const dimensions: Array<[string, number]> = [
+    ['友情', change.friendshipDelta],
+    ['信任', change.trustDelta],
+    ['亲密倾向', change.attractionDelta],
+    ['商业合作', change.businessDelta],
+  ];
+  return dimensions
+    .filter(([, amount]) => amount !== 0)
+    .map(([label, amount]) => `${label} ${signedAmount(amount)}`);
+}
+
+function buildEconomyAndRelationshipFactsSection(data: DailyReportData) {
+  const lines: string[] = ['### 当日经济流水', ''];
+  if (data.economyLedger.length === 0) {
+    lines.push('- 当日无记录');
+  } else {
+    for (const entry of data.economyLedger) {
+      const resident = entry.residentName ?? entry.residentId ?? '机构';
+      const institution = entry.institutionName ?? entry.institutionId ?? '未记录机构';
+      lines.push(`- ${escapeMarkdown(resident)}｜${economyFactLabel(entry)}｜${escapeMarkdown(institution)}｜证据 ${escapeMarkdown(entry.sourceKey)}`);
+    }
+  }
+  lines.push('', '### 当日机构状态', '');
+  if (data.institutionStates.length === 0) {
+    lines.push('- 当日无记录');
+  } else {
+    for (const state of data.institutionStates) {
+      lines.push(`- ${escapeMarkdown(state.institutionName)}｜现金 ${state.cash} 金贝｜收入 ${state.todayIncome} 金贝｜支出 ${state.todayExpense} 金贝｜客流 ${state.visitorCount}`);
+    }
+  }
+  lines.push('', '### 当日关系变化', '');
+  if (data.relationshipChanges.length === 0) {
+    lines.push('- 当日无记录');
+  } else {
+    for (const change of data.relationshipChanges) {
+      const deltas = relationshipDeltaLabels(change);
+      lines.push(`- ${escapeMarkdown(change.residentAName)} ↔ ${escapeMarkdown(change.residentBName)}｜${deltas.length > 0 ? deltas.join('、') : '数值变化 0'}｜证据 ${escapeMarkdown(change.sourceKey)}`);
+    }
+  }
+  return reportSection('经济与关系事实', lines);
+}
+
 function buildLifeAppendixSection(data: DailyReportData) {
   return reportSection('生活记录附录', data.lifeEvents.map((event) =>
     `- ${event.createdAt}｜${residentIdentity(data, event.residentId, event.displayName)}｜${activityKindLabels[event.kind] ?? '其他'}｜${escapeMarkdown(event.text)}`,
@@ -506,6 +614,15 @@ export function buildDailyReport(
     logs: snapshot.logs
       .filter((entry) => entry.kind !== 'conversation' && sameLocalDay(entry.createdAt, now))
       .sort(chronological),
+    economyLedger: (snapshot.dailyEconomyLedger ?? [])
+      .filter((entry) => sameLocalDay(entry.createdAt, now))
+      .sort(chronological),
+    institutionStates: (snapshot.institutionStates ?? [])
+      .filter((state) => state.dayKey === shanghaiDayKey(now) && sameLocalDay(state.updatedAt, now))
+      .sort((left, right) => left.updatedAt - right.updatedAt),
+    relationshipChanges: (snapshot.dailyRelationshipChanges ?? [])
+      .filter((change) => sameLocalDay(change.createdAt, now))
+      .sort(chronological),
     residentProfileIdsByRuntimeId: buildRuntimeResidentProfileMap(snapshot),
     observerControlledResidentIds: new Set(
       snapshot.residentActivity
@@ -525,6 +642,7 @@ export function buildDailyReport(
     ...buildActivityClassificationSection(data),
     ...buildConversationsSection(data),
     ...buildPublicEventsSection(data),
+    ...buildEconomyAndRelationshipFactsSection(data),
     ...buildLifeAppendixSection(data),
     ...buildRawMessagesSection(data),
     ...buildDataNotesSection(),

@@ -158,7 +158,7 @@ describe('social evidence builder', () => {
     const result = buildSocialEvidence(fixtureBroadcastSnapshot(), now);
 
     expect(result.evidence.map((entry) => entry.evidenceId)).toEqual([
-      'E001', 'E002', 'E003', 'E004', 'E005', 'E006',
+      'E001', 'E002', 'E003', 'E004', 'E005', 'E006', 'E007',
     ]);
     expect(result.evidence.map((entry) => entry.category)).toEqual(expect.arrayContaining([
       'interaction-network',
@@ -193,6 +193,53 @@ describe('social evidence builder', () => {
     )).toBe(true);
     expect(result.limitations.length).toBeGreaterThan(0);
     expect(result.followUps.length).toBeGreaterThan(0);
+  });
+
+  test('aggregates ledger-backed labor-commerce and relationship changes without deriving them from prose', () => {
+    const snapshot = fixtureBroadcastSnapshot({
+      dailyEconomyLedger: [{
+        idempotencyKey: 'activity:work:4', residentId: 'tang-guo', residentName: '唐果',
+        institutionId: 'tingyu-teahouse', institutionName: '听雨茶庄', kind: 'work', amount: 12,
+        sourceKey: 'activity:work:4', text: '唐果完成茶庄工作。',
+        createdAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      institutionStates: [{
+        institutionId: 'tingyu-teahouse', institutionName: '听雨茶庄', cash: 112,
+        todayIncome: 0, todayExpense: 12, visitorCount: 1, dayKey: '2026-07-17',
+        updatedAt: Date.parse('2026-07-17T01:00:00Z'),
+      }],
+      dailyRelationshipChanges: [{
+        idempotencyKey: 'conversation:c:4', residentA: 'tang-guo', residentAName: '唐果',
+        residentB: 'shen-yan', residentBName: '沈砚', kind: 'conversation',
+        friendshipDelta: 1, trustDelta: 0, attractionDelta: 0, businessDelta: 0,
+        sourceKey: 'conversation:c:4', text: '完成对话。',
+        createdAt: Date.parse('2026-07-17T01:01:00Z'),
+      }],
+    });
+    const result = buildSocialEvidence(snapshot, now);
+    const labor = evidenceFor(snapshot, 'labor-commerce');
+    const relationship = evidenceFor(snapshot, 'relationship-signal');
+
+    expect(result.evidence.map((entry) => entry.category)).toContain('labor-commerce');
+    expect(labor.statement).toContain('工作收入 +12 金贝（1 笔）');
+    expect(labor.statement).toContain('听雨茶庄 1 笔');
+    expect(labor.sourceKeys).toContain('ledger:activity:work:4#001');
+    expect(relationship.statement).toContain('唐果 ↔ 沈砚｜友情 +1（1 笔）');
+    expect(relationship.sourceKeys).toContain('relationship:conversation:c:4#001');
+  });
+
+  test('does not invent economic or relationship changes from conversation prose', () => {
+    const snapshot = fixtureBroadcastSnapshot({
+      dailyMessages: [{
+        ...residentMessage(0, 'tang-guo'),
+        text: '我今天领到工资，也和沈砚的友情增加了。',
+      }],
+      dailyLifeEvents: [],
+      logs: [],
+    });
+
+    expect(evidenceFor(snapshot, 'labor-commerce').statement).toContain('当日经济账本：无记录');
+    expect(evidenceFor(snapshot, 'relationship-signal').statement).toContain('当日关系变更：无记录');
   });
 
   test('does not treat legacy scripted mystery content as a current social pattern', () => {
@@ -235,7 +282,7 @@ describe('social evidence builder', () => {
       'resident:su-ying',
     ]));
     expect([...sourceKeys].every((key) =>
-      /^(?:message:|life:|log:|resident:)/u.test(key),
+      /^(?:message:|life:|log:|ledger:|institution:|relationship:|resident:|snapshot-day:)/u.test(key),
     )).toBe(true);
   });
 
@@ -254,7 +301,7 @@ describe('social evidence builder', () => {
       dailyLifeEvents: [],
     }), now);
 
-    expect(result.evidence).toHaveLength(6);
+    expect(result.evidence).toHaveLength(7);
     expect(result.ruleFindings).toHaveLength(3);
     expect(JSON.stringify(result)).not.toContain(hostile);
     expect(JSON.stringify(result)).not.toMatch(/恶意|动机|导致|因为/u);
@@ -922,7 +969,7 @@ describe('social evidence builder', () => {
     const result = buildSocialEvidence(snapshot, now);
     const evidenceById = new Map(result.evidence.map((entry) => [entry.evidenceId, entry]));
 
-    expect(result.evidence).toHaveLength(6);
+    expect(result.evidence).toHaveLength(7);
     expect(result.ruleFindings).toHaveLength(3);
     expect(new Set(result.ruleFindings.map((finding) => finding.evidenceIds[0])).size).toBe(3);
     expect(result.ruleFindings.every((finding) => /未记录|没有|无可用/u.test(finding.claim))).toBe(true);
