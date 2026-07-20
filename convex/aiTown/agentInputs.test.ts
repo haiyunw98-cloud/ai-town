@@ -211,9 +211,20 @@ describe('controlled daily event ferry transfer', () => {
     })).toBeNull();
 
     expect(player.position).toEqual({ x: 23, y: 6 });
-    expect(player).toEqual(expect.objectContaining({
-      activity: expect.objectContaining({ until: appliedAt }),
-    }));
+    expect((player as { activity?: { until: number } }).activity?.until).toBe(appliedAt);
+  });
+
+  test('accepts a walkable berth beside the old dock so returning residents can disembark separately', () => {
+    const { game, player } = ferryGame({ position: trialIslandCheckpoints.awards });
+
+    expect(transfer().handler(game as never, appliedAt, {
+      playerId: 'p:1' as never,
+      destination: { x: 22, y: 6 },
+      description: '乘摆渡船返回主镇，恢复普通生活',
+      until: appliedAt,
+    })).toBeNull();
+
+    expect(player.position).toEqual({ x: 22, y: 6 });
   });
 
   test('rejects a return command delayed by more than two hours without mutation', () => {

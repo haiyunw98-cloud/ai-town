@@ -19,9 +19,9 @@ const Descriptions = localizedDescriptions(getWorldLocale());
 const MAX_EVENT_TRANSFER_DURATION = 2 * 60 * 60_000;
 export const MAX_EVENT_TRANSFER_STALENESS = 2 * 60 * 60_000;
 const EVENT_TRANSFER_DESTINATIONS = [
-  eventCheckpoints.dock,
   ...Object.values(trialIslandCheckpoints),
 ];
+const EVENT_TRANSFER_DOCK_RADIUS = 4;
 
 export function prepareEventTransfer(
   game: Pick<import('./game').Game, 'worldMap'>,
@@ -38,7 +38,13 @@ export function prepareEventTransfer(
   if (x < 0 || y < 0 || x >= game.worldMap.width || y >= game.worldMap.height) {
     throw new Error('Event transfer destination is outside map bounds.');
   }
-  if (!EVENT_TRANSFER_DESTINATIONS.some((entry) => entry.x === x && entry.y === y)) {
+  const isIslandCheckpoint = EVENT_TRANSFER_DESTINATIONS.some(
+    (entry) => entry.x === x && entry.y === y,
+  );
+  const isMainTownDockBerth =
+    Math.abs(x - eventCheckpoints.dock.x) <= EVENT_TRANSFER_DOCK_RADIUS
+    && Math.abs(y - eventCheckpoints.dock.y) <= EVENT_TRANSFER_DOCK_RADIUS;
+  if (!isIslandCheckpoint && !isMainTownDockBerth) {
     throw new Error('Event transfer destination is not an allowlisted ferry checkpoint.');
   }
   if (game.worldMap.objectTiles.some((layer) => layer[x]?.[y] !== -1)) {

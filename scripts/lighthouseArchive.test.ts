@@ -45,7 +45,9 @@ function snapshot(): ObserverSnapshot {
 describe('Lighthouse IMA archive', () => {
   test('uses Shanghai calendar boundaries and previous-day selection', () => {
     expect(shanghaiDayKey(Date.parse('2026-07-19T16:00:00Z'))).toBe(dayKey);
+    expect(shanghaiDayKey(Date.parse('2026-07-19T16:00:00Z') + 0.459)).toBe(dayKey);
     expect(previousShanghaiDayKey(dayKey)).toBe('2026-07-19');
+    expect(() => shanghaiDayKey(Number.NaN)).toThrow('Invalid timestamp');
   });
 
   test('filters every timed fact to the requested day', () => {

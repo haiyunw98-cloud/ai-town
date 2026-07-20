@@ -146,10 +146,14 @@ describe('daily event map movement planning', () => {
     expect(island).toHaveLength(9);
     expect(island.every((command) => command.kind === 'transfer')).toBe(true);
     expect(island.every((command) => command.until === now)).toBe(true);
-    expect(island.every((command) =>
-      command.destination.x === eventCheckpoints.dock.x
-      && command.destination.y === eventCheckpoints.dock.y,
-    )).toBe(true);
+    expect(new Set(island.map((command) =>
+      `${command.destination.x}:${command.destination.y}`,
+    )).size).toBe(9);
+    for (const command of island) {
+      expect(Math.abs(command.destination.x - eventCheckpoints.dock.x)).toBeLessThanOrEqual(3);
+      expect(Math.abs(command.destination.y - eventCheckpoints.dock.y)).toBeLessThanOrEqual(3);
+      expectWalkable(command.destination);
+    }
 
     const mainTown = movement.buildDailyReturnMovementCommands(
       'main-town', participants, now,

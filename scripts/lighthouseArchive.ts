@@ -333,5 +333,7 @@ function assertDayKey(dayKey: string) {
 }
 
 function assertTimestamp(timestamp: number) {
-  if (!Number.isSafeInteger(timestamp) || timestamp < 0) throw new Error('Invalid timestamp');
+  if (!Number.isFinite(timestamp) || timestamp < 0 || Number.isNaN(new Date(timestamp).getTime())) {
+    throw new Error('Invalid timestamp');
+  }
 }

@@ -1,793 +1,218 @@
-# AI Town 🏠💻💌
+# 灯塔镇 · 本地 AI 居民社会模拟
 
-> **Lighthouse Town fork:** This branch includes a complete Simplified Chinese localization, a bilingual UI, original inland-Jiangnan world art, five new residents, and a local-only resident conversation path. See [中文使用说明](./README.zh-CN.md).
+灯塔镇是基于 [a16z AI Town](https://github.com/a16z-infra/ai-town) 深度改造的中文、本地优先 AI 社会模拟项目。九位拥有独立身份、职业、生活状态、经济账户和关系网络的居民，会在一座江南内陆水乡中工作、消费、交往、参加公共活动并留下可追溯记录。
 
-[Live Demo](https://www.convex.dev/ai-town)
+项目面向长期观察与社会研究：画面负责呈现真实移动和公共事件，Convex 保存事实数据，本地 Ollama 负责居民对话，双日报与 IMA 归档负责把日常生活整理成可复核材料。
 
-[Join our community Discord: AI Stack Devs](https://discord.gg/PQUmTBTGmT)
+![灯塔镇当前运行画面](docs/visuals/lighthouse-town-live.png)
 
-<img width="1454" alt="Screen Shot 2023-08-14 at 10 01 00 AM" src="https://github.com/a16z-infra/ai-town/assets/3489963/a4c91f17-23ed-47ec-8c4e-9f9a8505057d">
+## 当前版本
 
-AI Town is a virtual town where AI characters live, chat and socialize.
+- **九位居民**：林澜、沈砚、唐果、墨七、苏萤、白露、顾潮、阿满、玄微先生。
+- **真实地图行动**：居民会前往书院、药庐、茶庄、食肆、集市、工坊、卦馆、镇公所等机构，不是只在面板中生成文字。
+- **独立人生档案**：点击居民可查看人物照片、职业、近期状态、经济、生活指标、友情、信任、亲密倾向与商业合作。
+- **日常社会模拟**：工作、收入、消费、饮食、休息、照护、合作、友情与谨慎发展的亲密关系均有结构化记录。
+- **每日公共活动**：上海时间每天 `12:00–14:00` 举行安全比赛；生活类活动在主镇，大型挑战在试炼岛，奖励会进入居民金贝账户。
+- **双日报**：可导出事实流水账，也可生成带范围说明和证据边界的社会观察日志。
+- **持续生活**：页面关闭后，小镇以低资源规则继续推进；重新打开后恢复实时引擎。
+- **本地模型优先**：居民对话使用本地 Ollama `gemma4:12b`，嵌入使用 `mxbai-embed-large`，没有付费模型自动回退。
+- **中文生活语境**：镇上没有海；中心高塔只是历史公共地标。居民主要谈工作、吃饭、邻里、买卖、公共生活与个人关系。
 
-This project is a deployable starter kit for easily building and customizing your own version of AI
-town. Inspired by the research paper
-[_Generative Agents: Interactive Simulacra of Human Behavior_](https://arxiv.org/pdf/2304.03442.pdf).
+## 世界如何运行
 
-The primary goal of this project, beyond just being a lot of fun to work on, is to provide a
-platform with a strong foundation that is meant to be extended. The back-end natively supports
-shared global state, transactions, and a simulation engine and should be suitable from everything
-from a simple project to play around with to a scalable, multi-player game. A secondary goal is to
-make a JS/TS framework available as most simulators in this space (including the original paper
-above) are written in Python.
+| 状态 | 居民与系统行为 | 模型占用 |
+| --- | --- | --- |
+| 页面打开 | 实时移动、交谈、工作、消费与活动同步 | 需要对话时调用 Ollama |
+| 页面关闭 | 每半小时槽推进工作、消费、社交和休息事实 | 后台规则不调用聊天模型 |
+| 电脑休眠或关机 | 下次启动分批补齐最近七天；更早时间只记录空档范围 | 关机期间不占资源 |
+| 点击“暂停” | 居民、经济、比赛和新模型请求全部停止 | Ollama 不再接收小镇请求 |
 
-## Overview
+“暂停”是硬停止，不会在恢复时补算暂停期间的生活；关闭网页不是暂停，后台仍会以低资源模式留下事实记录。
 
-- 💻 [Stack](#stack)
-- 🧠 [Installation](#installation) (cloud, local, Docker, self-host, Fly.io, ...)
-- 💻️ [Windows Pre-requisites](#windows-installation)
-- 🤖 [Connect an LLM](#connect-an-llm) (Lighthouse Town residents use local Ollama; the upstream provider reference is retained below)
-- 👤 [Customize - YOUR OWN simulated world](#customize-your-own-simulation)
-- 👩‍💻 [Deploying to production](#deploy-the-app-to-production)
-- 🐛 [Troubleshooting](#troubleshooting)
+## 核心系统
 
-## Stack
+### 居民与关系
 
-- Game engine, database, and vector search: [Convex](https://convex.dev/)
-- Auth (Optional): [Clerk](https://clerk.com/)
-- Lighthouse Town resident conversations and observer prose use local [Ollama](https://github.com/ollama/ollama) with `gemma4:12b`; embeddings use `mxbai-embed-large`.
-- The repository retains general provider plumbing for upstream starter-kit use, but the current
-  Lighthouse Town resident path does not call OpenAI, Together.ai, DeepSeek, or another paid fallback.
-  A free cloud model may be added later only as an explicitly configured option; it is not an
-  automatic or current resident fallback.
-- Background Music Generation: [Replicate](https://replicate.com/) using
-  [MusicGen](https://huggingface.co/spaces/facebook/MusicGen)
+每位居民拥有稳定的人格、职业、生活目标、工作机构、资金、饥饿、精力、近期事件和人物照片。关系分为友情、信任、亲密倾向与商业合作四个维度，不会把普通聊天直接判定为恋爱。
 
-Other credits:
+关系数值只根据结构化事实变化，例如共同工作、真实交易、照护、互惠或争执。对话散文会完整保留，但不会直接改写账户和关系。
 
-- Pixel Art Generation: [Replicate](https://replicate.com/),
-  [Fal.ai](https://serverless.fal.ai/lora)
-- All interactions, background music and rendering on the <Game/> component in the project are
-  powered by [PixiJS](https://pixijs.com/).
-- Tilesheet:
-  - https://opengameart.org/content/16x16-game-assets by George Bailey
-  - https://opengameart.org/content/16x16-rpg-tileset by hilau
-- We used https://github.com/pierpo/phaser3-simple-rpg for the original POC of this project. We have
-  since re-wrote the whole app, but appreciated the easy starting point
-- Original assets by [ansimuz](https://opengameart.org/content/tiny-rpg-forest)
-- The UI is based on original assets by
-  [Mounir Tohami](https://mounirtohami.itch.io/pixel-art-gui-elements)
+- 普通对话仅写入结构化记录，四个维度均为 `0`。
+- 真实交易或委托使信任、商业合作各 `+1`（每日各最多 `+3`）。
+- 明确争执使友情 `-2`、信任 `-1`（每日下限分别为 `-4`、`-2`）。
+- 结构化的双方互惠证据才使亲密倾向 `+1`（每日最多 `+1`）。
 
-# Installation
+### 经济与机构
 
-The overall steps are:
+小镇使用虚拟货币“金贝”。居民在对应机构完成工作后获得工资、自营收入或合约分成；购买餐食、茶点、药品、日用品和服务时会扣除余额并更新机构库存与营业数据。
 
-1. [Build and deploy](#build-and-deploy)
-2. [Connect it to an LLM](#connect-an-llm)
+机构保存现金、库存、客流、服务次数、当日收入与支出。余额和库存不能为负，每日补货与固定成本使用唯一结算键，重启不会重复入账。
 
-## Build and Deploy
+余额不足时，对应消费候选会被过滤，不会自动改选最低价餐食；库存不足时也不会凭空完成交易。
 
-There are a few ways to run the app on top of Convex (the backend).
+### 每日活动与试炼岛
 
-1. The standard Convex setup, where you develop locally or in the cloud. This requires a Convex
-   account(free). This is the easiest way to depoy it to the cloud and seriously develop.
-2. If you want to try it out without an account and you're okay with Docker, the Docker Compose
-   setup is nice and self-contained.
-3. There's a community fork of this project offering a one-click install on
-   [Pinokio](https://pinokio.computer/item?uri=https://github.com/cocktailpeanutlabs/aitown) for
-   anyone interested in running but not modifying it 😎.
-4. You can also deploy it to [Fly.io](https://fly.io/). See [./fly](./fly) for instructions.
+每天中午两小时举行一次公共活动。地图会展示集合、乘船、分组、比赛、退出观赛、颁奖和返程。所有淘汰都是安全退出，不会死亡或受伤。
 
-### Standard Setup
+活动结束后，九位居民会在码头不同泊位下船并恢复普通生活，避免角色重叠和寻路死锁。活动奖励与日常经济共用同一账本：签到 `10` 金贝、进入决赛额外 `20` 金贝、冠军额外 `50` 金贝。
 
-Note, if you're on Windows, see [below](#windows-installation).
+### 观察与报告
+
+观察台提供两种按需导出：
+
+1. **事实流水账**：按上海日期保存人物活动、地点、关系变化、经济变化、观察者介入与原始对话，不推断动机。
+2. **社会观察日志**：在同一批事实之上，谨慎整理社会结构、互动网络、友情与亲密迹象、商业劳动、公共规范和后续观察线索。
+
+社会观察日志可以由本地 `gemma4:12b` 辅助扩写；模型不可用时仍会生成确定性规则版。报告用于保留研究材料，不自动作心理诊断、价值判断或论文结论。
+
+## 快速启动
+
+### 1. 准备环境
+
+- macOS（常驻站点脚本使用 `zsh` 与系统自带的 `screen`）
+- Node.js 与 npm
+- [Ollama](https://ollama.com/)
+
+下载本地模型：
 
 ```sh
-git clone https://github.com/a16z-infra/ai-town.git
+ollama pull gemma4:12b
+ollama pull mxbai-embed-large
+```
+
+### 2. 获取项目
+
+```sh
+git clone https://github.com/haiyunw98-cloud/ai-town.git
 cd ai-town
 npm install
+cp .env.example .env.local
 ```
 
-This will require logging into your Convex account, if you haven't already.
+默认模型配置：
 
-To run it:
-
-```sh
-npm run dev
+```dotenv
+WORLD_LOCALE=zh-CN
+LLM_PROVIDER=ollama
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=gemma4:12b
+OLLAMA_EMBEDDING_MODEL=mxbai-embed-large
+OLLAMA_EMBEDDING_DIMENSION=1024
 ```
 
-You can now visit http://localhost:5173.
-
-If you'd rather run the frontend and backend separately (which syncs your backend functions as
-they're saved), you can run these in two terminals:
-
-```bash
-npm run dev:frontend
-npm run dev:backend
-```
-
-See [package.json](./package.json) for details.
-
-### 灯塔镇独立站点
-
-灯塔镇的常驻预览使用专用端口 `4174`，不与其他项目常用的 Vite 开发端口 `5173`
-冲突。启动或恢复前后端服务：
+### 3. 安装常驻站点
 
 ```sh
 ./scripts/install-lighthouse-site.sh
 ```
 
-访问 `http://localhost:4174/ai-town`。安装脚本同时启动低资源的研究归档服务；可用以下命令检查前端、本地 Convex 后端与归档心跳：
+打开：<http://localhost:4174/ai-town>
+
+`4174` 是灯塔镇专用端口，不占用常见的 Vite `5173` 端口。安装脚本会构建项目，并启动前端、本地 Convex 后端和研究归档服务。
+
+检查运行状态：
 
 ```sh
 ./scripts/check-lighthouse-site.sh
 ```
 
-如确需其他端口，可在两个命令前设置相同的 `LIGHTHOUSE_TOWN_PORT` 值。
+正常输出应同时包含：
 
-#### 持续生活与 IMA 研究档案
+```text
+frontend=200 backend=tcp-open archive=healthy
+```
 
-- 有观察者时使用实时引擎；无人打开网页时，世界转为低资源后台生活，每五分钟检查一次，以半小时槽记录工作、消费、邻里往来与休息，不调用 Ollama。
-- 电脑休眠或关机后，下一次启动会分批补齐最近七天的规则事实；更早空档只写范围摘要，不虚构逐时经历。手动点击“暂停”是硬停止，暂停期不会推进，也不会在恢复后补算。
-- 上海时间每日 `12:00–14:00` 的安全活动在无人观察时也会按规则推进并结算奖励；重新打开网页后，地图直接追上当前阶段。活动结束后居民返镇并恢复普通生活。
-- 研究归档每十分钟原子更新当日与前一日资料，默认目录为 `~/Documents/灯塔镇研究档案/IMA导入/`。每天包含 `事实流水账.md`、`社会观察素材.md`、`原始数据.json` 和带哈希的 `manifest.json`。
-- 该目录与 Obsidian 第二大脑隔离，服务不读取或写入任何 Obsidian 路径。可在 IMA 中把 `IMA导入` 目录作为独立资料来源；即使客户端需要手工重新导入，源文件仍会持续自动更新。
+## 页面操作
 
-需要立即手工刷新归档时运行：
+- **暂停 / 恢复**：硬停止或恢复整个小镇。
+- **主镇 / 试炼岛 / 全景 / 活动**：切换地图镜头。
+- **跟随**：先选择一位居民，再让镜头跟随其行动。
+- **扩大地图 / 打开观察台**：调整地图和观察区域比例。
+- **地点名录**：查看机构用途、服务、营业状态和居民使用情况。
+- **进入 / 离开**：以观察者角色进入地图，与居民发起真实对话。
+- **居民详情**：查看人生档案、照片、状态与关系网络。
+
+## 本地数据与研究档案
+
+核心事实保存在本地 Convex 数据库中。默认开发数据目录位于：
+
+```text
+.convex/local/default/convex_local_backend.sqlite3
+```
+
+主要数据表：
+
+- `messages`：原始对话消息
+- `lifeEvents`：居民生活事实
+- `economyLedger`：不可变经济账本
+- `residentEconomy`：居民账户与生活状态
+- `townInstitutions`：机构现金、库存与营业数据
+- `townRelationships` / `relationshipChanges`：关系状态与变化证据
+- `townEvents` / `eventParticipants` / `eventLog`：每日活动及过程记录
+
+研究归档默认每十分钟原子更新到：
+
+```text
+~/Documents/灯塔镇研究档案/IMA导入/
+```
+
+每天包含：
+
+- `事实流水账.md`
+- `社会观察素材.md`
+- `原始数据.json`
+- `manifest.json`
+
+该目录与 Obsidian 第二大脑隔离，不读取或写入任何 Obsidian 路径。需要立即刷新时运行：
 
 ```sh
 npm run archive:ima
 ```
 
-#### 居民日常对话规则
+运行日志位于：
 
-灯塔镇的当前运行设定是**江南内陆水乡，镇上没有海**。镇中心高塔只是历史公共地标，不承担航海、航标、观潮或海防功能。居民自主对话只从日常生活话题中选择，不主动发起高塔谜团、异常调查或海洋叙事。
+```text
+~/Library/Logs/LighthouseTown/
+```
 
-- 话题选择按每位居民的上海当日记录滚动校正：生计 `60%`、关系 `25%`、公共生活 `15%`。从空计数开始的 100 次确定性基准严格为 `60 / 25 / 15`，并避免连续重复最近的细分话题。
-- 简体中文提示范围为开场 `15–45` 字、普通回复 `20–60` 字、告别 `10–35` 字；发送前的最终硬上限分别是开场 `45`、续谈 `60`、离开 `35` 个 Unicode 字符。每次居民生成请求设置 `max_tokens: 120`，每轮只推进一个意思，不使用括号舞台说明。
-- 发送边界会移除舞台说明；超长但其他方面有效的模型输出会优先保留第一个完整句子，否则在安全的 Unicode 边界自然截短到上述硬上限。只有空内容、旧谜团叙事或本地模型不可用时，居民才会发送与当日话题相关的确定性规则回退文本，不会改用付费模型。
-- 观察者若向居民询问大海、潮汐或高塔航行用途，最终回复会先校正为“镇上没有海，这座塔只是地标。”，再用一句短问句回到镇上日常。
-
-居民对话、对话记忆摘要与反思的当前路径只允许本地 Ollama，并显式请求 `gemma4:12b`。即使通用 LLM 环境变量配置了付费提供商，这条居民路径也会拒绝它；未来若增加免费云模型，需要新的显式配置与实现。
-
-“小镇观察”的自动对话摘要只读取**上海时区当日**消息，并按“劳动、商业、饮食、照护、友情与关系、公共生活”六类可见事实归纳。若一组对话过滤后没有新的日常事实，显示“暂无新的日常记录”；若速报没有可展示条目，也使用同一空状态。旧消息和已结束的公共事件仍作为历史记录保留，但海洋、谜团、异常与历史赛事内容不会进入居民自主对话记忆，也不会进入当日实时摘要。
-
-#### 双日报
-
-独立站点 `http://localhost:4174/ai-town` 的“小镇观察”中提供两个按需导出入口：
-
-- **事实流水账**：按上海日期整理可核对的居民活动、地点、关系设定、观察者介入与原始对话，不推断动机或因果；文件名为
-  `灯塔镇事实流水账-YYYY-MM-DD.md`。
-- **社会观察日志**：在同一批事实记录上形成谨慎观察，使用“记录显示”“可能”“尚需持续观察”等限定表达；文件名为
-  `灯塔镇社会观察日志-YYYY-MM-DD.md`。
-
-社会观察日志固定包含十个章节：①观察范围与数据覆盖；②当日社会结构概览；③居民互动网络与关系动向；④友情、亲密关系与合作迹象；⑤商业生活、劳动与机构使用；⑥公共生活、规范、分歧与协调；⑦观察者介入及其可见影响；⑧本地模型辅助的谨慎观察；⑨后续值得持续记录的线索；⑩方法与边界说明。
-
-社会观察的扩写只使用本地 Ollama `gemma4:12b`，只向模型提供长度受限的当日事实摘要。小镇暂停时，手动导出仍可调用常驻模型；模型失败或 Ollama
-不可用时，仍会下载由规则生成的确定性回退报告。社会观察日志生成流程不会调用 DeepSeek 或其他付费模型。报告只在用户点击时生成并下载，不新增报告数据库。使用本地自托管 Convex 时，摘要不离开本机；若使用云 Convex deployment，摘要会提交到该 deployment，再由 action 请求本机 Ollama，请按研究资料的隐私要求选择部署方式。动态内容会转义，观察者身份与居民分开统计；日志用于保留可复核的观察材料，不作心理诊断、价值判断、因果定论或论文结论。
-
-#### 基础经济、工作与关系规则
-
-- 小镇内部只使用虚拟货币“金贝”，不对应现实货币。首版模拟九位现有居民及九个现有机构；职业在对应机构完成已注册的 `work` 活动后，才按确定性账本获得工资、自营收入或合约分成，界面上的“正在工作”文字本身不会结算收入。
-- 机构保存现金、分类库存、服务计数、当日收入/支出和客流。餐食、茶点、药品、日用品与工艺服务不能卖出负库存；余额不足时，对应消费候选会被过滤，不会自动改选最低价餐食，余额也不会变为负数。饥饿和精力会影响工作、用餐、休息等活动选择，但不由模型直接改写账户。
-- 关系分别保存友情、信任、亲密倾向和商业合作。普通对话仅写入结构化记录，四个维度均为 `0`；共同工作/活动使友情、信任各 `+1`（每日各最多 `+3`）；真实交易或委托使信任、商业合作各 `+1`（每日各最多 `+3`）；明确帮助或照护使友情 `+2`、信任 `+1`（每日最多分别为 `+4`、`+2`）；明确争执使友情 `-2`、信任 `-1`（每日下限分别为 `-4`、`-2`）。结构化的双方互惠证据才使亲密倾向 `+1`（每日最多 `+1`）；普通谈话不会自动产生恋爱数值，关系数值只由结构化变化行更新。
-- 小镇暂停时不调度新活动，也不结算工作、消费、每日补货或关系变化；恢复后不会补扣暂停期间的消费。每日首次推进以上海日期的唯一键结算补货和机构固定成本，重启或补跑不会重复入账。
-- 每日活动奖励与日常经济共用同一不可变账本：完成签到为 `10` 金贝参赛补贴，进入决赛额外 `20` 金贝，冠军额外 `50` 金贝；生产事件流在完成阶段自动按活动与居民的唯一键结算，重复归档不会二次发放。
-- 事实流水账会按上海当日列出结构化经济和关系变化；社会观察只汇总这些账本/变化行，不从对话散文推定工资、消费或关系数值。首版不实现银行、贷款、利息、股票、房价、税率、复杂供应链、人口出生或死亡，也不允许模型直接修改余额、库存或关系数值。
-- 观察快照的每类高频记录最多展示前 `500` 条（机构状态为前 `50` 条）；若查询到下一条哨兵记录，日报会明确标注“至少 1 条未纳入快照”。这是导出展示边界，不会删除本地数据库中的历史记录。
-
-### Using Docker Compose with self-hosted Convex
-
-You can also run the Convex backend with the self-hosted Docker container. Here we'll set it up to
-run the frontend, backend, and dashboard all via docker compose.
+## 开发与验证
 
 ```sh
-docker compose up --build -d
+# 开发模式
+npm run dev
+
+# 完整测试
+npm test -- --runInBand
+
+# 类型检查、前端构建与客户端边界检查
+npm run build
+
+# 地图素材检查
+npm run validate:world
+
+# 每日活动完整生命周期演练
+npm run verify:event-runtime
 ```
 
-The container will keep running in the background if you pass `-d`. After you've done it once, you
-can `stop` and `start` services.
+主要目录：
 
-- The frontend will be running on http://localhost:5173.
-- The backend will be running on http://localhost:3210 (3211 for the http api).
-- The dashboard will be running on http://localhost:6791.
-
-To log into the dashboard and deploy from the convex CLI, you will need to generate an admin key.
-
-```sh
-docker compose exec backend ./generate_admin_key.sh
+```text
+convex/                         模拟引擎、数据库、经济、关系、活动与报告
+data/worlds/lighthouse-town/   居民、机构、地图和世界设定
+src/components/                 地图、观察台、档案与交互界面
+public/assets/worlds/           主镇、试炼岛与居民视觉素材
+scripts/                        常驻站点、健康检查、归档和运行态验证
+docs/superpowers/               设计规格与实施计划
 ```
 
-Add it to your `.env.local` file. Note: If you run `down` and `up`, you'll have to generate the key
-again and update the `.env.local` file.
+## 当前边界
 
-```sh
-# in .env.local
-CONVEX_SELF_HOSTED_ADMIN_KEY="<admin-key>" # Ensure there are quotes around it
-CONVEX_SELF_HOSTED_URL="http://127.0.0.1:3210"
-```
+当前版本重点模拟九位居民组成的小型社会，不追求一次性扩展到数百人。已实现工作的真实结算、消费、机构库存、关系变化、每日活动和长期记录；尚未实现银行贷款、利息、股票、房价、税制、人口出生死亡与复杂供应链。
 
-Then set up the Convex backend (one time):
+所有金贝、比赛、身份和关系均为虚构模拟。模型只生成对话与有限观察文本，不能直接修改资金、库存、比赛结算或关系数值。
 
-```sh
-npm run predev
-```
+## 致谢与许可证
 
-To continuously deploy new code to the backend and print logs:
+本项目基于 [a16z-infra/ai-town](https://github.com/a16z-infra/ai-town)，保留原项目的模拟引擎基础、PixiJS/Convex 技术路线及相应许可证和素材署名。灯塔镇的中文世界设定、江南地图、居民档案、经济关系系统、每日活动、双日报和本地研究归档是在该基础上的独立扩展。
 
-```sh
-npm run dev:backend
-```
-
-To see the dashboard, visit `http://localhost:6791` and provide the admin key you generated earlier.
-
-### Configuring Docker for Ollama
-
-If you'll be using Ollama for local inference, you'll need to configure Docker to connect to it.
-
-```sh
-npx convex env set OLLAMA_HOST http://host.docker.internal:11434
-```
-
-To test the connection (after you [have it running](#ollama-lighthouse-town-resident-default)):
-
-```sh
-docker compose exec backend /bin/bash curl http://host.docker.internal:11434
-```
-
-If it says "Ollama is running", it's good! Otherwise, check out the
-[Troubleshooting](#troubleshooting) section.
-
-## Connect an LLM
-
-Note: If you want to run the backend in the cloud, you can either use a cloud-based LLM API, like
-OpenAI or Together.ai or you can proxy the traffic from the cloud to your local Ollama. See
-[below](#using-local-inference-from-a-cloud-deployment) for instructions.
-
-### Ollama (Lighthouse Town resident default)
-
-The current Lighthouse Town resident conversation path requires Ollama and does not fall back to a
-paid provider.
-
-1. Download and install [Ollama](https://ollama.com/).
-2. Open the app or run `ollama serve` in a terminal. `ollama serve` will warn you if the app is
-   already running.
-3. Run `ollama pull gemma4:12b` to download the resident chat model.
-4. Test it with `ollama run gemma4:12b`.
-
-Ollama model options can be found [here](https://ollama.ai/library).
-
-`OLLAMA_MODEL` still configures generic Ollama calls elsewhere in the starter kit, but it does not
-replace the explicit `gemma4:12b` model used by the current resident conversation and observer
-paths. If you want to edit the embedding model:
-
-1. Set the schema-time constant in `convex/util/embeddingDimension.ts` to the model's actual
-   dimension. Convex requires this to remain a static number while compiling the vector index.
-2. Set `OLLAMA_EMBEDDING_MODEL` and `OLLAMA_EMBEDDING_DIMENSION` in the Convex environment to the
-   same model and dimension, then rebuild and reinitialize data as described below.
-
-Note: You might want to set `NUM_MEMORIES_TO_SEARCH` to `1` in constants.ts, to reduce the size of
-conversation prompts, if you see slowness.
-
-### OpenAI
-
-The current Lighthouse Town resident path rejects OpenAI. For upstream/general provider paths that
-use OpenAI, set the schema-time value in `convex/util/embeddingDimension.ts` to the embedding
-model's actual dimension, for example:
-
-```ts
-export const EMBEDDING_DIMENSION = 1536;
-```
-
-Set the `OPENAI_API_KEY` environment variable. Visit https://platform.openai.com/account/api-keys if
-you don't have one.
-
-```sh
-npx convex env set OPENAI_API_KEY 'your-key'
-```
-
-Optional: choose models with `OPENAI_CHAT_MODEL` and `OPENAI_EMBEDDING_MODEL`.
-
-### Together.ai
-
-The current Lighthouse Town resident path rejects Together.ai. For upstream/general provider paths
-that use Together.ai, set the static schema dimension in `convex/util/embeddingDimension.ts`, for
-example:
-
-```ts
-export const EMBEDDING_DIMENSION = 768;
-```
-
-Set the `TOGETHER_API_KEY` environment variable. Visit https://api.together.xyz/settings/api-keys if
-you don't have one.
-
-```sh
-npx convex env set TOGETHER_API_KEY 'your-key'
-```
-
-Optional: choose models via `TOGETHER_CHAT_MODEL`, `TOGETHER_EMBEDDING_MODEL`. The embedding model's
-dimension must match `EMBEDDING_DIMENSION`.
-
-### Other OpenAI-compatible API
-
-This section applies only to upstream/general provider paths. The current Lighthouse Town resident
-path rejects `custom` providers and will not send resident conversation, memory, or observer work
-to an OpenAI-compatible cloud service.
-
-For a general path, you can use an OpenAI-compatible API, such as Anthropic, Groq, or Azure.
-
-- Change the static `EMBEDDING_DIMENSION` in `convex/util/embeddingDimension.ts` to match the
-  dimension of your embedding model. This schema-time number must equal
-  `LLM_EMBEDDING_DIMENSION` in the Convex environment.
-- Edit `getLLMConfig` in `llm.ts` or set environment variables:
-
-```sh
-npx convex env set LLM_PROVIDER 'custom'
-npx convex env set LLM_API_URL 'your-url'
-npx convex env set LLM_API_KEY 'your-key'
-npx convex env set LLM_MODEL 'your-chat-model'
-npx convex env set LLM_EMBEDDING_MODEL 'your-embedding-model'
-npx convex env set LLM_EMBEDDING_DIMENSION 'your-embedding-dimension'
-```
-
-Note: if `LLM_API_KEY` is not required, don't set it.
-
-### Note on changing the LLM provider or embedding model:
-
-If you change the LLM provider or embedding model, you should delete your data and start over. The
-embeddings used for memory are based on the embedding model you choose, and the dimension of the
-vector database must match the embedding model's dimension. See
-[below](#wiping-the-database-and-starting-over) for how to do that.
-
-## Customize your own simulation
-
-NOTE: every time you change character data, you should re-run `npx convex run testing:wipeAllTables`
-and then `npm run dev` to re-upload everything to Convex. This is because character data is sent to
-Convex on the initial load. However, beware that `npx convex run testing:wipeAllTables` WILL wipe
-all of your data.
-
-1. Create your own characters and stories: All characters and stories, as well as their spritesheet
-   references are stored in [characters.ts](./data/characters.ts). You can start by changing
-   character descriptions.
-
-2. Updating spritesheets: in `data/characters.ts`, you will see this code:
-
-   ```ts
-   export const characters = [
-     {
-       name: 'f1',
-       textureUrl: '/assets/32x32folk.png',
-       spritesheetData: f1SpritesheetData,
-       speed: 0.1,
-     },
-     ...
-   ];
-   ```
-
-   You should find a sprite sheet for your character, and define sprite motion / assets in the
-   corresponding file (in the above example, `f1SpritesheetData` was defined in f1.ts)
-
-3. Update the Background (Environment): The map gets loaded in `convex/init.ts` from
-   `data/gentle.js`. To update the map, follow these steps:
-
-   - Use [Tiled](https://www.mapeditor.org/) to export tilemaps as a JSON file (2 layers named
-     bgtiles and objmap)
-   - Use the `convertMap.js` script to convert the JSON to a format that the engine can use.
-
-   ```console
-   node data/convertMap.js <mapDataPath> <assetPath> <tilesetpxw> <tilesetpxh>
-   ```
-
-   - `<mapDataPath>`: Path to the Tiled JSON file.
-   - `<assetPath>`: Path to tileset images.
-   - `<tilesetpxw>`: Tileset width in pixels.
-   - `<tilesetpxh>`: Tileset height in pixels. Generates `converted-map.js` that you can use like
-     `gentle.js`
-
-4. Adding background music with Replicate (Optional)
-
-   For Daily background music generation, create a [Replicate](https://replicate.com/) account and
-   create a token in your Profile's [API Token page](https://replicate.com/account/api-tokens).
-   `npx convex env set REPLICATE_API_TOKEN # token`
-
-   This only works if you can receive the webhook from Replicate. If it's running in the normal
-   Convex cloud, it will work by default. If you're self-hosting, you'll need to configure it to hit
-   your app's url on `/http`. If you're using Docker Compose, it will be `http://localhost:3211`,
-   but you'll need to proxy the traffic to your local machine.
-
-   **Note**: The simulation will pause after 5 minutes if the window is idle. Loading the page will
-   unpause it. You can also manually freeze & unfreeze the world with a button in the UI. If you
-   want to run the world without the browser, you can comment-out the "stop inactive worlds" cron in
-   `convex/crons.ts`.
-
-   - Change the background music by modifying the prompt in `convex/music.ts`
-   - Change how often to generate new music at `convex/crons.ts` by modifying the
-     `generate new background music` job
-
-## Commands to run / test / debug
-
-**To stop the back end, in case of too much activity**
-
-This will stop running the engine and agents. You can still run queries and run functions to debug.
-
-```bash
-npx convex run testing:stop
-```
-
-**To restart the back end after stopping it**
-
-```bash
-npx convex run testing:resume
-```
-
-**To kick the engine in case the game engine or agents aren't running**
-
-```bash
-npx convex run testing:kick
-```
-
-**To archive the world**
-
-If you'd like to reset the world and start from scratch, you can archive the current world:
-
-```bash
-npx convex run testing:archive
-```
-
-Then, you can still look at the world's data in the dashboard, but the engine and agents will no
-longer run.
-
-You can then create a fresh world with `init`.
-
-```bash
-npx convex run init
-```
-
-**To pause your backend deployment**
-
-You can go to the [dashboard](https://dashboard.convex.dev) to your deployment settings to pause and
-un-pause your deployment. This will stop all functions, whether invoked from the client, scheduled,
-or as a cron job. See this as a last resort, as there are gentler ways of stopping above.
-
-## Windows Installation
-
-### Prerequisites
-
-1. **Windows 10/11 with WSL2 installed**
-2. **Internet connection**
-
-Steps:
-
-1. Install WSL2
-
-   First, you need to install WSL2. Follow
-   [this guide](https://docs.microsoft.com/en-us/windows/wsl/install) to set up WSL2 on your Windows
-   machine. We recommend using Ubuntu as your Linux distribution.
-
-2. Update Packages
-
-   Open your WSL terminal (Ubuntu) and update your packages:
-
-   ```sh
-   sudo apt update
-   ```
-
-3. Install NVM and Node.js
-
-   NVM (Node Version Manager) helps manage multiple versions of Node.js. Install NVM and Node.js 18
-   (the stable version):
-
-   ```sh
-   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.2/install.sh | bash
-   export NVM_DIR="$([ -z "${XDG_CONFIG_HOME-}" ] && printf %s "${HOME}/.nvm" || printf %s "${XDG_CONFIG_HOME}/nvm")"
-   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-   source ~/.bashrc
-   nvm install 18
-   nvm use 18
-   ```
-
-4. Install Python and Pip
-
-   Python is required for some dependencies. Install Python and Pip:
-
-   ```sh
-   sudo apt-get install python3 python3-pip sudo ln -s /usr/bin/python3 /usr/bin/python
-   ```
-
-At this point, you can follow the instructions [above](#installation).
-
-## Deploy the app to production
-
-### Deploy Convex functions to prod environment
-
-Before you can run the app, you will need to make sure the Convex functions are deployed to its
-production environment. Note: this is assuming you're using the default Convex cloud product.
-
-1. Run `npx convex deploy` to deploy the convex functions to production
-2. Run `npx convex run init --prod`
-
-To transfer your local data to the cloud, you can run `npx convex export` and then import it with
-`npx convex import --prod`.
-
-If you have existing data you want to clear, you can run
-`npx convex run testing:wipeAllTables --prod`
-
-### Adding Auth (Optional)
-
-You can add clerk auth back in with `git revert b44a436`. Or just look at that diff for what changed
-to remove it.
-
-**Make a Clerk account**
-
-- Go to https://dashboard.clerk.com/ and click on "Add Application"
-- Name your application and select the sign-in providers you would like to offer users
-- Create Application
-- Add `VITE_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` to `.env.local`
-
-```bash
-VITE_CLERK_PUBLISHABLE_KEY=pk_***
-CLERK_SECRET_KEY=sk_***
-```
-
-- Go to JWT Templates and create a new Convex Template.
-- Copy the JWKS endpoint URL for use below.
-
-```sh
-npx convex env set CLERK_ISSUER_URL # e.g. https://your-issuer-url.clerk.accounts.dev/
-```
-
-### Deploy the frontend to Vercel
-
-- Register an account on Vercel and then [install the Vercel CLI](https://vercel.com/docs/cli).
-- **If you are using Github Codespaces**: You will need to
-  [install the Vercel CLI](https://vercel.com/docs/cli) and authenticate from your codespaces cli by
-  running `vercel login`.
-- Deploy the app to Vercel with `vercel --prod`.
-
-## Using local inference from a cloud deployment
-
-We support using [Ollama](https://github.com/jmorganca/ollama) for conversation generations. To have
-it accessible from the web, you can use Tunnelmole or Ngrok or similar so the cloud backend can send
-requests to Ollama running on your local machine.
-
-Steps:
-
-1. Set up either Tunnelmole or Ngrok.
-2. Add Ollama endpoint to Convex
-   ```sh
-   npx convex env set OLLAMA_HOST # your tunnelmole/ngrok unique url from the previous step
-   ```
-3. Update Ollama domains Ollama has a list of accepted domains. Add the ngrok domain so it won't
-   reject traffic. see [ollama.ai](https://ollama.ai) for more details.
-
-### Using Tunnelmole
-
-[Tunnelmole](https://github.com/robbie-cahill/tunnelmole-client) is an open source tunneling tool.
-
-You can install Tunnelmole using one of the following options:
-
-- NPM: `npm install -g tunnelmole`
-- Linux: `curl -s https://tunnelmole.com/sh/install-linux.sh | sudo bash`
-- Mac:
-  `curl -s https://tunnelmole.com/sh/install-mac.sh --output install-mac.sh && sudo bash install-mac.sh`
-- Windows: Install with NPM, or if you don't have NodeJS installed, download the `exe` file for
-  Windows [here](https://tunnelmole.com/downloads/tmole.exe) and put it somewhere in your PATH.
-
-Once Tunnelmole is installed, run the following command:
-
-```
-tmole 11434
-```
-
-Tunnelmole should output a unique url once you run this command.
-
-### Using Ngrok
-
-Ngrok is a popular closed source tunneling tool.
-
-- [Install Ngrok](https://ngrok.com/docs/getting-started/)
-
-Once ngrok is installed and authenticated, run the following command:
-
-```
-ngrok http http://localhost:11434
-```
-
-Ngrok should output a unique url once you run this command.
-
-## Troubleshooting
-
-### Wiping the database and starting over
-
-You can wipe the database by running:
-
-```sh
-npx convex run testing:wipeAllTables
-```
-
-Then reset with:
-
-```sh
-npx convex run init
-```
-
-### Incompatible Node.js versions
-
-If you encounter a node version error on the convex server upon application startup, please use node
-version 18, which is the most stable. One way to do this is by
-[installing nvm](https://nodejs.org/en/download/package-manager) and running `nvm install 18` and
-`nvm use 18`.
-
-### Reaching Ollama
-
-If you're having trouble with the backend communicating with Ollama, it depends on your setup how to
-debug:
-
-1. If you're running directly on Windows, see
-   [Windows Ollama connection issues](#windows-ollama-connection-issues).
-2. If you're using **Docker**, see
-   [Docker to Ollama connection issues](#docker-to-ollama-connection-issues).
-3. If you're running locally, you can try the following:
-
-```sh
-npx convex env set OLLAMA_HOST http://localhost:11434
-```
-
-By default, the host is set to `http://127.0.0.1:11434`. Some systems prefer `localhost`
-¯\_(ツ)\_/¯.
-
-### Windows Ollama connection issues
-
-If the above didn't work after following the [windows](#windows-installation) and regular
-[installation](#installation) instructions, you can try the following, assuming you're **not** using
-Docker.
-
-If you're using Docker, see the [next section](#docker-to-ollama-connection-issues) for Docker
-troubleshooting.
-
-For running directly on Windows, you can try the following:
-
-1. Install `unzip` and `socat`:
-
-   ```sh
-   sudo apt install unzip socat
-   ```
-
-2. Configure `socat` to Bridge Ports for Ollama
-
-   Run the following command to bridge ports:
-
-   ```sh
-   socat TCP-LISTEN:11434,fork TCP:$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):11434 &
-   ```
-
-3. Test if it's working:
-
-   ```sh
-   curl http://127.0.0.1:11434
-   ```
-
-   If it responds OK, the Ollama API should be accessible.
-
-### Docker to Ollama connection issues
-
-If you're having trouble with the backend communicating with Ollama, there's a couple things to
-check:
-
-1. Is Docker at least verion 18.03 ? That allows you to use the `host.docker.internal` hostname to
-   connect to the host from inside the container.
-
-2. Is Ollama running? You can check this by running `curl http://localhost:11434` from outside the
-   container.
-
-3. Is Ollama accessible from inside the container? You can check this by running
-   `docker compose exec backend curl http://host.docker.internal:11434`.
-
-If 1 & 2 work, but 3 does not, you can use `socat` to bridge the traffic from inside the container
-to Ollama running on the host.
-
-1. Configure `socat` with the host's IP address (not the Docker IP).
-
-   ```sh
-   docker compose exec backend /bin/bash
-   HOST_IP=YOUR-HOST-IP
-   socat TCP-LISTEN:11434,fork TCP:$HOST_IP:11434
-   ```
-
-   Keep this running.
-
-2. Then from outside of the container:
-
-   ```sh
-   npx convex env set OLLAMA_HOST http://localhost:11434
-   ```
-
-3. Test if it's working:
-
-   ```sh
-   docker compose exec backend curl http://localhost:11434
-   ```
-
-   If it responds OK, the Ollama API is accessible. Otherwise, try changing the previous two to
-   `http://127.0.0.1:11434`.
-
-### Launching an Interactive Docker Terminal
-
-If you wan to investigate inside the container, you can launch an interactive Docker terminal, for
-the `frontend`, `backend` or `dashboard` service:
-
-```bash
-docker compose exec frontend /bin/bash
-```
-
-To exit the container, run `exit`.
-
-### Updating the browser list
-
-```bash
-docker compose exec frontend npx update-browserslist-db@latest
-```
-
-# 🧑‍🏫 What is Convex?
-
-[Convex](https://convex.dev) is a hosted backend platform with a built-in database that lets you
-write your [database schema](https://docs.convex.dev/database/schemas) and
-[server functions](https://docs.convex.dev/functions) in
-[TypeScript](https://docs.convex.dev/typescript). Server-side database
-[queries](https://docs.convex.dev/functions/query-functions) automatically
-[cache](https://docs.convex.dev/functions/query-functions#caching--reactivity) and
-[subscribe](https://docs.convex.dev/client/react#reactivity) to data, powering a
-[realtime `useQuery` hook](https://docs.convex.dev/client/react#fetching-data) in our
-[React client](https://docs.convex.dev/client/react). There are also clients for
-[Python](https://docs.convex.dev/client/python), [Rust](https://docs.convex.dev/client/rust),
-[ReactNative](https://docs.convex.dev/client/react-native), and
-[Node](https://docs.convex.dev/client/javascript), as well as a straightforward
-[HTTP API](https://docs.convex.dev/http-api/).
-
-The database supports [NoSQL-style documents](https://docs.convex.dev/database/document-storage)
-with [opt-in schema validation](https://docs.convex.dev/database/schemas),
-[relationships](https://docs.convex.dev/database/document-ids) and
-[custom indexes](https://docs.convex.dev/database/indexes/) (including on fields in nested objects).
-
-The [`query`](https://docs.convex.dev/functions/query-functions) and
-[`mutation`](https://docs.convex.dev/functions/mutation-functions) server functions have
-transactional, low latency access to the database and leverage our
-[`v8` runtime](https://docs.convex.dev/functions/runtimes) with
-[determinism guardrails](https://docs.convex.dev/functions/runtimes#using-randomness-and-time-in-queries-and-mutations)
-to provide the strongest ACID guarantees on the market: immediate consistency, serializable
-isolation, and automatic conflict resolution via
-[optimistic multi-version concurrency control](https://docs.convex.dev/database/advanced/occ) (OCC /
-MVCC).
-
-The [`action` server functions](https://docs.convex.dev/functions/actions) have access to external
-APIs and enable other side-effects and non-determinism in either our
-[optimized `v8` runtime](https://docs.convex.dev/functions/runtimes) or a more
-[flexible `node` runtime](https://docs.convex.dev/functions/runtimes#nodejs-runtime).
-
-Functions can run in the background via
-[scheduling](https://docs.convex.dev/scheduling/scheduled-functions) and
-[cron jobs](https://docs.convex.dev/scheduling/cron-jobs).
-
-Development is cloud-first, with
-[hot reloads for server function](https://docs.convex.dev/cli#run-the-convex-dev-server) editing via
-the [CLI](https://docs.convex.dev/cli),
-[preview deployments](https://docs.convex.dev/production/hosting/preview-deployments),
-[logging and exception reporting integrations](https://docs.convex.dev/production/integrations/),
-There is a [dashboard UI](https://docs.convex.dev/dashboard) to
-[browse and edit data](https://docs.convex.dev/dashboard/deployments/data),
-[edit environment variables](https://docs.convex.dev/production/environment-variables),
-[view logs](https://docs.convex.dev/dashboard/deployments/logs),
-[run server functions](https://docs.convex.dev/dashboard/deployments/functions), and more.
-
-There are built-in features for [reactive pagination](https://docs.convex.dev/database/pagination),
-[file storage](https://docs.convex.dev/file-storage),
-[reactive text search](https://docs.convex.dev/text-search),
-[vector search](https://docs.convex.dev/vector-search),
-[https endpoints](https://docs.convex.dev/functions/http-actions) (for webhooks),
-[snapshot import/export](https://docs.convex.dev/database/import-export/),
-[streaming import/export](https://docs.convex.dev/production/integrations/streaming-import-export),
-and [runtime validation](https://docs.convex.dev/database/schemas#validators) for
-[function arguments](https://docs.convex.dev/functions/args-validation) and
-[database data](https://docs.convex.dev/database/schemas#schema-validation).
-
-Everything scales automatically, and it’s [free to start](https://www.convex.dev/plans).
+许可证见 [LICENSE](LICENSE)。

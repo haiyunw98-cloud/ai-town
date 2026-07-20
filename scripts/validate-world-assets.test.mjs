@@ -6,7 +6,7 @@ import test from 'node:test';
 
 const validator = await import('./validate-world-assets.mjs');
 
-test('resident photo validation requires nine complete four-photo WebP sets', () => {
+void test('resident photo validation requires nine complete four-photo WebP sets', () => {
   assert.equal(
     typeof validator.validateResidentPhotoAssets,
     'function',
@@ -44,4 +44,30 @@ test('resident photo validation requires nine complete four-photo WebP sets', ()
   assert.ok(failures.some((failure) => failure.includes('resident-2') && failure.includes('WebP')));
   assert.ok(failures.some((failure) => failure.includes('resident-3') && failure.includes('empty')));
   assert.ok(failures.some((failure) => failure.includes('36')));
+});
+
+void test('operations guide validation follows the current local Lighthouse Town contract', () => {
+  assert.equal(
+    typeof validator.validateOperationsGuide,
+    'function',
+    'validator must export validateOperationsGuide',
+  );
+
+  const currentGuide = [
+    './scripts/install-lighthouse-site.sh',
+    'http://localhost:4174/ai-town',
+    'LLM_PROVIDER=ollama',
+    'OLLAMA_MODEL=gemma4:12b',
+    'WORLD_LOCALE=zh-CN',
+    '事实流水账',
+    '社会观察日志',
+    'IMA导入',
+    'messages',
+  ].join('\n');
+  assert.deepEqual(validator.validateOperationsGuide(currentGuide), []);
+
+  const failures = validator.validateOperationsGuide('npm run dev');
+  assert.ok(failures.some((failure) => failure.includes('gemma4:12b')));
+  assert.ok(failures.some((failure) => failure.includes('4174')));
+  assert.ok(failures.some((failure) => failure.includes('社会观察日志')));
 });

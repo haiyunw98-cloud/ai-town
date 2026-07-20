@@ -48,6 +48,24 @@ export function validateResidentPhotoAssets(profiles, publicDir) {
   return failures;
 }
 
+export function validateOperationsGuide(guide) {
+  const failures = [];
+  for (const requiredText of [
+    './scripts/install-lighthouse-site.sh',
+    'http://localhost:4174/ai-town',
+    'LLM_PROVIDER=ollama',
+    'OLLAMA_MODEL=gemma4:12b',
+    'WORLD_LOCALE=zh-CN',
+    '事实流水账',
+    '社会观察日志',
+    'IMA导入',
+    'messages',
+  ]) {
+    if (!guide.includes(requiredText)) failures.push(`README.md is missing: ${requiredText}`);
+  }
+  return failures;
+}
+
 export async function validateWorldAssets(root = resolve(import.meta.dirname, '..')) {
 const assetDir = resolve(root, 'public/assets/worlds/lighthouse-town');
 const requiredAssets = [
@@ -60,23 +78,11 @@ const requiredAssets = [
 ];
 const failures = [];
 
-const chineseReadme = resolve(root, 'README.zh-CN.md');
-if (!existsSync(chineseReadme)) {
-  failures.push('missing Chinese operations guide: README.zh-CN.md');
+const operationsReadme = resolve(root, 'README.md');
+if (!existsSync(operationsReadme)) {
+  failures.push('missing operations guide: README.md');
 } else {
-  const guide = readFileSync(chineseReadme, 'utf8');
-  for (const requiredText of [
-    'npm run dev',
-    'docker compose up --build -d',
-    'LLM_PROVIDER=ollama',
-    'LLM_PROVIDER=openai',
-    'LLM_PROVIDER=together',
-    'LLM_PROVIDER=custom',
-    'WORLD_LOCALE',
-    'npx convex run testing:wipeAllTables',
-  ]) {
-    if (!guide.includes(requiredText)) failures.push(`README.zh-CN.md is missing: ${requiredText}`);
-  }
+  failures.push(...validateOperationsGuide(readFileSync(operationsReadme, 'utf8')));
 }
 
 for (const asset of requiredAssets) {

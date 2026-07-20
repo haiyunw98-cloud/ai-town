@@ -176,15 +176,16 @@ export function buildDailyReturnMovementCommands(
   validateDailyMovementRoster(participants);
   if (!Number.isFinite(now)) throw new Error('Daily return time must be finite.');
   if (venue === 'trial-island') {
-    return participants.map((participant) => ({
+    const destinations = walkableDailyOffsets(eventCheckpoints.dock, participants.length);
+    return participants.map((participant, index) => ({
       kind: 'transfer',
       residentId: participant.residentId,
-      destination: { ...eventCheckpoints.dock },
+      destination: destinations[index],
       description: '乘摆渡船返回主镇，恢复普通生活',
       until: now,
     }));
   }
-  if (venue !== 'main-town') throw new Error(`Unknown daily event venue: ${venue}`);
+  if (venue !== 'main-town') throw new Error('Unknown daily event venue.');
   const destinations = walkableDailyOffsets(eventCheckpoints.plaza, participants.length);
   return participants.map((participant, index) => ({
     kind: 'move',
