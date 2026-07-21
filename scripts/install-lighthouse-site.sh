@@ -8,7 +8,20 @@ LOGS="${LIGHTHOUSE_TOWN_LOG_DIR:-$HOME/Library/Logs/LighthouseTown}"
 STATE_DIR="${LIGHTHOUSE_TOWN_STATE_DIR:-$HOME/Library/Application Support/LighthouseTown}"
 FRONTEND_PORT="${LIGHTHOUSE_TOWN_PORT:-4174}"
 BACKEND_PORT=3210
+STARTUP_TIMEOUT_SECS="${LIGHTHOUSE_TOWN_STARTUP_TIMEOUT_SECS:-300}"
+CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS="${CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS:-$STARTUP_TIMEOUT_SECS}"
 ARCHIVE_ROOT="${LIGHTHOUSE_IMA_ARCHIVE_DIR:-$HOME/Documents/灯塔镇研究档案/IMA导入}"
+
+if [[ ! "$STARTUP_TIMEOUT_SECS" == <-> ]] || (( STARTUP_TIMEOUT_SECS < 30 )); then
+  echo "LIGHTHOUSE_TOWN_STARTUP_TIMEOUT_SECS must be an integer of at least 30 seconds" >&2
+  exit 2
+fi
+if [[ ! "$CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS" == <-> ]] \
+  || (( CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS < 30 )); then
+  echo "CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS must be an integer of at least 30 seconds" >&2
+  exit 2
+fi
+export CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS
 
 NODE_BIN="$(command -v node)"
 NPM_BIN="$(command -v npm)"
@@ -17,8 +30,8 @@ NC_BIN="$(command -v nc)"
 SCREEN_BIN="$(command -v screen)"
 PGREP_BIN="$(command -v pgrep)"
 
-CONVEX_ENTRY="$ROOT/node_modules/convex/bin/main.js"
 VITE_ENTRY="$ROOT/node_modules/vite/bin/vite.js"
+BACKEND_ENTRY="$ROOT/scripts/run-convex-local-backend.ts"
 BACKEND_SESSION="lighthouse-town-backend"
 FRONTEND_SESSION="lighthouse-town-frontend"
 ARCHIVE_SESSION="lighthouse-town-archive"
@@ -148,7 +161,7 @@ main() {
   stop_managed_session "$BACKEND_SESSION"
   stop_managed_process "$ARCHIVE_PID_FILE" "$ARCHIVE_ENTRY"
   stop_managed_process "$FRONTEND_PID_FILE" "$VITE_ENTRY"
-  stop_managed_process "$BACKEND_PID_FILE" "$CONVEX_ENTRY"
+  stop_managed_process "$BACKEND_PID_FILE" "$BACKEND_ENTRY"
   sleep 1
 
   if "$NC_BIN" -z 127.0.0.1 "$FRONTEND_PORT" 2>/dev/null; then
@@ -162,7 +175,8 @@ main() {
 
   "$SCREEN_BIN" -DmS "$BACKEND_SESSION" "$PROCESS_RUNNER" \
     "$ROOT" "$LOGS/backend.log" "$LOGS/backend-error.log" "$BACKEND_PID_FILE" \
-    "$NODE_BIN" "$CONVEX_ENTRY" dev --tail-logs &!
+    "$NODE_BIN" --loader ts-node/esm --experimental-specifier-resolution=node \
+    "$BACKEND_ENTRY" "$ROOT" &!
   "$SCREEN_BIN" -DmS "$FRONTEND_SESSION" "$PROCESS_RUNNER" \
     "$ROOT" "$LOGS/frontend.log" "$LOGS/frontend-error.log" "$FRONTEND_PID_FILE" \
     "$NODE_BIN" "$VITE_ENTRY" preview --host 127.0.0.1 \
@@ -173,8 +187,8 @@ main() {
     "$NODE_BIN" --loader ts-node/esm --experimental-specifier-resolution=node \
     "$ARCHIVE_ENTRY" &!
 
-  # A cold local Convex start can take more than twenty seconds on a busy laptop.
-  for _ in {1..60}; do
+  # A large local history database can take several minutes to recover after a cold start.
+  for ((attempt = 1; attempt <= STARTUP_TIMEOUT_SECS; attempt += 1)); do
     if managed_session_running "$BACKEND_SESSION" \
       && managed_session_running "$FRONTEND_SESSION" \
       && managed_session_running "$ARCHIVE_SESSION" \
@@ -194,7 +208,7 @@ main() {
   stop_managed_session "$BACKEND_SESSION"
   stop_managed_process "$ARCHIVE_PID_FILE" "$ARCHIVE_ENTRY"
   stop_managed_process "$FRONTEND_PID_FILE" "$VITE_ENTRY"
-  stop_managed_process "$BACKEND_PID_FILE" "$CONVEX_ENTRY"
+  stop_managed_process "$BACKEND_PID_FILE" "$BACKEND_ENTRY"
   echo "Lighthouse Town site failed its startup health check" >&2
   return 1
 }

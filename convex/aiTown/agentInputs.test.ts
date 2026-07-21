@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
-import { agentInputs } from './agentInputs';
+import { agentInputs, findNearbyOpenDestination } from './agentInputs';
+import { manhattanDistance } from '../util/geometry';
 import {
   mapheight,
   mapwidth,
@@ -163,6 +164,27 @@ describe('controlled daily event ferry transfer', () => {
     }
   });
 
+  test('event movement ends an ordinary conversation before moving the resident', () => {
+    const { game, player } = ferryGame();
+    const stop = jest.fn(() => game.world.conversations.delete('c:1'));
+    game.world.conversations.set('c:1', {
+      participants: new Map([
+        ['p:1', { status: { kind: 'participating' } }],
+        ['p:2', { status: { kind: 'participating' } }],
+      ]),
+      stop,
+    });
+
+    expect(agentInputs.eventMove.handler(game as never, appliedAt, {
+      playerId: 'p:1' as never,
+      destination: { x: 22, y: 15 },
+      description: '按活动安排前往下一处场地',
+      until: appliedAt + 60_000,
+    })).toBeNull();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(player.pathfinding).toEqual(expect.objectContaining({ destination: { x: 22, y: 15 } }));
+  });
+
   test.each([
     [{ x: 51, y: 15 }, 'not an allowlisted checkpoint'],
     [{ x: 50.5, y: 15 }, 'not integral'],
@@ -258,5 +280,88 @@ describe('controlled daily event ferry transfer', () => {
       description: '乘船',
       until: appliedAt,
     })).toThrow(/resident|player|missing|find/iu);
+  });
+});
+
+describe('observer commands', () => {
+  const appliedAt = 1_000_000;
+  const observerCommand = () => (agentInputs as unknown as {
+    observerCommand: {
+      handler: (
+        game: ReturnType<typeof ferryGame>['game'],
+        now: number,
+        args: {
+          playerId: string;
+          destination: { x: number; y: number };
+          description: string;
+          emoji: string;
+          until: number;
+        },
+      ) => null;
+    };
+  }).observerCommand;
+
+  test('moves an AI resident under an observer instruction and replaces conflicting work', () => {
+    const fixture = ferryGame();
+
+    expect(observerCommand().handler(fixture.game, appliedAt, {
+      playerId: 'p:1',
+      destination: { x: 22, y: 15 },
+      description: '按观察者安排前往灯塔广场',
+      emoji: '🎯',
+      until: appliedAt + 30 * 60_000,
+    })).toBeNull();
+
+    expect(fixture.agent.inProgressOperation).toBeUndefined();
+    expect(fixture.player.pathfinding?.destination).toEqual({ x: 22, y: 15 });
+    expect((fixture.player as typeof fixture.player & { activity?: unknown }).activity).toEqual({
+      description: '按观察者安排前往灯塔广场',
+      emoji: '🎯',
+      until: appliedAt + 30 * 60_000,
+    });
+  });
+
+  test('rejects observer commands for the human observer and invalid durations', () => {
+    const human = ferryGame({ human: 'observer:1' });
+    expect(() => observerCommand().handler(human.game, appliedAt, {
+      playerId: 'p:1',
+      destination: { x: 22, y: 15 },
+      description: '错误指令',
+      emoji: '🎯',
+      until: appliedAt + 10_000,
+    })).toThrow(/AI resident|human/iu);
+
+    const resident = ferryGame();
+    expect(() => observerCommand().handler(resident.game, appliedAt, {
+      playerId: 'p:1',
+      destination: { x: 22, y: 15 },
+      description: '过长指令',
+      emoji: '🎯',
+      until: appliedAt + 25 * 60 * 60_000,
+    })).toThrow(/duration|time|window/iu);
+  });
+});
+
+describe('shared institution destination spreading', () => {
+  test('assigns a nearby walkable tile when another resident occupies the requested counter', () => {
+    const fixture = ferryGame();
+    fixture.game.world.players.set('p:2', {
+      id: 'p:2',
+      position: { x: 22, y: 15 },
+      pathfinding: { destination: { x: 22, y: 15 } },
+      speed: 0,
+    });
+
+    const destination = findNearbyOpenDestination(
+      fixture.game as never,
+      1_000_000,
+      fixture.player as never,
+      { x: 22, y: 15 },
+    );
+
+    expect(destination).not.toEqual({ x: 22, y: 15 });
+    expect(manhattanDistance(destination, { x: 22, y: 15 })).toBeLessThanOrEqual(3);
+    expect(Number.isInteger(destination.x)).toBe(true);
+    expect(Number.isInteger(destination.y)).toBe(true);
   });
 });

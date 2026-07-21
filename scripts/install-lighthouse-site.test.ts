@@ -48,7 +48,9 @@ describe('Lighthouse Town site installer', () => {
     expect(source).toContain('"$SCREEN_BIN" -DmS "$BACKEND_SESSION"');
     expect(source).toContain('"$SCREEN_BIN" -DmS "$FRONTEND_SESSION"');
     expect(source).toContain('"$SCREEN_BIN" -DmS "$ARCHIVE_SESSION"');
-    expect(source).toContain('for _ in {1..60}');
+    expect(source).toContain('LIGHTHOUSE_TOWN_STARTUP_TIMEOUT_SECS:-300');
+    expect(source).toContain('CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS');
+    expect(source).toContain('for ((attempt = 1; attempt <= STARTUP_TIMEOUT_SECS; attempt += 1)); do');
     expect(source).toContain('listing="$("$SCREEN_BIN" -ls 2>/dev/null || true)"');
   });
 
@@ -68,7 +70,8 @@ describe('Lighthouse Town site installer', () => {
     expect(source).toContain('ps -p "$pid" -o command=');
     expect(source).toContain('"$PGREP_BIN" -P "$pid"');
     expect(source).toContain('Refusing to stop unmanaged PID');
-    expect(source).toContain('node_modules/convex/bin/main.js');
+    expect(source).toContain('scripts/run-convex-local-backend.ts');
+    expect(source).not.toContain('dev --tail-logs');
     expect(source).toContain('node_modules/vite/bin/vite.js');
     expect(source).toContain('stop_managed_session "$FRONTEND_SESSION"');
     expect(source).toContain('stop_managed_session "$BACKEND_SESSION"');
@@ -76,7 +79,6 @@ describe('Lighthouse Town site installer', () => {
     expect(source).toContain('scripts/run-lighthouse-archive.ts');
     expect(source).toContain('"ok": true');
     expect(source).not.toContain('"/node_modules/vite/bin/vite.js"');
-    expect(source).not.toContain('"/node_modules/convex/bin/main.js"');
   });
 
   test.each([

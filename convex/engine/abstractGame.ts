@@ -137,12 +137,31 @@ export async function engineInsertInput(
   args: any,
 ): Promise<Id<'inputs'>> {
   const now = Date.now();
-  const prevInput = await ctx.db
-    .query('inputs')
-    .withIndex('byInputNumber', (q) => q.eq('engineId', engineId))
-    .order('desc')
-    .first();
-  const number = prevInput ? prevInput.number + 1 : 0;
+  const counter = await ctx.db
+    .query('engineInputCounters')
+    .withIndex('engineId', (q) => q.eq('engineId', engineId))
+    .unique();
+  let number: number;
+  if (counter) {
+    number = counter.nextNumber;
+    if (!Number.isSafeInteger(number) || number < 0) {
+      throw new Error(`Invalid input counter for engine ${engineId}`);
+    }
+    await ctx.db.patch(counter._id, { nextNumber: number + 1 });
+  } else {
+    // One-time migration for an existing local town. Once initialized, producers never read a
+    // completed input row again, so saveWorld can attach results without starving new commands.
+    const prevInput = await ctx.db
+      .query('inputs')
+      .withIndex('byInputNumber', (q) => q.eq('engineId', engineId))
+      .order('desc')
+      .first();
+    number = prevInput ? prevInput.number + 1 : 0;
+    if (!Number.isSafeInteger(number) || number < 0) {
+      throw new Error(`Invalid previous input number for engine ${engineId}`);
+    }
+    await ctx.db.insert('engineInputCounters', { engineId, nextNumber: number + 1 });
+  }
   const inputId = await ctx.db.insert('inputs', {
     engineId,
     number,

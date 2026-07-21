@@ -1529,6 +1529,114 @@ p[contenteditable='true']:empty::before {
   text-align: center;
 }
 
+.god-mode-controls {
+  margin: 10px 0 16px;
+  padding: 11px;
+  border: 1px solid rgba(229, 183, 91, 0.48);
+  border-radius: 12px;
+  color: #f4ecd8;
+  background:
+    linear-gradient(135deg, rgba(229, 183, 91, 0.12), transparent 46%),
+    rgba(5, 29, 34, 0.9);
+}
+
+.god-mode-controls header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.god-mode-controls header div {
+  display: grid;
+  gap: 2px;
+}
+
+.god-mode-controls header strong {
+  color: #ffd77c;
+  font-size: 15px;
+}
+
+.god-mode-controls header small,
+.god-mode-controls header > span {
+  color: rgba(244, 236, 216, 0.62);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.god-mode-controls header > span {
+  max-width: 92px;
+  text-align: right;
+}
+
+.god-mode-controls > div {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.god-mode-controls button {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  padding: 5px 3px;
+  border: 1px solid rgba(229, 183, 91, 0.35);
+  border-radius: 8px;
+  color: #f7edda;
+  background: rgba(29, 79, 76, 0.72);
+  cursor: pointer;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.god-mode-controls button span {
+  font-size: 15px;
+}
+
+.god-mode-controls button:hover:not(:disabled) {
+  border-color: #f4c66e;
+  background: rgba(48, 112, 100, 0.88);
+  transform: translateY(-1px);
+}
+
+.god-mode-controls button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.observer-panel-error {
+  margin: 18px;
+  padding: 18px;
+  border: 1px solid rgba(229, 183, 91, 0.5);
+  border-radius: 12px;
+  color: #f4ecd8;
+  background: rgba(5, 29, 34, 0.9);
+  text-align: center;
+}
+
+.observer-panel-error strong {
+  color: #ffd77c;
+  font-size: 18px;
+}
+
+.observer-panel-error p {
+  margin: 8px 0 12px;
+  color: rgba(244, 236, 216, 0.72);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.observer-panel-error button {
+  padding: 8px 12px;
+  border: 1px solid rgba(229, 183, 91, 0.6);
+  border-radius: 8px;
+  color: #112f32;
+  background: #f1c468;
+  cursor: pointer;
+  font-weight: 800;
+}
+
 .runtime-snapshot-notice {
   margin: 0 0 9px;
   padding: 9px 10px;

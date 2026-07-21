@@ -5,7 +5,6 @@ import { playerId } from './ids';
 import {
   PATHFINDING_TIMEOUT,
   PATHFINDING_BACKOFF,
-  HUMAN_IDLE_TOO_LONG,
   MAX_HUMAN_PLAYERS,
   MAX_PATHFINDS_PER_STEP,
 } from '../constants';
@@ -82,9 +81,9 @@ export class Player {
   }
 
   tick(game: Game, now: number) {
-    if (this.human && this.lastInput < now - HUMAN_IDLE_TOO_LONG) {
-      this.leave(game, now);
-    }
+    // The single local human is a god-mode observer, not a transient walking
+    // avatar. Keep it available so direct resident conversations survive idle
+    // browser periods and page refreshes.
   }
 
   tickPathfinding(game: Game, now: number) {

@@ -12,6 +12,8 @@ import { playerId } from './aiTown/ids';
 import { kickEngine, startEngine, stopEngine } from './aiTown/main';
 import { engineInsertInput } from './engine/abstractGame';
 import { internal } from './_generated/api';
+import { resolveObserverCommand } from './observerCommands';
+import { residentEconomyProfiles } from '../data/worlds/lighthouse-town/economy';
 
 export const defaultWorldStatus = query({
   handler: async (ctx) => {
@@ -145,6 +147,67 @@ export const joinWorld = mutation({
       // description: `${identity.givenName} is a human player`,
       tokenIdentifier: DEFAULT_NAME,
     });
+  },
+});
+
+export const issueObserverCommand = mutation({
+  args: {
+    worldId: v.id('worlds'),
+    engineId: v.id('engines'),
+    residentId: playerId,
+    command: v.union(
+      v.literal('work'),
+      v.literal('rest'),
+      v.literal('eat'),
+      v.literal('shop'),
+      v.literal('plaza'),
+      v.literal('custom'),
+    ),
+    customDestination: v.optional(v.object({ x: v.number(), y: v.number() })),
+  },
+  handler: async (ctx, args) => {
+    const description = await ctx.db
+      .query('playerDescriptions')
+      .withIndex('worldId', (q) =>
+        q.eq('worldId', args.worldId).eq('playerId', args.residentId),
+      )
+      .unique();
+    if (
+      !description
+      || !residentEconomyProfiles.some((profile) => profile.name === description.name)
+    ) {
+      throw new Error('只能向一位正在生活的 AI 居民下达指令。');
+    }
+    const resolved = resolveObserverCommand(
+      args.command,
+      description.name,
+      args.customDestination,
+    );
+    const now = Date.now();
+    // Do not read the large, constantly-saved world document here. A live world writes that
+    // document every two seconds, so coupling a user command to it can keep the mutation in
+    // optimistic-concurrency retries and leave the UI stuck on “下达中”. The already-mounted
+    // game supplies its engine id, while the stable description row proves resident ownership.
+    const inputId = await engineInsertInput(ctx, args.engineId, 'observerCommand', {
+      playerId: args.residentId,
+      destination: resolved.destination,
+      description: resolved.description,
+      emoji: resolved.emoji,
+      until: now + resolved.durationMs,
+    });
+    await ctx.scheduler.runAfter(0, internal.lives.recordActivity, {
+      worldId: args.worldId,
+      residentId: args.residentId,
+      kind: 'observer-intervention',
+      category: 'observer-intervention',
+      phase: 'start',
+      text: `观察者指令：${resolved.description}`,
+      createdAt: now,
+      sourceKey: `observer-command:${inputId}`,
+      operationId: String(inputId),
+      activityUntil: now + resolved.durationMs,
+    });
+    return inputId;
   },
 });
 

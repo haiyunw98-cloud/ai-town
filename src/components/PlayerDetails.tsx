@@ -1,4 +1,4 @@
-import { useQuery } from 'convex/react';
+import { useConvex, useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import closeImg from '../../assets/close.svg';
@@ -11,6 +11,9 @@ import type { ServerGame } from '../hooks/serverGame';
 import { useI18n } from '../i18n';
 import { conversationAction } from './conversationAccess';
 import ResidentDossier from './ResidentDossier';
+import { useEffect, useRef, useState } from 'react';
+import { godModeQuickCommands, type GodModeCommandId } from './godMode';
+import { waitForInput } from '../hooks/sendInput';
 
 export default function PlayerDetails({
   worldId,
@@ -28,13 +31,14 @@ export default function PlayerDetails({
   scrollViewRef: React.RefObject<HTMLDivElement>;
 }) {
   const { t } = useI18n();
+  const convex = useConvex();
   const humanTokenIdentifier = useQuery(api.world.userStatus, { worldId });
 
   const players = [...game.world.players.values()];
   const humanPlayer = players.find((p) => p.human === humanTokenIdentifier);
   const humanConversation = humanPlayer ? game.world.playerConversation(humanPlayer) : undefined;
   // Always select the other player if we're in a conversation with them.
-  if (humanPlayer && humanConversation) {
+  if (!playerId && humanPlayer && humanConversation) {
     const otherPlayerIds = [...humanConversation.participants.keys()].filter(
       (p) => p !== humanPlayer.id,
     );
@@ -55,6 +59,25 @@ export default function PlayerDetails({
   const acceptInvite = useSendInput(engineId, 'acceptInvite');
   const rejectInvite = useSendInput(engineId, 'rejectInvite');
   const leaveConversation = useSendInput(engineId, 'leaveConversation');
+  const issueObserverCommand = useMutation(api.world.issueObserverCommand);
+  const [commandPending, setCommandPending] = useState<GodModeCommandId>();
+  const autoStartedResident = useRef<GameId<'players'>>();
+
+  useEffect(() => {
+    const alreadyTalkingToSelected = !!player && !!humanConversation?.participants.has(player.id);
+    if (
+      !player
+      || player.human
+      || !humanPlayer
+      || alreadyTalkingToSelected
+      || autoStartedResident.current === player.id
+    ) return;
+    autoStartedResident.current = player.id;
+    void toastOnError(startConversation({ playerId: humanPlayer.id, invitee: player.id }))
+      .catch(() => {
+        autoStartedResident.current = undefined;
+      });
+  }, [humanConversation, humanPlayer, player, startConversation]);
 
   if (!playerId) {
     return (
@@ -149,6 +172,26 @@ export default function PlayerDetails({
       }),
     );
   };
+  const onObserverCommand = async (command: GodModeCommandId) => {
+    if (!player || player.human || commandPending) return;
+    setCommandPending(command);
+    try {
+      const inputId = await issueObserverCommand({
+        worldId,
+        engineId,
+        residentId: player.id,
+        command,
+      });
+      // The command is acknowledged as soon as it is durably queued. Its visible movement is
+      // streamed back by the game; waiting for the whole engine queue here can make a busy event
+      // look like the button froze even though the instruction was accepted.
+      void toastOnError(waitForInput(convex, inputId)).catch(() => undefined);
+    } catch {
+      // toastOnError already showed the failure.
+    } finally {
+      setCommandPending(undefined);
+    }
+  };
   // const pendingSuffix = (inputName: string) =>
   //   [...inflightInputs.values()].find((i) => i.name === inputName) ? ' opacity-50' : '';
 
@@ -175,6 +218,27 @@ export default function PlayerDetails({
           worldId={worldId}
           playerId={player.id}
         />
+      )}
+      {!isMe && (
+        <section className="god-mode-controls" aria-label="上帝模式居民指令">
+          <header>
+            <div><strong>上帝模式</strong><small>点击地图也可派遣这位居民</small></div>
+            <span>观察者介入会写入日志</span>
+          </header>
+          <div>
+            {godModeQuickCommands.map((command) => (
+              <button
+                key={command.id}
+                type="button"
+                disabled={!!commandPending}
+                onClick={() => void onObserverCommand(command.id)}
+              >
+                <span>{command.emoji}</span>
+                {commandPending === command.id ? '下达中…' : command.label}
+              </button>
+            ))}
+          </div>
+        </section>
       )}
       {canInvite && (
         <a

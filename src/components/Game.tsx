@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import PixiGame from './PixiGame.tsx';
 
 import { Stage } from '@pixi/react';
-import { ConvexProvider, useConvex, useQuery } from 'convex/react';
+import { ConvexProvider, useConvex, useMutation, useQuery } from 'convex/react';
 import PlayerDetails from './PlayerDetails.tsx';
 import { api } from '../../convex/_generated/api';
 import { useWorldHeartbeat } from '../hooks/useWorldHeartbeat.ts';
@@ -17,6 +17,9 @@ import { townLandmarks } from '../../data/worlds/lighthouse-town/map';
 import InstitutionDetails from './InstitutionDetails';
 import type { TownCameraMode } from './cameraFrame';
 import PixiRuntimeGate from './PixiRuntimeGate';
+import { waitForInput } from '../hooks/sendInput';
+import { toast } from 'react-toastify';
+import ObserverPanelBoundary from './ObserverPanelBoundary';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
@@ -33,6 +36,7 @@ export default function Game() {
   const [locationDirectoryOpen, setLocationDirectoryOpen] = useState(false);
   const [observerOpen, setObserverOpen] = useState(() => window.innerWidth >= 960);
   const [cameraMode, setCameraMode] = useState<TownCameraMode>('town');
+  const [observerRetry, setObserverRetry] = useState(0);
   const [gameWrapper, setGameWrapper] = useState<HTMLDivElement | null>(null);
   const [{ width, height }, setGameSize] = useState({ width: 0, height: 0 });
 
@@ -55,6 +59,29 @@ export default function Game() {
   const engineId = worldStatus?.engineId;
 
   const game = useServerGame(worldId);
+  const joinObserver = useMutation(api.world.joinWorld);
+  const observerJoinPending = useRef(false);
+
+  useEffect(() => {
+    if (
+      !worldId
+      || !game
+      || worldStatus?.status !== 'running'
+      || [...game.world.players.values()].some((player) => !!player.human)
+      || observerJoinPending.current
+    ) return;
+    observerJoinPending.current = true;
+    void (async () => {
+      try {
+        const inputId = await joinObserver({ worldId });
+        await waitForInput(convex, inputId);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        observerJoinPending.current = false;
+      }
+    })();
+  }, [convex, game, joinObserver, worldId, worldStatus?.status]);
 
   // Send a periodic heartbeat to our world to keep it alive.
   useWorldHeartbeat();
@@ -82,8 +109,8 @@ export default function Game() {
         <img src="/ai-town/assets/worlds/lighthouse-town/playable-map-v1.webp" alt="" />
         <div>
           <span>灯</span>
-          <h1>正在重连灯塔镇</h1>
-          <p>居民、记忆与小镇记录都安全保存在本地。</p>
+          <h1>正在载入灯塔镇</h1>
+          <p>正在连接本地居民与记录，通常只需几秒。</p>
         </div>
       </div>
     );
@@ -209,13 +236,6 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
           <button className="observer-drawer-close" onClick={() => setObserverOpen(false)}>
             × 收起观察台
           </button>
-          {sidebarTab === 'institution' && selectedLandmark && (
-            <InstitutionDetails
-              worldId={worldId}
-              landmark={selectedLandmark}
-              onClose={closeInstitutionDetails}
-            />
-          )}
           {sidebarTab !== 'institution' && <div className="observer-tabs" role="tablist">
             <button
               className={sidebarTab === 'broadcast' ? 'is-active' : ''}
@@ -232,25 +252,36 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
               {t('event.resident')}
             </button>
           </div>}
-          {sidebarTab === 'broadcast' ? (
-            <EventBroadcast
-              worldId={worldId}
-                  onSelectResident={(residentId) => {
-                    setSelectedElement({ kind: 'player', id: residentId });
-                    setSelectedLandmark(undefined);
-                    setSidebarTab('resident');
-                  }}
-                />
-          ) : sidebarTab === 'resident' ? (
-            <PlayerDetails
-              worldId={worldId}
-              engineId={engineId}
-              game={game}
-              playerId={selectedElement?.id}
-              setSelectedElement={setSelectedElement}
-              scrollViewRef={scrollViewRef}
-            />
-          ) : null}
+          <ObserverPanelBoundary
+            key={`${sidebarTab}:${observerRetry}`}
+            onRetry={() => setObserverRetry((value) => value + 1)}
+          >
+            {sidebarTab === 'institution' && selectedLandmark ? (
+              <InstitutionDetails
+                worldId={worldId}
+                landmark={selectedLandmark}
+                onClose={closeInstitutionDetails}
+              />
+            ) : sidebarTab === 'broadcast' ? (
+              <EventBroadcast
+                worldId={worldId}
+                onSelectResident={(residentId) => {
+                  setSelectedElement({ kind: 'player', id: residentId });
+                  setSelectedLandmark(undefined);
+                  setSidebarTab('resident');
+                }}
+              />
+            ) : sidebarTab === 'resident' ? (
+              <PlayerDetails
+                worldId={worldId}
+                engineId={engineId}
+                game={game}
+                playerId={selectedElement?.id}
+                setSelectedElement={setSelectedElement}
+                scrollViewRef={scrollViewRef}
+              />
+            ) : null}
+          </ObserverPanelBoundary>
         </aside>
       </div>
     </>

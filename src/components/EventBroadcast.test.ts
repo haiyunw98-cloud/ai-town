@@ -1198,6 +1198,14 @@ describe('event broadcast view model', () => {
     expect(source).toContain('const dailyMessages = messages.map((message) => ({');
   });
 
+  test('does not display the invisible god-mode observer as a town resident', () => {
+    const source = readFileSync(new URL('./EventBroadcast.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('!resident.observerControlled');
+    expect(source).toContain('visibleResidentActivity.length');
+    expect(source).toContain('visibleResidentActivity.map');
+  });
+
   test('includes bounded, chronological Shanghai-day economy and relationship rows in the observer snapshot', () => {
     const source = readFileSync(new URL('../../convex/events.ts', import.meta.url), 'utf8');
     const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');

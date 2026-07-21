@@ -61,7 +61,7 @@ export default function Home() {
           <div className="flex gap-4 flex-grow pointer-events-none">
             <FreezeButton />
             <MusicButton />
-            <Button href="https://github.com/a16z-infra/ai-town" imgUrl={starImg}>
+            <Button href="https://github.com/haiyunw98-cloud/ai-town" imgUrl={starImg}>
               {t('app.github')}
             </Button>
             <InteractButton />

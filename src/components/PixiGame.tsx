@@ -5,9 +5,8 @@ import { PixiStaticMap } from './PixiStaticMap.tsx';
 import PixiViewport from './PixiViewport.tsx';
 import { Viewport } from 'pixi-viewport';
 import type { Id } from '../../convex/_generated/dataModel';
-import { useQuery } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api.js';
-import { useSendInput } from '../hooks/sendInput.ts';
 import { toastOnError } from '../toasts.ts';
 import { DebugPath } from './DebugPath.tsx';
 import { PositionIndicator } from './PositionIndicator.tsx';
@@ -43,7 +42,7 @@ export const PixiGame = (props: {
     (p) => p.human === humanTokenIdentifier,
   )?.id;
 
-  const moveTo = useSendInput(props.engineId, 'moveTo');
+  const issueObserverCommand = useMutation(api.world.issueObserverCommand);
 
   // Interaction for clicking on the world to navigate.
   const dragStart = useRef<{ screenX: number; screenY: number } | null>(null);
@@ -68,9 +67,6 @@ export const PixiGame = (props: {
         return;
       }
     }
-    if (!humanPlayerId) {
-      return;
-    }
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
@@ -86,11 +82,24 @@ export const PixiGame = (props: {
       x: Math.floor(gameSpaceTiles.x),
       y: Math.floor(gameSpaceTiles.y),
     };
-    console.log(`Moving to ${JSON.stringify(roundedTiles)}`);
-    await toastOnError(moveTo({ playerId: humanPlayerId, destination: roundedTiles }));
+    const selectedResident = props.selectedPlayerId
+      ? props.game.world.players.get(props.selectedPlayerId)
+      : undefined;
+    if (!selectedResident || selectedResident.human) return;
+    console.log(`Observer directs ${selectedResident.id} to ${JSON.stringify(roundedTiles)}`);
+    await toastOnError((async () => {
+      const inputId = await issueObserverCommand({
+        worldId: props.worldId,
+        engineId: props.engineId,
+        residentId: selectedResident.id,
+        command: 'custom',
+        customDestination: roundedTiles,
+      });
+      return inputId;
+    })());
   };
   const { width, height, tileDim } = props.game.worldMap;
-  const players = [...props.game.world.players.values()];
+  const players = [...props.game.world.players.values()].filter((player) => !player.human);
   const selectedPosition = props.selectedPlayerId
     ? props.game.world.players.get(props.selectedPlayerId)?.position
     : undefined;

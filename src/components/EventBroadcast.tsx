@@ -53,6 +53,9 @@ export default function EventBroadcast({
   }
   const view = buildBroadcastView(snapshot, locale, now);
   const story = buildTownStory(snapshot.conversations);
+  const visibleResidentActivity = snapshot.residentActivity.filter(
+    (resident) => !resident.observerControlled,
+  );
   const exportFacts = () => {
     exportFactualReport({ snapshot, locale, exportNow: Date.now() });
   };
@@ -127,11 +130,11 @@ export default function EventBroadcast({
 
       <div className="resident-activity">
         <div className="event-section-title">
-          <h3>{snapshot.residentActivity.length} 人此刻</h3>
+          <h3>{visibleResidentActivity.length} 人此刻</h3>
           <span>实时生活状态</span>
         </div>
         <div className="resident-activity-grid">
-          {snapshot.residentActivity.map((resident) => (
+          {visibleResidentActivity.map((resident) => (
             <button
               key={resident.residentId}
               onClick={() => onSelectResident?.(resident.residentId as GameId<'players'>)}

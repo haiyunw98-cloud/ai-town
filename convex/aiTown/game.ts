@@ -48,7 +48,9 @@ type GameStateDiff = Infer<typeof gameStateDiff>;
 
 export class Game extends AbstractGame {
   tickDuration = 16;
-  stepDuration = 1000;
+  // Preserve 60 FPS simulation ticks and client interpolation while halving
+  // large world-document rewrites in the persistent local database.
+  stepDuration = 2000;
   maxTicksPerStep = 600;
   maxInputsPerStep = 32;
 

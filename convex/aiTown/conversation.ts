@@ -12,7 +12,9 @@ import { stopPlayer, blocked, movePlayer } from './movement';
 import { ConversationMembership, serializedConversationMembership } from './conversationMembership';
 import { parseMap, serializeMap } from '../util/object';
 import {
+  canHumanReplaceConversation,
   canHumanPreemptConversation,
+  shouldEnterConversationImmediately,
   shouldAutoAcceptHumanInvite,
 } from './conversationPriority';
 
@@ -179,6 +181,18 @@ export class Conversation {
     member.status = { kind: 'walkingOver' };
   }
 
+  enterImmediately(game: Game, now: number) {
+    if (this.participants.size !== 2) {
+      throw new Error(`Conversation ${this.id} requires exactly two participants`);
+    }
+    for (const [participantId, member] of this.participants) {
+      const participant = game.world.players.get(participantId);
+      if (!participant) throw new Error(`Player ${participantId} is missing`);
+      stopPlayer(participant);
+      member.status = { kind: 'participating', started: now };
+    }
+  }
+
   rejectInvite(game: Game, now: number, player: Player) {
     const member = this.participants.get(player.id);
     if (!member) {
@@ -270,6 +284,19 @@ export const conversationInputs = {
       if (!invitee) {
         throw new Error(`Invalid player ID: ${inviteeId}`);
       }
+      const requesterConversation = [...game.world.conversations.values()].find((conversation) =>
+        conversation.participants.has(player.id),
+      );
+      if (requesterConversation?.participants.has(invitee.id)) {
+        return requesterConversation.id;
+      }
+      if (
+        requesterConversation
+        && canHumanReplaceConversation(!!player.human, false)
+      ) {
+        console.log(`Human ${player.id} is switching away from ${requesterConversation.id}`);
+        requesterConversation.stop(game, now);
+      }
       const inviteeConversation = [...game.world.conversations.values()].find((conversation) =>
         conversation.participants.has(invitee.id),
       );
@@ -294,6 +321,12 @@ export const conversationInputs = {
       if (shouldAutoAcceptHumanInvite(!!player.human, !!inviteeAgent)) {
         const conversation = game.world.conversations.get(conversationId);
         conversation?.acceptInvite(game, invitee);
+        if (
+          conversation
+          && shouldEnterConversationImmediately(!!player.human, !!inviteeAgent)
+        ) {
+          conversation.enterImmediately(game, now);
+        }
         if (inviteeAgent) {
           delete inviteeAgent.inProgressOperation;
           delete inviteeAgent.toRemember;

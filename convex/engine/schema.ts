@@ -52,5 +52,12 @@ export type Engine = Infer<typeof engine>;
 
 export const engineTables = {
   inputs: defineTable(input).index('byInputNumber', ['engineId', 'number']),
+  // Keep queue numbering separate from input result rows. Completed inputs are patched by the
+  // game loop, so deriving the next number from the last input made every producer conflict with
+  // result persistence on a busy, long-running town.
+  engineInputCounters: defineTable({
+    engineId: v.id('engines'),
+    nextNumber: v.number(),
+  }).index('engineId', ['engineId']),
   engines: defineTable(engine),
 };
