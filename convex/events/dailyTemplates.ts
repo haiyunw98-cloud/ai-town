@@ -45,7 +45,9 @@ const STAGE_IDS: DailyStageId[] = [
   'final',
   'awards',
 ];
-const STAGE_END_MINUTES = [10, 35, 60, 70, 90, 110, 120];
+// Boarding is visible but deliberately brief: the activity should get to a
+// playable map stage quickly instead of leaving everyone waiting at the dock.
+const STAGE_END_MINUTES = [3, 35, 60, 70, 90, 110, 120];
 const STAGE_ACTIVE_COUNTS = [9, 8, 6, 6, 4, 1, 1];
 const STAGE_CHOICES: DailyEventChoice[][] = [
   [

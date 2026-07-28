@@ -23,6 +23,7 @@ const EVENT_TRANSFER_DESTINATIONS = [
   ...Object.values(trialIslandCheckpoints),
 ];
 const EVENT_TRANSFER_DOCK_RADIUS = 4;
+const EVENT_TRANSFER_ISLAND_RADIUS = 3;
 
 export function prepareEventTransfer(
   game: Pick<import('./game').Game, 'worldMap'>,
@@ -40,7 +41,9 @@ export function prepareEventTransfer(
     throw new Error('Event transfer destination is outside map bounds.');
   }
   const isIslandCheckpoint = EVENT_TRANSFER_DESTINATIONS.some(
-    (entry) => entry.x === x && entry.y === y,
+    (entry) =>
+      Math.abs(entry.x - x) <= EVENT_TRANSFER_ISLAND_RADIUS
+      && Math.abs(entry.y - y) <= EVENT_TRANSFER_ISLAND_RADIUS,
   );
   const isMainTownDockBerth =
     Math.abs(x - eventCheckpoints.dock.x) <= EVENT_TRANSFER_DOCK_RADIUS

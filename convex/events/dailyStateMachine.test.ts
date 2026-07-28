@@ -109,6 +109,16 @@ describe('daily event state machine', () => {
     expect(finished.log.every((entry, index) => index === 0 || entry.createdAt > finished.log[index - 1].createdAt || entry.stageIndex === 6)).toBe(true);
   });
 
+  test('writes a factual roster-level result for every completed stage', () => {
+    const stageOne = advanceDailyEventToStage(createState(), 1, start + 1_000);
+    const entry = stageOne.log.at(-1)!;
+
+    expect(entry.text).toContain('按令前进赛道');
+    expect(entry.text).toContain('晋级');
+    expect(entry.text).toContain('转入观众席');
+    expect(residents9.some((resident) => entry.text.includes(resident.displayName))).toBe(true);
+  });
+
   test('returns the identical state object for duplicate or backward progression', () => {
     const state = createState();
     const once = advanceDailyEventToStage(state, 2, start + 2_000);

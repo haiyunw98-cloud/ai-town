@@ -146,10 +146,12 @@ export function buildDailyStageMovementCommands(
   const until = phaseEndsAt;
   const transfers: DailyMovementCommand[] = template.venue === 'trial-island'
     && stageIndex > 0 && includeIslandTransfer
-    ? participants.map((participant) => ({
+    ? participants.map((participant, index) => ({
         kind: 'transfer',
         residentId: participant.residentId,
-        destination: { ...trialIslandCheckpoints.arrival },
+        // A ferry transfer is instantaneous, so sharing one tile would visibly
+        // stack the entire roster before their follow-up movement executes.
+        destination: walkableDailyOffsets(trialIslandCheckpoints.arrival, participants.length)[index],
         description: '乘摆渡船抵达试炼岛活动场地',
         until,
       }))
@@ -212,6 +214,14 @@ export function dailyMovementBatchStatus(
   }
   if (outcomes.some((outcome) => outcome === 'failed')) return 'failed' as const;
   return 'completed' as const;
+}
+
+export function formatDailyMovementCompletion(
+  entries: readonly { displayName: string; description: string }[],
+) {
+  return `地图行动确认：${entries
+    .map((entry) => `${entry.displayName}${entry.description}`)
+    .join('；')}。`;
 }
 
 export function boundObserverRows<T>(rows: readonly T[], limit = OBSERVER_SNAPSHOT_LIMIT) {
@@ -1379,19 +1389,34 @@ async function reconcileEventMovementInputs(
   }
   let pending = false;
   let failed = false;
+  const participants = await ctx.db
+    .query('eventParticipants')
+    .withIndex('eventId', (q) => q.eq('eventId', eventId))
+    .take(10);
+  const names = new Map(participants.map((participant) => [participant.residentId, participant.displayName]));
   for (const [batchKey, batchOutcomes] of outcomes) {
     const status = dailyMovementBatchStatus(batchOutcomes);
     if (status === 'pending') pending = true;
     if (status === 'failed') failed = true;
     if (status === 'completed') {
       const first = rows.find((row) => row.batchKey === batchKey)!;
+      const batchRows = rows.filter((row) => row.batchKey === batchKey);
+      const visibleRows = batchRows.some((row) => row.commandKind === 'move')
+        ? batchRows.filter((row) => row.commandKind === 'move')
+        : batchRows;
+      const movements = visibleRows
+        .sort((left, right) => left.commandIndex - right.commandIndex)
+        .map((row) => ({
+          displayName: names.get(row.residentId) ?? row.residentId,
+          description: row.description,
+        }));
       await insertUniqueMovementLog(
         ctx,
         eventId,
         batchKey,
         first.stageIndex,
         'movement-marker',
-        '本阶段全部居民的地图移动已由引擎确认完成。',
+        formatDailyMovementCompletion(movements),
         now,
       );
     }

@@ -14,7 +14,7 @@ describe('daily event templates', () => {
   test('gives every template seven fixed stages spanning the full two-hour window', () => {
     for (const template of dailyEventTemplates) {
       expect(template.stages.map((stage) => stage.endsAtMinute)).toEqual([
-        10, 35, 60, 70, 90, 110, 120,
+        3, 35, 60, 70, 90, 110, 120,
       ]);
       expect(template.stages.map((stage) => stage.targetActive)).toEqual([
         9, 8, 6, 6, 4, 1, 1,

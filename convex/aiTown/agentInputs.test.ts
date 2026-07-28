@@ -186,7 +186,7 @@ describe('controlled daily event ferry transfer', () => {
   });
 
   test.each([
-    [{ x: 51, y: 15 }, 'not an allowlisted checkpoint'],
+    [{ x: 54, y: 14 }, 'outside the allowed arrival berth'],
     [{ x: 50.5, y: 15 }, 'not integral'],
     [{ x: Number.NaN, y: 15 }, 'not finite'],
     [{ x: 84, y: 15 }, 'out of bounds'],

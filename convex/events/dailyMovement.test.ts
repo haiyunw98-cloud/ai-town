@@ -39,6 +39,9 @@ const movement = eventsModule as unknown as {
   dailyMovementBatchStatus: (
     outcomes: readonly ('success' | 'pending' | 'failed')[],
   ) => 'pending' | 'failed' | 'completed';
+  formatDailyMovementCompletion: (
+    entries: readonly { displayName: string; description: string }[],
+  ) => string;
 };
 
 const participants: Participant[] = Array.from({ length: 9 }, (_, index) => ({
@@ -83,9 +86,12 @@ describe('daily event map movement planning', () => {
     const transfers = commands.filter((command) => command.kind === 'transfer');
     const moves = commands.filter((command) => command.kind === 'move');
     expect(transfers).toHaveLength(9);
+    expect(new Set(transfers.map((command) =>
+      `${command.destination.x}:${command.destination.y}`,
+    )).size).toBe(9);
     expect(transfers.every((command) =>
-      command.destination.x === trialIslandCheckpoints.arrival.x
-      && command.destination.y === trialIslandCheckpoints.arrival.y,
+      Math.abs(command.destination.x - trialIslandCheckpoints.arrival.x) <= 3
+      && Math.abs(command.destination.y - trialIslandCheckpoints.arrival.y) <= 3,
     )).toBe(true);
     expect(moves).toHaveLength(9);
     expect(commands.every((command) => command.until === phaseEndsAt)).toBe(true);
@@ -184,5 +190,12 @@ describe('daily event map movement planning', () => {
     expect(movement.dailyMovementBatchStatus(['success', 'pending'])).toBe('pending');
     expect(movement.dailyMovementBatchStatus(['success', 'failed'])).toBe('failed');
     expect(movement.dailyMovementBatchStatus([])).toBe('pending');
+  });
+
+  test('renders a readable per-resident movement record instead of a generic engine marker', () => {
+    expect(movement.formatDailyMovementCompletion([
+      { displayName: '林澜', description: '参加按令前进赛道' },
+      { displayName: '沈砚', description: '在试炼岛观众席观看活动并为同伴加油' },
+    ])).toBe('地图行动确认：林澜参加按令前进赛道；沈砚在试炼岛观众席观看活动并为同伴加油。');
   });
 });

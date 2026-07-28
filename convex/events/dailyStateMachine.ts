@@ -154,10 +154,19 @@ export function advanceDailyEventToStage(
       };
     });
 
+    const advancing = participants
+      .filter((participant) => participant.active)
+      .sort(compareParticipants)
+      .map((participant) => participant.displayName);
+    const observing = participants
+      .filter((participant) => !participant.active)
+      .sort((left, right) => left.displayName.localeCompare(right.displayName))
+      .map((participant) => participant.displayName);
+
     log.push({
       sequence: log.length,
       stageIndex,
-      text: `${stage.label}完成，退出者转入观众席。`,
+      text: formatStageResult(stage.label, advancing, observing),
       createdAt:
         previousCreatedAt + ((createdAt - previousCreatedAt) * offset) / stageCount,
     });
@@ -189,6 +198,18 @@ export function advanceDailyEventToStage(
     participants,
     log,
   };
+}
+
+function formatStageResult(
+  stageLabel: string,
+  advancing: readonly string[],
+  observing: readonly string[],
+) {
+  const advancement = `晋级：${advancing.join('、')}。`;
+  const spectator = observing.length > 0
+    ? `转入观众席：${observing.join('、')}。`
+    : '全员继续参赛。';
+  return `${stageLabel}完成。${advancement}${spectator}`;
 }
 
 function validateCreationInputs(

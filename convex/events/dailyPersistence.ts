@@ -184,14 +184,24 @@ export function buildDailyEventDraft(args: {
         resident.residentId === participant.residentId)!.identity,
       shells: 0,
     })),
-    logs: [{
-      eventKey: `daily:${args.dayKey}:announcement`,
-      sequence: 0,
-      stageIndex: 0,
-      kind: 'announcement',
-      text: args.theme.announcement,
-      createdAt: args.startedAt,
-    }],
+    logs: [
+      {
+        eventKey: `daily:${args.dayKey}:announcement`,
+        sequence: 0,
+        stageIndex: 0,
+        kind: 'announcement',
+        text: args.theme.announcement,
+        createdAt: args.startedAt,
+      },
+      {
+        eventKey: `daily:${args.dayKey}:briefing`,
+        sequence: 1,
+        stageIndex: 0,
+        kind: 'briefing',
+        text: formatOpeningBriefing(args.template, state.participants),
+        createdAt: args.startedAt,
+      },
+    ],
   };
 }
 
@@ -278,18 +288,38 @@ export function serializeDailyEventState(
     logs: state.log.map((entry, index) => ({
       eventKey: index === 0
         ? `daily:${state.dayKey}:announcement`
-        : completed && index === state.log.length - 1
-          ? `daily:${state.dayKey}:return`
-          : `daily:${state.dayKey}:stage:${entry.stageIndex}`,
+        : index === 1 && entry.stageIndex === 0
+          ? `daily:${state.dayKey}:briefing`
+          : completed && index === state.log.length - 1
+            ? `daily:${state.dayKey}:return`
+            : `daily:${state.dayKey}:stage:${entry.stageIndex}`,
       sequence: entry.sequence,
       stageIndex: entry.stageIndex,
-      kind: index === 0 ? 'announcement' : completed && index === state.log.length - 1
-        ? 'return'
-        : 'stage',
+      kind: index === 0 ? 'announcement' : index === 1 && entry.stageIndex === 0
+        ? 'briefing'
+        : completed && index === state.log.length - 1
+          ? 'return'
+          : 'stage',
       text: index === 0 ? previousEvent.announcement : entry.text,
       createdAt: entry.createdAt,
     })),
   };
+}
+
+function formatOpeningBriefing(
+  template: DailyEventTemplate,
+  participants: readonly { displayName: string; teamId: 'jade' | 'amber' }[],
+) {
+  const jade = participants
+    .filter((participant) => participant.teamId === 'jade')
+    .map((participant) => participant.displayName);
+  const amber = participants
+    .filter((participant) => participant.teamId === 'amber')
+    .map((participant) => participant.displayName);
+  return `活动说明：首关“${template.stages[0].label}”，随后依次完成${template.stages
+    .slice(1)
+    .map((stage) => `“${stage.label}”`)
+    .join('、')}。参赛名单：${participants.map((participant) => participant.displayName).join('、')}。青队：${jade.join('、')}；琥珀队：${amber.join('、')}。`;
 }
 
 function validateConfiguredResidents(residents: readonly DailyRuntimeResident[]) {

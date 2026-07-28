@@ -54,12 +54,18 @@ describe('daily event persistence contract', () => {
         shells: 0, active: true, role: 'competitor', reachedFinal: false,
       }),
     ]));
-    expect(draft.logs).toEqual([
+    expect(draft.logs).toEqual(expect.arrayContaining([
       expect.objectContaining({
         eventKey: `daily:${dayKey}:announcement`, sequence: 0, stageIndex: 0,
         text: theme.announcement,
       }),
-    ]);
+      expect.objectContaining({
+        eventKey: `daily:${dayKey}:briefing`, sequence: 1, stageIndex: 0,
+      }),
+    ]));
+    expect(draft.logs).toHaveLength(2);
+    expect(draft.logs[1].text).toContain('参赛名单：');
+    expect(draft.logs[1].text).toContain('林澜');
   });
 
   test('fails closed unless the runtime roster maps exactly once to all configured residents', () => {
@@ -100,7 +106,7 @@ describe('daily event persistence contract', () => {
     expect(persisted.participants.filter((entry) => entry.reachedFinal)).toHaveLength(4);
     expect(new Set(persisted.logs.map((entry) => entry.eventKey)).size)
       .toBe(persisted.logs.length);
-    expect(persisted.logs.map((entry) => entry.sequence)).toEqual([0, 1, 2, 3, 4]);
+    expect(persisted.logs.map((entry) => entry.sequence)).toEqual([0, 1, 2, 3, 4, 5]);
   });
 
   test('serializes stage six as one completed winner with endedAt and safe return audit', () => {
