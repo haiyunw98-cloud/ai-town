@@ -195,6 +195,9 @@ export const agentInputs = {
       until: v.number(),
     },
     handler: (game, now, args) => {
+      // Event phases are time-bounded. A delayed engine input must not pull a
+      // resident back to an old venue after the event has already advanced.
+      if (args.until < now) return null;
       const player = game.world.players.get(parseGameId('players', args.playerId));
       if (!player) return null;
       if (player.human) throw new Error('Event movement is restricted to AI residents.');

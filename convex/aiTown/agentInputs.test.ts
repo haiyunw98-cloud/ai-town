@@ -185,6 +185,21 @@ describe('controlled daily event ferry transfer', () => {
     expect(player.pathfinding).toEqual(expect.objectContaining({ destination: { x: 22, y: 15 } }));
   });
 
+  test('ignores an event movement command that arrives after its stage has ended', () => {
+    const { game, player, agent } = ferryGame();
+    const before = structuredClone(player);
+
+    expect(agentInputs.eventMove.handler(game as never, appliedAt, {
+      playerId: 'p:1' as never,
+      destination: { x: 22, y: 15 },
+      description: '已结束关卡的迟到移动',
+      until: appliedAt - 1,
+    })).toBeNull();
+
+    expect(player).toEqual(before);
+    expect(agent).toHaveProperty('inProgressOperation');
+  });
+
   test.each([
     [{ x: 54, y: 14 }, 'outside the allowed arrival berth'],
     [{ x: 50.5, y: 15 }, 'not integral'],
