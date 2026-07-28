@@ -456,6 +456,18 @@ body {
   transform: none;
 }
 
+/* Sidebar actions must establish their own block containing box. Without this,
+ * the inner Tailwind `h-full` percentage can resolve against the fixed-height
+ * observer panel and stretch a one-line conversation action to the viewport. */
+.observer-action-button {
+  display: block;
+  height: auto;
+}
+
+.observer-action-button > div {
+  height: auto;
+}
+
 p[contenteditable='true']:empty::before {
   content: attr(placeholder);
   color: #aaa;

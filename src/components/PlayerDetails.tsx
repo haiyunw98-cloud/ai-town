@@ -243,7 +243,7 @@ export default function PlayerDetails({
       {canInvite && (
         <a
           className={
-            'mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
+            'observer-action-button mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
             pendingSuffix('startConversation')
           }
           onClick={() => void onStartConversation()}
@@ -257,7 +257,7 @@ export default function PlayerDetails({
       )}
       {waitingForAccept && (
         <a
-          className="mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto"
+          className="observer-action-button mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto"
           onClick={() => void onCancelConversation()}
         >
           <div className="h-full bg-clay-700 text-center">
@@ -267,7 +267,7 @@ export default function PlayerDetails({
       )}
       {waitingForNearby && (
         <a
-          className="mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto"
+          className="observer-action-button mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto"
           onClick={() => void onCancelConversation()}
         >
           <div className="h-full bg-clay-700 text-center">
@@ -278,7 +278,7 @@ export default function PlayerDetails({
       {inConversationWithMe && (
         <a
           className={
-            'mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
+            'observer-action-button mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
             pendingSuffix('leaveConversation')
           }
           onClick={() => void onLeaveConversation()}
@@ -292,7 +292,7 @@ export default function PlayerDetails({
         <>
           <a
             className={
-              'mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
+              'observer-action-button mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
               pendingSuffix('acceptInvite')
             }
             onClick={() => void onAcceptInvite()}
@@ -303,7 +303,7 @@ export default function PlayerDetails({
           </a>
           <a
             className={
-              'mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
+              'observer-action-button mt-6 button text-white shadow-solid text-xl cursor-pointer pointer-events-auto' +
               pendingSuffix('rejectInvite')
             }
             onClick={() => void onRejectInvite()}

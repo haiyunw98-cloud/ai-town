@@ -19,6 +19,8 @@ import EventMapOverlay from './EventMapOverlay.tsx';
 import { buildEventOverlayState } from './eventMapOverlayModel.ts';
 import { cameraFrame, type TownCameraMode } from './cameraFrame.ts';
 import type { GameId } from '../../convex/aiTown/ids.ts';
+import { resolveMainTownObserverDestination } from './observerDestination.ts';
+import { toast } from 'react-toastify';
 
 export const PixiGame = (props: {
   worldId: Id<'worlds'>;
@@ -77,7 +79,6 @@ export const PixiGame = (props: {
       x: gameSpacePx.x / tileDim,
       y: gameSpacePx.y / tileDim,
     };
-    setLastDestination({ t: Date.now(), ...gameSpaceTiles });
     const roundedTiles = {
       x: Math.floor(gameSpaceTiles.x),
       y: Math.floor(gameSpaceTiles.y),
@@ -86,14 +87,20 @@ export const PixiGame = (props: {
       ? props.game.world.players.get(props.selectedPlayerId)
       : undefined;
     if (!selectedResident || selectedResident.human) return;
-    console.log(`Observer directs ${selectedResident.id} to ${JSON.stringify(roundedTiles)}`);
+    const destination = resolveMainTownObserverDestination(roundedTiles);
+    if (!destination) {
+      toast.info('试炼岛需要通过活动转场进入；请在主镇范围内点击派遣居民。');
+      return;
+    }
+    setLastDestination({ t: Date.now(), ...destination });
+    console.log(`Observer directs ${selectedResident.id} to ${JSON.stringify(destination)}`);
     await toastOnError((async () => {
       const inputId = await issueObserverCommand({
         worldId: props.worldId,
         engineId: props.engineId,
         residentId: selectedResident.id,
         command: 'custom',
-        customDestination: roundedTiles,
+        customDestination: destination,
       });
       return inputId;
     })());
