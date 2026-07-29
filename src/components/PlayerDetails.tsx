@@ -11,7 +11,7 @@ import type { ServerGame } from '../hooks/serverGame';
 import { useI18n } from '../i18n';
 import { conversationAction } from './conversationAccess';
 import ResidentDossier from './ResidentDossier';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { godModeQuickCommands, type GodModeCommandId } from './godMode';
 import { waitForInput } from '../hooks/sendInput';
 
@@ -61,23 +61,6 @@ export default function PlayerDetails({
   const leaveConversation = useSendInput(engineId, 'leaveConversation');
   const issueObserverCommand = useMutation(api.world.issueObserverCommand);
   const [commandPending, setCommandPending] = useState<GodModeCommandId>();
-  const autoStartedResident = useRef<GameId<'players'>>();
-
-  useEffect(() => {
-    const alreadyTalkingToSelected = !!player && !!humanConversation?.participants.has(player.id);
-    if (
-      !player
-      || player.human
-      || !humanPlayer
-      || alreadyTalkingToSelected
-      || autoStartedResident.current === player.id
-    ) return;
-    autoStartedResident.current = player.id;
-    void toastOnError(startConversation({ playerId: humanPlayer.id, invitee: player.id }))
-      .catch(() => {
-        autoStartedResident.current = undefined;
-      });
-  }, [humanConversation, humanPlayer, player, startConversation]);
 
   if (!playerId) {
     return (

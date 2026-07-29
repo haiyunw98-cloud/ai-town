@@ -9,4 +9,12 @@ describe('PlayerDetails action layout', () => {
     expect(styles).toMatch(/\.observer-action-button\s*\{[^}]*display:\s*block;[^}]*height:\s*auto;/s);
     expect(styles).toMatch(/\.observer-action-button\s*>\s*div\s*\{[^}]*height:\s*auto;/s);
   });
+
+  test('selecting a resident only observes them until the observer explicitly joins the conversation', () => {
+    const source = readFileSync(new URL('./PlayerDetails.tsx', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('autoStartedResident');
+    expect(source).not.toContain('void toastOnError(startConversation({ playerId: humanPlayer.id, invitee: player.id }))');
+    expect(source).toContain("onClick={() => void onStartConversation()}");
+  });
 });
