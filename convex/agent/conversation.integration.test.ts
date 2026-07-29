@@ -86,11 +86,14 @@ describe('daily-life prompt contract', () => {
     ['startConversationMessage', 'continueConversationMessage'],
     ['continueConversationMessage', 'leaveConversationMessage'],
     ['leaveConversationMessage', undefined],
-  ])('%s wires local preflight before its embedding call', (name, nextName) => {
+  ])('%s delegates optional memory retrieval to the local preflight helper', (name, nextName) => {
     const source = sourceFor(name, nextName);
-    const guardAt = source.indexOf('loadResidentMemoryContext');
-    const embeddingAt = source.indexOf('embeddingsCache.fetch');
+    const helperStart = conversationSource.indexOf('async function searchResidentMemoriesOrEmpty');
+    const helper = conversationSource.slice(helperStart);
+    const guardAt = helper.indexOf('assertLocalOllamaProvider');
+    const embeddingAt = helper.indexOf('embeddingsCache.fetch');
 
+    expect(source).toContain('searchResidentMemoriesOrEmpty');
     expect(guardAt).toBeGreaterThanOrEqual(0);
     expect(embeddingAt).toBeGreaterThan(guardAt);
   });
@@ -235,22 +238,28 @@ describe('daily-life prompt contract', () => {
     ['startConversationMessage', 'continueConversationMessage'],
     ['continueConversationMessage', 'leaveConversationMessage'],
     ['leaveConversationMessage', undefined],
-  ] as const)('%s filters searched memories before including them in its prompt', (name, next) => {
+  ] as const)('%s uses filtered optional memories before including them in its prompt', (name, next) => {
     const source = sourceFor(name, next);
-    const searchAt = source.indexOf('searchMemories');
-    const filterAt = source.indexOf('filterLegacyMemories');
+    const helperStart = conversationSource.indexOf('async function searchResidentMemoriesOrEmpty');
+    const helper = conversationSource.slice(helperStart);
+    const searchAt = helper.indexOf('searchMemories');
+    const filterAt = helper.indexOf('filterLegacyMemories');
     const promptAt = source.indexOf('relatedMemoriesPrompt');
+    expect(source).toContain('searchResidentMemoriesOrEmpty');
     expect(searchAt).toBeGreaterThanOrEqual(0);
-    expect(filterAt).toBeGreaterThan(searchAt);
-    expect(promptAt).toBeGreaterThan(filterAt);
+    expect(filterAt).toBeGreaterThanOrEqual(0);
+    expect(promptAt).toBeGreaterThanOrEqual(0);
   });
 
   test('filters legacy memories before selecting a prior-conversation memory', () => {
     const source = sourceFor('startConversationMessage', 'continueConversationMessage');
-    const filterAt = source.indexOf('filterLegacyMemories');
+    const helperStart = conversationSource.indexOf('async function searchResidentMemoriesOrEmpty');
+    const helper = conversationSource.slice(helperStart);
+    const filterAt = helper.indexOf('filterLegacyMemories');
     const selectionAt = source.indexOf('memoryWithOtherPlayer');
+    expect(source).toContain('searchResidentMemoriesOrEmpty');
     expect(filterAt).toBeGreaterThanOrEqual(0);
-    expect(selectionAt).toBeGreaterThan(filterAt);
+    expect(selectionAt).toBeGreaterThanOrEqual(0);
   });
 
   test('uses the exact executable 120-token conversation limit in every completion', () => {

@@ -200,19 +200,12 @@ export async function startConversationMessage(
     conversationId,
     now: Date.now(),
   });
-  const embedding = await loadResidentMemoryContext({
-    assertLocalProvider: assertLocalOllamaProvider,
-    fetchEmbedding: () =>
-      embeddingsCache.fetch(ctx, `${player.name} is talking to ${otherPlayer.name}`),
-  });
-
-  const searchedMemories = await memory.searchMemories(
+  const memories = await searchResidentMemoriesOrEmpty(
     ctx,
     player.id as GameId<'players'>,
-    embedding,
+    `${player.name} is talking to ${otherPlayer.name}`,
     Number(process.env.NUM_MEMORIES_TO_SEARCH) || NUM_MEMORIES_TO_SEARCH,
   );
-  const memories = filterLegacyMemories(searchedMemories);
 
   const memoryWithOtherPlayer = memories.find(
     (m) => m.data.type === 'conversation' && m.data.playerIds.includes(otherPlayerId),
@@ -255,6 +248,26 @@ function trimContentPrefx(content: string, prompt: string) {
   return content;
 }
 
+async function searchResidentMemoriesOrEmpty(
+  ctx: ActionCtx,
+  player: GameId<'players'>,
+  query: string,
+  limit: number,
+): Promise<memory.Memory[]> {
+  // Semantic memory is optional context. A rebuild or cache miss must not turn
+  // an otherwise healthy local model reply into the generic safety fallback.
+  assertLocalOllamaProvider();
+  try {
+    const embedding = await loadResidentMemoryContext({
+      assertLocalProvider: assertLocalOllamaProvider,
+      fetchEmbedding: () => embeddingsCache.fetch(ctx, query),
+    });
+    return filterLegacyMemories(await memory.searchMemories(ctx, player, embedding, limit));
+  } catch {
+    return [];
+  }
+}
+
 export async function continueConversationMessage(
   ctx: ActionCtx,
   worldId: Id<'worlds'>,
@@ -280,18 +293,9 @@ export async function continueConversationMessage(
     now,
   });
   const started = new Date(conversation.created);
-  const embedding = await loadResidentMemoryContext({
-    assertLocalProvider: assertLocalOllamaProvider,
-    fetchEmbedding: () =>
-      embeddingsCache.fetch(ctx, `What do you think about ${otherPlayer.name}?`),
-  });
-  const searchedMemories = await memory.searchMemories(
-    ctx,
-    player.id as GameId<'players'>,
-    embedding,
-    3,
+  const memories = await searchResidentMemoriesOrEmpty(
+    ctx, player.id as GameId<'players'>, `What do you think about ${otherPlayer.name}?`, 3,
   );
-  const memories = filterLegacyMemories(searchedMemories);
   const prevMessages = await ctx.runQuery(api.messages.listMessages, { worldId, conversationId });
   const prompt = [
     buildWorldPrompt(locale),
@@ -352,21 +356,12 @@ export async function leaveConversationMessage(
     conversationId,
     now: Date.now(),
   });
-  const embedding = await loadResidentMemoryContext({
-    assertLocalProvider: assertLocalOllamaProvider,
-    fetchEmbedding: () =>
-      embeddingsCache.fetch(
-        ctx,
-        `What should ${player.name} remember while leaving ${otherPlayer.name}?`,
-      ),
-  });
-  const searchedMemories = await memory.searchMemories(
+  const memories = await searchResidentMemoriesOrEmpty(
     ctx,
     player.id as GameId<'players'>,
-    embedding,
+    `What should ${player.name} remember while leaving ${otherPlayer.name}?`,
     3,
   );
-  const memories = filterLegacyMemories(searchedMemories);
   const prevMessages = await ctx.runQuery(api.messages.listMessages, { worldId, conversationId });
   const prompt = [
     buildWorldPrompt(locale),
@@ -426,6 +421,7 @@ function activeDailyActivityPrompt(
   return [
     `You are actively taking part in today's event: ${activity.eventName}; current stage: ${activity.stageLabel}.`,
     'If the observer asks about what you are doing, answer concretely about this stage, your action, progress, teammate, or immediate feeling. Do not repeat a generic old-life question or invent a past conversation.',
+    `你正在参加「${activity.eventName}」，当前项目是「${activity.stageLabel}」。本轮必须围绕正在做的动作、进度、队友或现场感受回答；不要改聊日常旧事，也不要反问“最近有什么新鲜事”。`,
   ];
 }
 
