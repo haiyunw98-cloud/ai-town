@@ -7,6 +7,7 @@ import {
 } from '../../convex/events';
 import {
   buildDailyReport,
+  buildDailyActivityDetail,
   buildBroadcastView,
   buildCompletedArchiveView,
   buildTownStory,
@@ -50,6 +51,32 @@ const running: BroadcastSnapshot = {
 };
 
 describe('event broadcast view model', () => {
+  test('describes an active trial-island activity with its current stage and full route', () => {
+    const detail = buildDailyActivityDetail({
+      id: 'event:island',
+      name: '极速共鸣·团队接力挑战',
+      status: 'running',
+      phase: 'round-one',
+      phaseEndsAt: 70_000,
+      prize: '参与 10 金贝；冠军再加 50 金贝',
+      dailyKey: '2026-07-29',
+      templateId: 'relay-build',
+      venueMode: 'trial-island',
+      stageIndex: 1,
+    });
+
+    expect(detail).toEqual(expect.objectContaining({
+      venue: '试炼岛',
+      currentStage: '赛道接力',
+      currentStageNumber: '第 2 / 7 关',
+      rule: expect.stringContaining('安全'),
+    }));
+    expect(detail?.stages.map((stage) => stage.label)).toEqual([
+      '码头集合登船', '赛道接力', '踏板运送', '庭院茶歇',
+      '团队组装', '彩旗冲刺', '颁奖返程',
+    ]);
+  });
+
   test('attributes observer intervention only to actual human player ids', async () => {
     const eventsModule = await import('../../convex/events') as Record<string, unknown>;
 
@@ -1204,6 +1231,15 @@ describe('event broadcast view model', () => {
     expect(source).toContain('!resident.observerControlled');
     expect(source).toContain('visibleResidentActivity.length');
     expect(source).toContain('visibleResidentActivity.map');
+  });
+
+  test('renders a disclosure with the live activity route and rules', () => {
+    const source = readFileSync(new URL('./EventBroadcast.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('buildDailyActivityDetail(snapshot.event)');
+    expect(source).toContain('活动详情 · 正在玩什么');
+    expect(source).toContain('活动规则');
+    expect(source).toContain('完整关卡');
   });
 
   test('includes bounded, chronological Shanghai-day economy and relationship rows in the observer snapshot', () => {

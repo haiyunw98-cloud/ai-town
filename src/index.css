@@ -1204,6 +1204,57 @@ p[contenteditable='true']:empty::before {
   line-height: 1.45;
 }
 
+.event-activity-detail {
+  overflow: hidden;
+  margin: 10px 0;
+  border: 1px solid rgba(239, 195, 97, 0.5);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(83, 45, 31, 0.82), rgba(9, 49, 53, 0.9));
+}
+
+.event-activity-detail > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.event-activity-detail > summary::-webkit-details-marker { display: none; }
+
+.event-activity-detail > summary > span { display: grid; gap: 2px; }
+.event-activity-detail > summary small { color: rgba(255, 232, 178, 0.68); font-size: 9px; }
+.event-activity-detail > summary strong { color: #ffe0a0; font-size: 13px; }
+.event-activity-detail > summary em { margin-left: auto; color: #f3cc79; font-size: 10px; font-style: normal; }
+
+.event-activity-detail-body {
+  padding: 0 12px 12px;
+  border-top: 1px solid rgba(244, 236, 216, 0.12);
+}
+
+.event-activity-now {
+  display: grid;
+  gap: 2px;
+  margin: 10px 0 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(2, 22, 25, 0.45);
+}
+
+.event-activity-now strong { color: #ffe0a0; font-size: 12px; }
+.event-activity-now span,
+.event-activity-detail-body > p { color: rgba(244, 236, 216, 0.74); font-size: 10px; line-height: 1.45; }
+.event-activity-detail-body > p { margin: 5px 0; }
+.event-activity-detail-body > p b { color: #ecc571; }
+
+.event-stage-route h3 { margin: 10px 0 4px; color: #f3cc79; font-size: 11px; }
+.event-stage-route ol { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.event-stage-route li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 5px 6px; border-radius: 6px; color: rgba(244, 236, 216, 0.72); font-size: 10px; }
+.event-stage-route li.is-current { color: #fff1c8; background: rgba(205, 123, 52, 0.26); }
+.event-stage-route li b { color: #f3cc79; text-align: center; }
+.event-stage-route li small { color: rgba(244, 236, 216, 0.5); font-size: 9px; }
+
 @media (max-width: 520px) {
   .event-history-card > summary em {
     overflow: hidden;

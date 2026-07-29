@@ -2,6 +2,7 @@ import type { Locale } from '../i18n';
 import { lighthouseCharacters } from '../../data/worlds/lighthouse-town/characters';
 import { residentLifeProfiles } from '../../data/worlds/lighthouse-town/lives';
 import { townLandmarks } from '../../data/worlds/lighthouse-town/map';
+import { dailyEventTemplates } from '../../convex/events/dailyTemplates';
 
 export type BroadcastSnapshot = {
   event: null | {
@@ -119,6 +120,52 @@ export type ResolvedSocialNarrative = {
   source: 'model' | 'fallback';
   narrative: string;
 };
+
+export type DailyActivityDetail = {
+  venue: string;
+  venueDescription: string;
+  currentStage: string;
+  currentStageNumber: string;
+  currentProps: string[];
+  rule: string;
+  stages: Array<{ label: string; props: string[]; current: boolean }>;
+};
+
+const activityPropNames: Record<string, string> = {
+  ferry: '摆渡船',
+  batons: '接力棒',
+  'color-tiles': '彩色踏板',
+  'tea-table': '茶歇桌',
+  'building-parts': '搭建材料',
+  'finish-flags': '冲刺彩旗',
+  podium: '领奖台',
+};
+
+export function buildDailyActivityDetail(
+  event: BroadcastSnapshot['event'],
+): DailyActivityDetail | null {
+  if (!event?.templateId || event.dailyKey === undefined) return null;
+  const template = dailyEventTemplates.find((entry) => entry.id === event.templateId);
+  if (!template) return null;
+  const stageIndex = Math.min(Math.max(event.stageIndex ?? 0, 0), template.stages.length - 1);
+  const stage = template.stages[stageIndex];
+  const island = template.venue === 'trial-island';
+  return {
+    venue: island ? '试炼岛' : '灯塔镇主镇',
+    venueDescription: island
+      ? '居民先在旧水码头集合，再由活动转场进入试炼岛；淘汰者会安全转至观众席。'
+      : '活动在主镇公共地点依次进行，居民会按关卡在书院、集市、茶庄、工坊或广场行动。',
+    currentStage: stage.label,
+    currentStageNumber: `第 ${stageIndex + 1} / ${template.stages.length} 关`,
+    currentProps: stage.props.map((prop) => activityPropNames[prop] ?? prop),
+    rule: `共 ${template.participantCount} 人参与，${template.teamCount} 队协作；所有淘汰均安全转入观众席，活动结束后返回正常生活。`,
+    stages: template.stages.map((entry, index) => ({
+      label: entry.label,
+      props: entry.props.map((prop) => activityPropNames[prop] ?? prop),
+      current: index === stageIndex,
+    })),
+  };
+}
 
 export async function resolveSocialNarrative(
   generate: () => Promise<unknown>,

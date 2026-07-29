@@ -7,6 +7,7 @@ import type { Locale } from '../i18n';
 import {
   buildBroadcastView,
   buildCompletedArchiveView,
+  buildDailyActivityDetail,
   buildTownStory,
   shanghaiDayKey,
   type BroadcastSnapshot,
@@ -52,6 +53,7 @@ export default function EventBroadcast({
     return <div className="event-empty">{t('event.loading')}</div>;
   }
   const view = buildBroadcastView(snapshot, locale, now);
+  const activityDetail = buildDailyActivityDetail(snapshot.event);
   const story = buildTownStory(snapshot.conversations);
   const visibleResidentActivity = snapshot.residentActivity.filter(
     (resident) => !resident.observerControlled,
@@ -114,6 +116,38 @@ export default function EventBroadcast({
             <div className="event-winner">{t('event.winner', { name: view.winnerName })}</div>
           )}
         </>
+      )}
+
+      {activityDetail && (
+        <details className="event-activity-detail" open>
+          <summary>
+            <span>
+              <small>活动详情 · 正在玩什么</small>
+              <strong>{snapshot.event?.name}</strong>
+            </span>
+            <em>{activityDetail.currentStageNumber}</em>
+          </summary>
+          <div className="event-activity-detail-body">
+            <div className="event-activity-now">
+              <strong>当前：{activityDetail.currentStage}</strong>
+              <span>{activityDetail.venue} · {activityDetail.currentProps.join('、')}</span>
+            </div>
+            <p><b>地点：</b>{activityDetail.venueDescription}</p>
+            <p><b>活动规则：</b>{activityDetail.rule}</p>
+            <div className="event-stage-route">
+              <h3>完整关卡</h3>
+              <ol>
+                {activityDetail.stages.map((stage, index) => (
+                  <li className={stage.current ? 'is-current' : ''} key={stage.label}>
+                    <b>{index + 1}</b>
+                    <span>{stage.label}</span>
+                    <small>{stage.props.join('、')}</small>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        </details>
       )}
 
       <div className="town-story">
