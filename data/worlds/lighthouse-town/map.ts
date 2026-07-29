@@ -166,12 +166,24 @@ objects[10][9] = 22;
 objects[31][22] = 22;
 objects[25][7] = 30;
 
-// A fully blocked inland river separates the original town from Trial Island.
-// Residents must use the controlled ferry transfer instead of pathfinding across it.
+// The inland river separates the original town from Trial Island.  The two
+// banks are linked only by the old water-route: it is walkable for the engine
+// so residents actually travel through the crossing, while the character
+// renderer shows the ferry beneath everyone who is taking that route.
 for (let x = TOWN_WIDTH; x <= 47; x += 1) {
   for (let y = 0; y < mapheight; y += 1) {
     ground[x][y] = (x + y) % 3 === 0 ? 3 : 2;
     objects[x][y] = 2;
+  }
+}
+
+// Boarding lane: the town road reaches the old dock, then the ferry crosses
+// the river at the same level as Trial Island's arrival pier.  Keep both rows
+// open so several residents can board without forming an impassable queue.
+for (let x = TOWN_WIDTH - 1; x <= 48; x += 1) {
+  for (const y of [14, 15]) {
+    ground[x][y] = 10;
+    objects[x][y] = -1;
   }
 }
 

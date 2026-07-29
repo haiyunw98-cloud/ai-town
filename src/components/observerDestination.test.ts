@@ -1,11 +1,11 @@
-import { resolveMainTownObserverDestination } from './observerDestination';
+import { resolveObserverDestination } from './observerDestination';
 
-describe('resolveMainTownObserverDestination', () => {
+describe('resolveObserverDestination', () => {
   test('accepts an integer tile in the main town', () => {
-    expect(resolveMainTownObserverDestination({ x: 39, y: 29 })).toEqual({ x: 39, y: 29 });
+    expect(resolveObserverDestination({ x: 39, y: 29 })).toEqual({ x: 39, y: 29 });
   });
 
-  test('rejects a trial-island tile before it is sent to the server', () => {
-    expect(resolveMainTownObserverDestination({ x: 48, y: 14 })).toBeUndefined();
+  test('allows a trial-island tile so a resident can take the ferry route', () => {
+    expect(resolveObserverDestination({ x: 48, y: 14 })).toEqual({ x: 48, y: 14 });
   });
 });

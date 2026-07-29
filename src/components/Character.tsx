@@ -42,6 +42,7 @@ export const Character = ({
   isMoving = false,
   isThinking = false,
   isSpeaking = false,
+  isOnFerry = false,
   emoji = '',
   isViewer = false,
   speed = 0.1,
@@ -62,6 +63,7 @@ export const Character = ({
   isThinking?: boolean;
   // Shows a speech bubble if true.
   isSpeaking?: boolean;
+  isOnFerry?: boolean;
   emoji?: string;
   // Highlights the player.
   isViewer?: boolean;
@@ -157,6 +159,22 @@ export const Character = ({
         <Text x={18} y={-10} scale={0.8} text={'💬'} anchor={{ x: 0.5, y: 0.5 }} />
       )}
       {isViewer && <ViewerIndicator />}
+      {isOnFerry && (
+        <Graphics
+          draw={(graphics) => {
+            graphics.clear();
+            graphics.beginFill(0x6e3d24, 0.98);
+            graphics.drawRoundedRect(-19, 8, 38, 11, 5);
+            graphics.endFill();
+            graphics.beginFill(0xe6b760, 0.95);
+            graphics.drawRect(-13, 5, 26, 4);
+            graphics.endFill();
+            graphics.lineStyle(2, 0x32180f, 0.9);
+            graphics.moveTo(-19, 15);
+            graphics.lineTo(19, 15);
+          }}
+        />
+      )}
       <AnimatedSprite
         ref={ref}
         isPlaying={isMoving}

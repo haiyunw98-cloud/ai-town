@@ -1,8 +1,8 @@
 import {
   eventCheckpoints,
   mapheight,
+  mapwidth,
   townLandmarkById,
-  TOWN_WIDTH,
 } from '../data/worlds/lighthouse-town/map';
 import {
   institutions,
@@ -29,8 +29,8 @@ export function resolveObserverCommand(
     if (!Number.isInteger(x) || !Number.isInteger(y)) {
       throw new Error('Custom observer destination must use integer coordinates.');
     }
-    if (x < 0 || y < 0 || x >= TOWN_WIDTH || y >= mapheight) {
-      throw new Error('Custom observer destination is outside main-town bounds.');
+    if (x < 0 || y < 0 || x >= mapwidth || y >= mapheight) {
+      throw new Error('Custom observer destination is outside map bounds.');
     }
     return {
       destination: { x, y },

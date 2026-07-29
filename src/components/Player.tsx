@@ -73,6 +73,11 @@ export const Player = ({
         ? '赶路中'
         : player.activity?.description ?? '生活中';
   const historicalFacing = { dx: historicalLocation.dx, dy: historicalLocation.dy };
+  const isFerryRide = Boolean(
+    player.activity?.until
+    && player.activity.until > (historicalTime ?? Date.now())
+    && player.activity.description.includes('乘坐内河渡船'),
+  );
   return (
     <>
       <Character
@@ -82,6 +87,7 @@ export const Player = ({
         isMoving={historicalLocation.speed > 0}
         isThinking={isThinking}
         isSpeaking={isSpeaking}
+        isOnFerry={isFerryRide}
         emoji={
           player.activity && player.activity.until > (historicalTime ?? Date.now())
             ? player.activity?.emoji

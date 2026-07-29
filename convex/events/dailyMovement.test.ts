@@ -92,22 +92,14 @@ describe('daily event map movement planning', () => {
     }
   });
 
-  test('transfers every island participant at first arrival, then separates competitors and spectators', () => {
+  test('sends every island participant over the visible ferry route, then separates competitors and spectators', () => {
     const commands = movement.buildDailyStageMovementCommands(
       dailyEventTemplates[0], 1, participants, now, phaseEndsAt, true,
     );
-    const transfers = commands.filter((command) => command.kind === 'transfer');
     const moves = commands.filter((command) => command.kind === 'move');
-    expect(transfers).toHaveLength(9);
-    expect(new Set(transfers.map((command) =>
-      `${command.destination.x}:${command.destination.y}`,
-    )).size).toBe(9);
-    expect(transfers.every((command) =>
-      Math.abs(command.destination.x - trialIslandCheckpoints.arrival.x) <= 3
-      && Math.abs(command.destination.y - trialIslandCheckpoints.arrival.y) <= 3,
-    )).toBe(true);
     expect(moves).toHaveLength(9);
     expect(commands.every((command) => command.until === phaseEndsAt)).toBe(true);
+    expect(commands.every((command) => command.description.includes('乘坐内河渡船'))).toBe(true);
     expect(new Set(moves.map((command) =>
       `${command.destination.x}:${command.destination.y}`,
     )).size).toBe(9);
@@ -130,7 +122,7 @@ describe('daily event map movement planning', () => {
     expect(commands.every((command) => command.until === elapsedPhaseEnd)).toBe(true);
   });
 
-  test('moves later island stages without another transfer and main-town stages never transfer', () => {
+  test('moves all later stages by pathfinding and never queues a coordinate transfer', () => {
     const island = movement.buildDailyStageMovementCommands(
       dailyEventTemplates[0], 4, participants, now, phaseEndsAt, false,
     );
@@ -181,13 +173,14 @@ describe('daily event map movement planning', () => {
     )).toThrow(/nine|9|roster/iu);
   });
 
-  test('returns island residents by controlled transfer and main-town residents by safe movement', () => {
+  test('returns island residents over the ferry lane and main-town residents by safe movement', () => {
     const island = movement.buildDailyReturnMovementCommands(
       'trial-island', participants, now,
     );
     expect(island).toHaveLength(9);
-    expect(island.every((command) => command.kind === 'transfer')).toBe(true);
-    expect(island.every((command) => command.until === now)).toBe(true);
+    expect(island.every((command) => command.kind === 'move')).toBe(true);
+    expect(island.every((command) => command.until === now + 15 * 60_000)).toBe(true);
+    expect(island.every((command) => command.description.includes('乘坐内河渡船'))).toBe(true);
     expect(new Set(island.map((command) =>
       `${command.destination.x}:${command.destination.y}`,
     )).size).toBe(9);
@@ -208,16 +201,16 @@ describe('daily event map movement planning', () => {
     for (const command of mainTown) expectWalkable(command.destination);
   });
 
-  test('builds stable, per-command idempotency keys for transfer and movement recovery', () => {
+  test('builds stable, per-command idempotency keys for ferry-route movement recovery', () => {
     const commands = movement.buildDailyStageMovementCommands(
       dailyEventTemplates[0], 1, participants, now, phaseEndsAt, true,
     );
     const batchKey = 'daily:2026-07-19:movement:stage:1';
     const keys = commands.map((command, index) =>
       movement.dailyMovementCommandKey(batchKey, index, command));
-    expect(new Set(keys).size).toBe(18);
-    expect(keys[0]).toBe(`${batchKey}:command:0:transfer:p:0`);
-    expect(keys[9]).toBe(`${batchKey}:command:9:move:p:0`);
+    expect(new Set(keys).size).toBe(9);
+    expect(keys[0]).toBe(`${batchKey}:command:0:move:p:0`);
+    expect(keys[8]).toBe(`${batchKey}:command:8:move:p:8`);
     expect(movement.dailyMovementCommandKey(batchKey, 0, commands[0])).toBe(keys[0]);
   });
 

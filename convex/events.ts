@@ -163,30 +163,20 @@ export function buildDailyStageMovementCommands(
     });
   }
   const until = phaseEndsAt;
-  const transfers: DailyMovementCommand[] = template.venue === 'trial-island'
-    && stageIndex > 0 && includeIslandTransfer
-    ? participants.map((participant, index) => ({
-        kind: 'transfer',
-        residentId: participant.residentId,
-        // A ferry transfer is instantaneous, so sharing one tile would visibly
-        // stack the entire roster before their follow-up movement executes.
-        destination: walkableDailyOffsets(trialIslandCheckpoints.arrival, participants.length)[index],
-        description: '乘摆渡船抵达试炼岛活动场地',
-        until,
-      }))
-    : [];
   const moves: DailyMovementCommand[] = participants.map((participant, index) => ({
     kind: 'move',
     residentId: participant.residentId,
     destination: destinationByIndex.get(index)!,
-    description: participant.active || stageIndex === 0
+    description: template.venue === 'trial-island' && stageIndex > 0 && includeIslandTransfer
+      ? `乘坐内河渡船前往试炼岛，准备参加${stage.label}`
+      : participant.active || stageIndex === 0
       ? `参加${stage.label}`
       : template.venue === 'trial-island'
         ? '在试炼岛观众席观看活动并为同伴加油'
         : '在灯塔广场观看活动并为同伴加油',
     until,
   }));
-  return [...transfers, ...moves];
+  return moves;
 }
 
 // A stage lasts much longer than one walk across its checkpoint. Rotate each
@@ -254,11 +244,14 @@ export function buildDailyReturnMovementCommands(
   if (venue === 'trial-island') {
     const destinations = walkableDailyOffsets(eventCheckpoints.dock, participants.length);
     return participants.map((participant, index) => ({
-      kind: 'transfer',
+      kind: 'move',
       residentId: participant.residentId,
       destination: destinations[index],
-      description: '乘摆渡船返回主镇，恢复普通生活',
-      until: now,
+      description: '乘坐内河渡船返回主镇，活动结束后恢复普通生活',
+      // This is a real route across the ferry lane, not a coordinate transfer.
+      // Leave enough time for the engine to complete the crossing even if a
+      // queue or an earlier conversation briefly delayed the departure.
+      until: now + 15 * 60_000,
     }));
   }
   if (venue !== 'main-town') throw new Error('Unknown daily event venue.');
@@ -1627,7 +1620,7 @@ async function queuePersistedDailyStageMovement(
     `daily:${event.dailyKey}:movement:stage:${event.stageIndex}`,
     event.stageIndex,
     commands,
-    'transfer',
+    'move',
     now,
   );
 }
@@ -1706,10 +1699,37 @@ async function queuePersistedDailyReturnMovement(
     `daily:${event.dailyKey}:movement:return`,
     event.stageIndex,
     commands,
-    'transfer',
+    'move',
     now,
   );
 }
+
+// Recovery for an already-completed event whose asynchronous return inputs
+// expired before the engine consumed them. It is safe to invoke repeatedly:
+// the movement batch owns its unique marker and will not duplicate transfers.
+export const repairLatestCompletedDailyReturn = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const defaults = await ctx.db
+      .query('worldStatus')
+      .withIndex('isDefault', (q) => q.eq('isDefault', true))
+      .take(2);
+    if (defaults.length !== 1) return { repaired: false as const, reason: 'world-not-ready' };
+    const event = await ctx.db
+      .query('townEvents')
+      .withIndex('worldId', (q) => q.eq('worldId', defaults[0].worldId))
+      .order('desc')
+      .first();
+    if (!event || event.status !== 'completed' || !event.dailyKey || event.venueMode !== 'trial-island') {
+      return { repaired: false as const, reason: 'no-completed-island-event' };
+    }
+    const persisted = await loadPersistedDailyDraft(ctx, event._id);
+    await queuePersistedDailyReturnMovement(
+      ctx, defaults[0].worldId, event._id, persisted.event, persisted.participants, Date.now(),
+    );
+    return { repaired: true as const, eventId: event._id };
+  },
+});
 
 async function recordDailyParticipation(
   ctx: MutationCtx,

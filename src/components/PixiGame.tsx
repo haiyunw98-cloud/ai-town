@@ -19,7 +19,7 @@ import EventMapOverlay from './EventMapOverlay.tsx';
 import { buildEventOverlayState } from './eventMapOverlayModel.ts';
 import { cameraFrame, type TownCameraMode } from './cameraFrame.ts';
 import type { GameId } from '../../convex/aiTown/ids.ts';
-import { resolveMainTownObserverDestination } from './observerDestination.ts';
+import { resolveObserverDestination } from './observerDestination.ts';
 import { toast } from 'react-toastify';
 
 export const PixiGame = (props: {
@@ -87,9 +87,9 @@ export const PixiGame = (props: {
       ? props.game.world.players.get(props.selectedPlayerId)
       : undefined;
     if (!selectedResident || selectedResident.human) return;
-    const destination = resolveMainTownObserverDestination(roundedTiles);
+    const destination = resolveObserverDestination(roundedTiles);
     if (!destination) {
-      toast.info('试炼岛需要通过活动转场进入；请在主镇范围内点击派遣居民。');
+      toast.info('请选择地图内的可到达地点；前往试炼岛会走内河渡船航线。');
       return;
     }
     setLastDestination({ t: Date.now(), ...destination });

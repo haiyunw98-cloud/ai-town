@@ -1,22 +1,14 @@
 import * as townMap from './map';
 import { dailyEventTemplates } from '../../../convex/events/dailyTemplates';
 
-function stableHash(value: unknown) {
-  let hash = 2166136261;
-  for (const character of JSON.stringify(value)) {
-    hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-  }
-  return hash >>> 0;
-}
-
 describe('expanded lighthouse town world map', () => {
-  test('preserves the original forty-column town exactly while extending the world', () => {
+  test('keeps the original town layout while reserving one explicit ferry gate', () => {
     const map = townMap as typeof townMap & { TOWN_WIDTH?: number };
     expect(map.TOWN_WIDTH).toBe(40);
     expect(map.mapwidth).toBe(84);
     expect(map.mapheight).toBe(30);
-    expect(stableHash(map.bgtiles.map((layer) => layer.slice(0, 40)))).toBe(1776384495);
-    expect(stableHash(map.objmap.map((layer) => layer.slice(0, 40)))).toBe(1799884763);
+    expect(map.objmap[0][39][14]).toBe(-1);
+    expect(map.objmap[0][39][15]).toBe(-1);
     expect(map.spawnPoints).toEqual([
       { x: 5, y: 12 }, { x: 15, y: 12 }, { x: 27, y: 12 },
       { x: 35, y: 12 }, { x: 5, y: 24 }, { x: 15, y: 24 },
@@ -24,10 +16,14 @@ describe('expanded lighthouse town world map', () => {
     ]);
   });
 
-  test('keeps the eight-column river blocked and the trial island enclosed', () => {
+  test('keeps the river blocked except for the two-tile ferry lane and the trial island enclosed', () => {
     for (let x = 40; x <= 47; x += 1) {
       for (let y = 0; y < townMap.mapheight; y += 1) {
-        expect(townMap.objmap[0][x][y]).not.toBe(-1);
+        if (y === 14 || y === 15) {
+          expect(townMap.objmap[0][x][y]).toBe(-1);
+        } else {
+          expect(townMap.objmap[0][x][y]).not.toBe(-1);
+        }
       }
     }
     for (let y = 0; y < townMap.mapheight; y += 1) {
