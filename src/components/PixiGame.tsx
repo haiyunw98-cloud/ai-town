@@ -16,6 +16,7 @@ import TownLandmarks from './TownLandmarks.tsx';
 import type { TownLandmark } from '../../data/worlds/lighthouse-town/map.ts';
 import { initialViewportScale } from './viewportMath.ts';
 import EventMapOverlay from './EventMapOverlay.tsx';
+import FerryOverlay from './FerryOverlay.tsx';
 import { buildEventOverlayState } from './eventMapOverlayModel.ts';
 import { cameraFrame, type TownCameraMode } from './cameraFrame.ts';
 import type { GameId } from '../../convex/aiTown/ids.ts';
@@ -173,6 +174,7 @@ export const PixiGame = (props: {
         onpointerdown={onMapPointerDown}
       />
       <TownLandmarks tileDim={tileDim} onSelect={props.onSelectLandmark} />
+      <FerryOverlay tileDim={tileDim} />
       <EventMapOverlay tileDim={tileDim} snapshot={eventMapSnapshot} />
       {players.map(
         (p) =>
