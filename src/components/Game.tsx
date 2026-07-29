@@ -87,7 +87,23 @@ export default function Game() {
   useWorldHeartbeat();
 
   const worldState = useQuery(api.world.worldState, worldId ? { worldId } : 'skip');
+  const eventMapSnapshot = useQuery(
+    api.events.eventMapSnapshot,
+    worldId ? { worldId } : 'skip',
+  );
   const { historicalTime, timeManager } = useHistoricalTime(worldState?.engine);
+
+  // An island camera is useful while an activity is actually running, but it
+  // must never strand the observer on the trial-island artwork after residents
+  // have been returned to their ordinary town lives.
+  useEffect(() => {
+    if (
+      eventMapSnapshot?.event.status !== 'running'
+      && (cameraMode === 'island' || cameraMode === 'event')
+    ) {
+      setCameraMode('town');
+    }
+  }, [cameraMode, eventMapSnapshot?.event.status]);
 
   const scrollViewRef = useRef<HTMLDivElement>(null);
 
