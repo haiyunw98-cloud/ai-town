@@ -38,15 +38,26 @@ export async function localChatCompletionOnce(
 
   const startedAt = Date.now();
   const fetchOnce = dependencies.fetch ?? globalThis.fetch;
-  const result = await fetchOnce(config.url + '/v1/chat/completions', {
+  // Ollama's OpenAI-compatible endpoint exposes model reasoning separately, but it
+  // cannot disable it. Short resident replies then use their entire token budget
+  // on hidden reasoning and arrive as an empty `content`, which triggers the
+  // deterministic fallback. The native endpoint supports `think: false`.
+  const result = await fetchOnce(config.url + '/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      ...body,
+      model: body.model,
+      messages: body.messages,
       stream: false,
-      ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+      think: false,
+      options: {
+        ...(body.max_tokens !== undefined ? { num_predict: body.max_tokens } : {}),
+        ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
+        ...(body.top_p !== undefined ? { top_p: body.top_p } : {}),
+        ...(body.stop ? { stop: typeof body.stop === 'string' ? [body.stop] : body.stop } : {}),
+      },
     }),
   });
   if (!result.ok) {
@@ -59,7 +70,7 @@ export async function localChatCompletionOnce(
   } catch {
     throw new Error('local-chat-completion-invalid-response');
   }
-  const content = json.choices?.[0]?.message?.content;
+  const content = (json as unknown as { message?: { content?: unknown } }).message?.content;
   if (typeof content !== 'string') {
     throw new Error('local-chat-completion-invalid-response');
   }

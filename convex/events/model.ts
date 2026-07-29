@@ -1,8 +1,8 @@
 import {
-  chatCompletion,
   CreateChatCompletionRequest,
   getLLMConfig,
   LLMConfig,
+  localChatCompletionOnce,
 } from '../util/llm';
 import { segmentConversationGraphemes } from '../util/conversationText';
 import type { DailyStageId } from './dailyTemplates';
@@ -19,6 +19,7 @@ export type EventDecisionInput = {
   displayName: string;
   identity: string;
   phase: EventPhase | DailyStageId;
+  stageLabel: string;
   choices: readonly EventChoice[];
 };
 
@@ -40,7 +41,11 @@ type EventModelDependencies = {
 
 const defaultDependencies: EventModelDependencies = {
   getConfig: getLLMConfig,
-  complete: (body) => chatCompletion({ ...body, stream: false }),
+  complete: (body) => localChatCompletionOnce({
+    ...body,
+    model: body.model ?? getLLMConfig().chatModel,
+    stream: false,
+  }),
 };
 
 const unsafePublicQuote = /死亡|死伤|伤亡|受伤|处决|流血|血腥|杀死|毙命/u;
@@ -49,8 +54,8 @@ export function buildEventDecisionPrompt(input: EventDecisionInput) {
   const choices = input.choices.map((choice) => `- ${choice.id}: ${choice.label}`).join('\n');
   return [
     `你是${input.displayName}。${input.identity}`,
-    `当前赛事阶段是 ${input.phase}。`,
-    '请依据你的性格选择一个行动，并给出一句可以公开播出的赛场发言。',
+    `当前赛事阶段是 ${input.phase}，现场项目是「${input.stageLabel}」。`,
+    '请依据你的性格选择一个行动，并给出一句可以公开播出的赛场发言。发言只谈这个项目的眼前动作、进度、队友或感受，不复述平日旧话题，不谈高塔、航行、河道、水位、机关或异变。',
     choices,
     '只选择上面列出的 choiceId。publicQuote 不超过 60 个中文字符，不暴露隐藏推理。',
     '只输出 JSON：{"choiceId":"...","publicQuote":"..."}',

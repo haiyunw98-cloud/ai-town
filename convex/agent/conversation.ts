@@ -8,6 +8,7 @@ import * as embeddingsCache from './embeddingsCache';
 import { GameId, conversationId, playerId } from '../aiTown/ids';
 import { NUM_MEMORIES_TO_SEARCH } from '../constants';
 import { buildWorldPrompt } from '../../data/worlds/lighthouse-town/manifest';
+import { dailyEventTemplates } from '../events/dailyTemplates';
 import { getWorldLocale } from '../util/worldLocale';
 import {
   conversationPromptRules,
@@ -183,7 +184,7 @@ export async function startConversationMessage(
   playerId: GameId<'players'>,
   otherPlayerId: GameId<'players'>,
 ): Promise<string> {
-  const { player, otherPlayer, agent, otherAgent, lastConversation } = await ctx.runQuery(
+  const { player, otherPlayer, agent, otherAgent, lastConversation, dailyActivity } = await ctx.runQuery(
     selfInternal.queryPromptData,
     {
       worldId,
@@ -221,6 +222,7 @@ export async function startConversationMessage(
     `You are ${player.name}, and you just started a conversation with ${otherPlayer.name}.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
+  prompt.push(...activeDailyActivityPrompt(dailyActivity));
   prompt.push(...conversationPromptRules(topic, locale));
   prompt.push(...previousConversationPrompt(otherPlayer, lastConversation));
   prompt.push(...relatedMemoriesPrompt(memories));
@@ -260,7 +262,7 @@ export async function continueConversationMessage(
   playerId: GameId<'players'>,
   otherPlayerId: GameId<'players'>,
 ): Promise<string> {
-  const { player, otherPlayer, conversation, agent, otherAgent } = await ctx.runQuery(
+  const { player, otherPlayer, conversation, agent, otherAgent, dailyActivity } = await ctx.runQuery(
     selfInternal.queryPromptData,
     {
       worldId,
@@ -297,6 +299,7 @@ export async function continueConversationMessage(
     `The conversation started at ${started.toLocaleString()}. It's now ${now.toLocaleString()}.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
+  prompt.push(...activeDailyActivityPrompt(dailyActivity));
   prompt.push(...conversationPromptRules(topic, locale));
   prompt.push(...relatedMemoriesPrompt(memories));
   prompt.push(
@@ -333,7 +336,7 @@ export async function leaveConversationMessage(
   playerId: GameId<'players'>,
   otherPlayerId: GameId<'players'>,
 ): Promise<string> {
-  const { player, otherPlayer, conversation, agent, otherAgent } = await ctx.runQuery(
+  const { player, otherPlayer, conversation, agent, otherAgent, dailyActivity } = await ctx.runQuery(
     selfInternal.queryPromptData,
     {
       worldId,
@@ -371,6 +374,7 @@ export async function leaveConversationMessage(
     `You've decided to leave the question and would like to politely tell them you're leaving the conversation.`,
   ];
   prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
+  prompt.push(...activeDailyActivityPrompt(dailyActivity));
   prompt.push(...conversationPromptRules(topic, locale));
   prompt.push(...relatedMemoriesPrompt(memories));
   prompt.push(
@@ -413,6 +417,16 @@ function agentPrompts(
     prompt.push(`About ${otherPlayer.name}: ${otherAgent.identity}`);
   }
   return prompt;
+}
+
+function activeDailyActivityPrompt(
+  activity: { eventName: string; stageLabel: string } | null,
+): string[] {
+  if (!activity) return [];
+  return [
+    `You are actively taking part in today's event: ${activity.eventName}; current stage: ${activity.stageLabel}.`,
+    'If the observer asks about what you are doing, answer concretely about this stage, your action, progress, teammate, or immediate feeling. Do not repeat a generic old-life question or invent a past conversation.',
+  ];
 }
 
 function previousConversationPrompt(
@@ -555,6 +569,31 @@ export const queryPromptData = internalQuery({
         ...otherAgent,
       };
     })();
+    const runningEvents = await ctx.db
+      .query('townEvents')
+      .withIndex('worldId', (q) => q.eq('worldId', args.worldId))
+      .filter((q) => q.eq(q.field('status'), 'running'))
+      .take(2);
+    if (runningEvents.length > 1) {
+      throw new Error(`Multiple running events found for ${args.worldId}`);
+    }
+    const runningEvent = runningEvents[0];
+    let dailyActivity: { eventName: string; stageLabel: string } | null = null;
+    if (runningEvent?.dailyKey && runningEvent.templateId && runningEvent.stageIndex !== undefined) {
+      const participant = await ctx.db
+        .query('eventParticipants')
+        .withIndex('eventId', (q) => q.eq('eventId', runningEvent._id))
+        .filter((q) => q.eq(q.field('residentId'), args.playerId))
+        .unique();
+      const template = dailyEventTemplates.find((entry) => entry.id === runningEvent.templateId);
+      const stage = template?.stages[runningEvent.stageIndex];
+      if (participant && stage) {
+        dailyActivity = {
+          eventName: runningEvent.eventName ?? '今日活动',
+          stageLabel: stage.label,
+        };
+      }
+    }
     return {
       player: { name: playerDescription.name, ...player },
       otherPlayer: { name: otherPlayerDescription.name, ...otherPlayer },
@@ -562,6 +601,7 @@ export const queryPromptData = internalQuery({
       agent: { identity: agentDescription.identity, plan: agentDescription.plan, ...agent },
       otherAgent: describedOtherAgent,
       lastConversation,
+      dailyActivity,
     };
   },
 });

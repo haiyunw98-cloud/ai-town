@@ -15,6 +15,13 @@ const EVENT_START_MINUTE = 12 * 60;
 const EVENT_END_MINUTE = 14 * 60;
 const STAGE_START_MINUTES = [0, 10, 35, 60, 70, 90, 110] as const;
 
+export function dailyStageStartMinute(stageIndex: number) {
+  if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= STAGE_START_MINUTES.length) {
+    throw new RangeError('Daily event stage index is outside the schedule.');
+  }
+  return STAGE_START_MINUTES[stageIndex];
+}
+
 function assertValidTimestamp(timestamp: number): void {
   const shiftedTimestamp = timestamp + SHANGHAI_OFFSET_MILLISECONDS;
   if (!Number.isFinite(timestamp) || Number.isNaN(new Date(shiftedTimestamp).getTime())) {

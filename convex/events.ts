@@ -29,6 +29,7 @@ import {
 } from './events/dailyTemplates';
 import {
   dailyEventAction,
+  dailyStageStartMinute,
   selectDailyTemplate,
   shanghaiEventDayKey,
 } from './events/dailySchedule';
@@ -70,6 +71,24 @@ export type DailyMovementCommand = Readonly<{
   description: string;
   until: number;
 }>;
+
+const DAILY_ACTIVITY_PULSE_MS = 45_000;
+
+export function dailyActivityPulseIndex(
+  template: DailyEventTemplate,
+  stageIndex: number,
+  startedAt: number,
+  now: number,
+) {
+  if (!Number.isFinite(startedAt) || !Number.isFinite(now)) {
+    throw new Error('Daily activity pulse requires finite timestamps.');
+  }
+  if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= template.stages.length) {
+    throw new Error('Daily activity pulse stage is outside the template.');
+  }
+  const stageStartedAt = startedAt + dailyStageStartMinute(stageIndex) * 60_000;
+  return Math.max(0, Math.floor((now - stageStartedAt) / DAILY_ACTIVITY_PULSE_MS));
+}
 
 function validateDailyMovementRoster(participants: readonly DailyMovementParticipant[]) {
   if (
@@ -168,6 +187,61 @@ export function buildDailyStageMovementCommands(
     until,
   }));
   return [...transfers, ...moves];
+}
+
+// A stage lasts much longer than one walk across its checkpoint. Rotate each
+// resident through the available walkable tiles so a relay, build, or service
+// round remains visibly active instead of freezing after its arrival.
+export function buildDailyStagePulseMovementCommands(
+  template: DailyEventTemplate,
+  stageIndex: number,
+  participants: readonly DailyMovementParticipant[],
+  pulseIndex: number,
+  phaseEndsAt: number,
+): DailyMovementCommand[] {
+  validateDailyMovementRoster(participants);
+  if (!Number.isInteger(pulseIndex) || pulseIndex < 1) {
+    throw new Error('Daily activity pulse index must be a positive integer.');
+  }
+  if (!Number.isFinite(phaseEndsAt)) throw new Error('Daily activity pulse expiry is invalid.');
+  if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= template.stages.length) {
+    throw new Error('Daily activity pulse stage is outside the template.');
+  }
+  const stage = template.stages[stageIndex];
+  const activeCheckpoint = dailyEventCheckpointById(
+    stageIndex === 0 ? 'old-dock' : stage.checkpoints[0],
+  );
+  const spectatorCheckpoint = template.venue === 'trial-island'
+    ? trialIslandCheckpoints.spectatorStand
+    : eventCheckpoints.plaza;
+  const destinationByIndex = new Map<number, { x: number; y: number }>();
+  for (const base of [activeCheckpoint, spectatorCheckpoint]) {
+    const indexes = participants.flatMap((participant, index) => {
+      const usesBase = stageIndex === 0 || participant.active
+        ? base === activeCheckpoint
+        : base === spectatorCheckpoint;
+      return usesBase ? [index] : [];
+    });
+    if (indexes.length === 0) continue;
+    const offsets = walkableDailyOffsets(base, indexes.length);
+    indexes.forEach((participantIndex, offsetIndex) => {
+      destinationByIndex.set(
+        participantIndex,
+        offsets[(offsetIndex + pulseIndex) % offsets.length],
+      );
+    });
+  }
+  return participants.map((participant, index) => ({
+    kind: 'move',
+    residentId: participant.residentId,
+    destination: destinationByIndex.get(index)!,
+    description: participant.active || stageIndex === 0
+      ? `在${stage.label}第 ${pulseIndex} 圈继续行动`
+      : template.venue === 'trial-island'
+        ? `在试炼岛观众席第 ${pulseIndex} 轮为同伴加油`
+        : `在灯塔广场第 ${pulseIndex} 轮观看活动`,
+    until: phaseEndsAt,
+  }));
 }
 
 export function buildDailyReturnMovementCommands(
@@ -327,6 +401,14 @@ export async function advanceDailyTownActivity(ctx: MutationCtx, now: number) {
     ) {
       const persisted = await loadPersistedDailyDraft(ctx, existing._id);
       await queuePersistedDailyStageMovement(
+        ctx,
+        worldStatus.worldId,
+        existing._id,
+        persisted.event,
+        persisted.participants,
+        now,
+      );
+      await queuePersistedDailyActivityPulse(
         ctx,
         worldStatus.worldId,
         existing._id,
@@ -1550,6 +1632,61 @@ async function queuePersistedDailyStageMovement(
   );
 }
 
+async function queuePersistedDailyActivityPulse(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  eventId: Id<'townEvents'>,
+  event: PersistedDailyEvent,
+  participants: readonly PersistedDailyParticipant[],
+  now: number,
+) {
+  if (event.status !== 'running' || !event.dailyKey || event.startedAt === undefined) return;
+  if (now >= event.phaseEndsAt) return;
+  const template = dailyEventTemplates.find((entry) => entry.id === event.templateId);
+  if (!template) throw new Error('Unknown daily activity pulse template.');
+  const pulseIndex = dailyActivityPulseIndex(template, event.stageIndex, event.startedAt, now);
+  // The first placement for a stage is already handled by the durable movement
+  // batch. Subsequent pulses deliberately use a lightweight unique marker: the
+  // normal movement-audit table remains bounded while the map visibly evolves.
+  if (pulseIndex < 1) return;
+  const markerKey = `daily:${event.dailyKey}:pulse:${event.stageIndex}:${pulseIndex}`;
+  const markers = await ctx.db
+    .query('eventLog')
+    .withIndex('eventKey', (q) => q.eq('eventId', eventId).eq('eventKey', markerKey))
+    .take(2);
+  if (markers.length > 1) throw new Error(`Daily activity pulse collision: ${markerKey}`);
+  if (markers[0]) return;
+
+  const commands = buildDailyStagePulseMovementCommands(
+    template, event.stageIndex, participants, pulseIndex, event.phaseEndsAt,
+  );
+  for (const command of commands) {
+    try {
+      await enqueueDailyMovementCommand(ctx, worldId, command);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '未知输入错误';
+      await insertUniqueMovementLog(
+        ctx,
+        eventId,
+        `${markerKey}:failure:${command.residentId}`,
+        event.stageIndex,
+        'movement-pulse-failure',
+        `${command.residentId} 本轮地图行动未下发：${detail.replace(/\s+/gu, ' ').slice(0, 80)}`,
+        now,
+      );
+    }
+  }
+  await insertUniqueMovementLog(
+    ctx,
+    eventId,
+    markerKey,
+    event.stageIndex,
+    'movement-pulse',
+    `现场动态：${template.stages[event.stageIndex].label}第 ${pulseIndex} 轮行动开始，参赛居民继续移动。`,
+    now,
+  );
+}
+
 async function queuePersistedDailyReturnMovement(
   ctx: MutationCtx,
   worldId: Id<'worlds'>,
@@ -1705,6 +1842,7 @@ export function selectDailyDecisionCandidate(
     identity: candidate.identity,
     stageIndex: event.stageIndex,
     phase: stage.id,
+    stageLabel: stage.label,
     choices: stage.choices,
   };
 }
@@ -1719,6 +1857,7 @@ export const generateNextDecision = internalAction({
       displayName: candidate.displayName,
       identity: candidate.identity,
       phase: candidate.phase,
+      stageLabel: candidate.stageLabel,
       choices: candidate.choices,
     });
     await ctx.runMutation(internal.events.saveDecision, {

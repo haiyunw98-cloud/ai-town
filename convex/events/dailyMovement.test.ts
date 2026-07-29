@@ -31,6 +31,13 @@ const movement = eventsModule as unknown as {
     participants: readonly Participant[],
     now: number,
   ) => Command[];
+  buildDailyStagePulseMovementCommands: (
+    template: DailyEventTemplate,
+    stageIndex: number,
+    participants: readonly Participant[],
+    pulseIndex: number,
+    phaseEndsAt: number,
+  ) => Command[];
   dailyMovementCommandKey: (
     markerKey: string,
     commandIndex: number,
@@ -42,6 +49,12 @@ const movement = eventsModule as unknown as {
   formatDailyMovementCompletion: (
     entries: readonly { displayName: string; description: string }[],
   ) => string;
+  dailyActivityPulseIndex: (
+    template: DailyEventTemplate,
+    stageIndex: number,
+    startedAt: number,
+    now: number,
+  ) => number;
 };
 
 const participants: Participant[] = Array.from({ length: 9 }, (_, index) => ({
@@ -129,6 +142,29 @@ describe('daily event map movement planning', () => {
     expect(mainTown).toHaveLength(9);
     expect(mainTown.every((command) => command.kind === 'move')).toBe(true);
     for (const command of [...island, ...mainTown]) expectWalkable(command.destination);
+  });
+
+  test('rotates live island competitors through a later track position instead of leaving them stationary', () => {
+    const firstPulse = movement.buildDailyStagePulseMovementCommands(
+      dailyEventTemplates[0], 1, participants, 1, phaseEndsAt,
+    );
+    const secondPulse = movement.buildDailyStagePulseMovementCommands(
+      dailyEventTemplates[0], 1, participants, 2, phaseEndsAt,
+    );
+
+    expect(firstPulse).toHaveLength(9);
+    expect(firstPulse.every((command) => command.kind === 'move')).toBe(true);
+    expect(firstPulse.every((command) => command.description.includes('第 1'))).toBe(true);
+    expect(firstPulse.map((command) => command.destination)).not.toEqual(
+      secondPulse.map((command) => command.destination),
+    );
+    for (const command of [...firstPulse, ...secondPulse]) expectWalkable(command.destination);
+  });
+
+  test('starts a fresh visible movement pulse every 45 seconds within an active stage', () => {
+    expect(movement.dailyActivityPulseIndex(dailyEventTemplates[0], 1, now, now + 10 * 60_000)).toBe(0);
+    expect(movement.dailyActivityPulseIndex(dailyEventTemplates[0], 1, now, now + 10 * 60_000 + 45_000)).toBe(1);
+    expect(movement.dailyActivityPulseIndex(dailyEventTemplates[0], 1, now, now + 10 * 60_000 + 90_000)).toBe(2);
   });
 
   test('fails closed before planning any movement for an unknown checkpoint or malformed roster', () => {

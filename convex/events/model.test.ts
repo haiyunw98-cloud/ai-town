@@ -10,6 +10,7 @@ const input = {
   displayName: '顾潮',
   identity: '顾潮是灯塔镇热情好胜的灯笼匠，但不会为了赢让别人受伤。',
   phase: 'secretTrade' as const,
+  stageLabel: '踏板运送',
   choices: [
     { id: 'share', label: '把线索分享给临时盟友' },
     { id: 'keep', label: '保留线索独自行动' },
@@ -32,6 +33,7 @@ describe('event model boundary', () => {
     const prompt = buildEventDecisionPrompt(input);
     expect(prompt).toContain(input.identity);
     expect(prompt).toContain('secretTrade');
+    expect(prompt).toContain('踏板运送');
     expect(prompt).toContain('share');
     expect(prompt).toContain('keep');
     expect(prompt).toContain('60 个中文字符');
@@ -150,6 +152,7 @@ describe('event model boundary', () => {
         displayName: '林澜',
         identity: '谨慎而愿意合作。',
         phase: stage.id,
+        stageLabel: stage.label,
         choices: stage.choices,
       },
       {
@@ -181,6 +184,7 @@ describe('event model boundary', () => {
           displayName: '林澜',
           identity: '谨慎而愿意合作。',
           phase: stage.id,
+          stageLabel: stage.label,
           choices: stage.choices,
         },
         {

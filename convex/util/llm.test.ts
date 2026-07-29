@@ -20,6 +20,8 @@ const llm = llmModule as unknown as {
       model: string;
       messages: Array<{ role: 'user'; content: string }>;
       stream?: false;
+      max_tokens?: number;
+      temperature?: number;
     },
     dependencies?: {
       getConfig: () => LLMConfig;
@@ -52,7 +54,7 @@ describe('localChatCompletionOnce', () => {
     if (!llm.localChatCompletionOnce) return;
     const fetchMock = jest.fn<typeof fetch>(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ choices: [{ message: { content: '日常回复' } }] }), {
+        new Response(JSON.stringify({ message: { content: '日常回复' } }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -69,9 +71,41 @@ describe('localChatCompletionOnce', () => {
 
     expect(result).toEqual({ content: '日常回复', retries: 0, ms: expect.any(Number) });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('http://ollama.test/v1/chat/completions');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://ollama.test/api/chat');
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
       model: 'gemma4:12b',
+      stream: false,
+      think: false,
+      options: {},
+    });
+  });
+
+  test('uses Ollama native no-thinking mode so short resident replies are not consumed by reasoning', async () => {
+    expect(llm.localChatCompletionOnce).toBeDefined();
+    if (!llm.localChatCompletionOnce) return;
+    const fetchMock = jest.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ message: { content: '我来接力，好让药材早点送到街坊手里。' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    const result = await llm.localChatCompletionOnce(
+      {
+        model: 'gemma4:12b',
+        messages: [{ role: 'user', content: '为什么参加接力？' }],
+        max_tokens: 120,
+        temperature: 0.7,
+      },
+      { getConfig: () => ollamaConfig, fetch: fetchMock },
+    );
+
+    expect(result.content).toContain('接力');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      think: false,
+      options: { num_predict: 120, temperature: 0.7 },
     });
   });
 
@@ -137,7 +171,7 @@ describe('localChatCompletionOnce', () => {
 
   test.each([
     ['invalid JSON', 'INVALID_JSON_SENTINEL', 'text/plain'],
-    ['missing content', JSON.stringify({ choices: [{ message: {} }] }), 'application/json'],
+    ['missing content', JSON.stringify({ message: {} }), 'application/json'],
   ])('returns a content-free error for %s', async (_name, responseBody, contentType) => {
     expect(llm.localChatCompletionOnce).toBeDefined();
     if (!llm.localChatCompletionOnce) return;
