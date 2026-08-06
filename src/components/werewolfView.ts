@@ -1,4 +1,8 @@
-import type { WerewolfAction, WerewolfRole } from '../../convex/werewolf/types';
+import type {
+  WerewolfAction,
+  WerewolfRecordedAction,
+  WerewolfRole,
+} from '../../convex/werewolf/types';
 
 export type WerewolfPanelState = {
   sessionId: string;
@@ -26,6 +30,12 @@ export type WerewolfPanelState = {
   witchNoticeTargetId?: string;
   antidoteAvailable?: boolean;
   poisonAvailable?: boolean;
+  observerSecrets?: {
+    roles: Record<string, WerewolfRole>;
+    nightActions: WerewolfRecordedAction[];
+    pendingNightTargetId?: string;
+    pendingPoisonTargetId?: string;
+  };
 };
 
 export type WerewolfPanelView = {
