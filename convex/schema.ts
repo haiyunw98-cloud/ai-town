@@ -374,6 +374,61 @@ export default defineSchema({
     .index('pairTime', ['worldId', 'residentA', 'residentB', 'createdAt'])
     .index('worldDay', ['worldId', 'dayKey', 'createdAt']),
 
+  werewolfSessions: defineTable({
+    worldId: v.id('worlds'),
+    status: v.union(v.literal('running'), v.literal('paused'), v.literal('completed')),
+    phase: v.string(),
+    round: v.number(),
+    seed: v.number(),
+    mode: v.union(v.literal('observe'), v.literal('play')),
+    humanPlayerId: v.optional(playerId),
+    spectatorPlayerId: v.optional(playerId),
+    stateJson: v.string(),
+    nextActionAt: v.number(),
+    winner: v.optional(v.string()),
+    startedAt: v.number(),
+    endedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index('worldId', ['worldId'])
+    .index('sessionKey', ['worldId', 'status']),
+
+  werewolfSeats: defineTable({
+    sessionId: v.id('werewolfSessions'),
+    playerId,
+    displayName: v.string(),
+    identity: v.string(),
+    kind: v.union(v.literal('ai'), v.literal('human')),
+    seatNumber: v.number(),
+    role: v.string(),
+    alive: v.boolean(),
+    stateJson: v.string(),
+  })
+    .index('sessionId', ['sessionId'])
+    .index('player', ['sessionId', 'playerId']),
+
+  werewolfActions: defineTable({
+    sessionId: v.id('werewolfSessions'),
+    actionKey: v.string(),
+    sequence: v.number(),
+    round: v.number(),
+    phase: v.string(),
+    actorId: v.optional(playerId),
+    kind: v.string(),
+    visibility: v.union(v.literal('public'), v.literal('private'), v.literal('system')),
+    targetId: v.optional(playerId),
+    text: v.optional(v.string()),
+    source: v.union(
+      v.literal('human'),
+      v.literal('model'),
+      v.literal('fallback'),
+      v.literal('system'),
+    ),
+    createdAt: v.number(),
+  })
+    .index('sessionId', ['sessionId'])
+    .index('actionKey', ['sessionId', 'actionKey']),
+
   ...agentTables,
   ...aiTownTables,
   ...engineTables,

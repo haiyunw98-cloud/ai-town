@@ -75,6 +75,12 @@ import type * as util_sleep from "../util/sleep.js";
 import type * as util_types from "../util/types.js";
 import type * as util_worldLocale from "../util/worldLocale.js";
 import type * as util_xxhash from "../util/xxhash.js";
+import type * as werewolf from "../werewolf.js";
+import type * as werewolf_model from "../werewolf/model.js";
+import type * as werewolf_privacy from "../werewolf/privacy.js";
+import type * as werewolf_setup from "../werewolf/setup.js";
+import type * as werewolf_stateMachine from "../werewolf/stateMachine.js";
+import type * as werewolf_types from "../werewolf/types.js";
 import type * as world from "../world.js";
 
 import type {
@@ -151,6 +157,12 @@ declare const fullApi: ApiFromModules<{
   "util/types": typeof util_types;
   "util/worldLocale": typeof util_worldLocale;
   "util/xxhash": typeof util_xxhash;
+  werewolf: typeof werewolf;
+  "werewolf/model": typeof werewolf_model;
+  "werewolf/privacy": typeof werewolf_privacy;
+  "werewolf/setup": typeof werewolf_setup;
+  "werewolf/stateMachine": typeof werewolf_stateMachine;
+  "werewolf/types": typeof werewolf_types;
   world: typeof world;
 }>;
 
