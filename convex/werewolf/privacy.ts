@@ -14,6 +14,7 @@ type PublicSeat = Pick<
 > & { role?: WerewolfRole };
 
 export type WerewolfViewerState = {
+  viewerId?: string;
   phase: WerewolfPhase;
   round: number;
   seats: PublicSeat[];
@@ -83,6 +84,7 @@ export function buildWerewolfViewerState(
     ...(completed ? { role: seat.role } : {}),
   }));
   const result: WerewolfViewerState = {
+    viewerId,
     phase: state.phase,
     round: state.round,
     seats,
