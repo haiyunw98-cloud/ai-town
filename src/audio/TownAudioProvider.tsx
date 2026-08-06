@@ -11,17 +11,24 @@ import {
   AudioChannel,
   AudioScene,
   AudioSettings,
+  AudioTrack,
+  audioTrackForScene,
   loadAudioSettings,
   normalizeAudioSettings,
   saveAudioSettings,
 } from './townAudio';
 
 type TownEffect = 'bell' | 'reveal' | 'gavel' | 'target' | 'vote';
+export type PlaybackStatus = 'locked' | 'loading' | 'playing' | 'muted' | 'paused' | 'error';
 type TownAudioApi = {
   settings: AudioSettings;
   unlocked: boolean;
   scene: AudioScene;
+  currentTrack: AudioTrack;
+  playbackStatus: PlaybackStatus;
+  playbackError?: string;
   unlock: () => Promise<void>;
+  retry: () => Promise<void>;
   setScene: (scene: AudioScene) => void;
   setChannel: (channel: AudioChannel, value: number) => void;
   toggleMute: () => void;
@@ -30,8 +37,8 @@ type TownAudioApi = {
 };
 
 const TownAudioContext = createContext<TownAudioApi | null>(null);
-
 type BrowserWindow = Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+type AudioDeck = { audio: HTMLAudioElement; trackId: string };
 
 function makeNoise(ctx: AudioContext, volume: number, frequency: number) {
   const frames = Math.max(1, Math.floor(ctx.sampleRate * 2));
@@ -51,49 +58,140 @@ function makeNoise(ctx: AudioContext, volume: number, frequency: number) {
   return source;
 }
 
-function makeDrone(ctx: AudioContext, frequency: number, volume: number) {
-  const oscillator = ctx.createOscillator();
-  const gain = ctx.createGain();
-  oscillator.type = 'sine';
-  oscillator.frequency.value = frequency;
-  gain.gain.value = volume;
-  oscillator.connect(gain).connect(ctx.destination);
-  oscillator.start();
-  return oscillator;
+function playbackMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === 'NotAllowedError') {
+    return '浏览器拦截了自动播放，请再次点击“开启声音”。';
+  }
+  return error instanceof Error ? `声音播放失败：${error.message}` : '声音播放失败，请重试。';
 }
 
 export function TownAudioProvider({ children }: PropsWithChildren) {
   const [settings, setSettings] = useState(loadAudioSettings);
   const [unlocked, setUnlocked] = useState(false);
-  const [scene, setScene] = useState<AudioScene>('town');
+  const [scene, setSceneState] = useState<AudioScene>('town');
   const [speechDucked, setSpeechDucked] = useState(false);
   const [visibilityDucked, setVisibilityDucked] = useState(() => document.hidden);
+  const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>('locked');
+  const [playbackError, setPlaybackError] = useState<string>();
   const contextRef = useRef<AudioContext>();
-  const townTrackRef = useRef<HTMLAudioElement>();
+  const decksRef = useRef<AudioDeck[]>([]);
+  const activeDeckRef = useRef(0);
+  const fadeTokenRef = useRef(0);
   const sceneSourcesRef = useRef<AudioScheduledSourceNode[]>([]);
+  const sceneRef = useRef(scene);
+  const settingsRef = useRef(settings);
+  const duckedRef = useRef(false);
 
-  const ensureContext = useCallback(() => {
+  const ensureAudio = useCallback(() => {
     if (!contextRef.current) {
       const AudioContextClass = window.AudioContext ?? (window as BrowserWindow).webkitAudioContext;
       if (!AudioContextClass) throw new Error('当前浏览器不支持声音播放。');
       contextRef.current = new AudioContextClass();
     }
-    if (!townTrackRef.current) {
-      const track = new Audio('/ai-town/assets/background.mp3');
-      track.loop = true;
-      track.preload = 'auto';
-      townTrackRef.current = track;
+    if (decksRef.current.length === 0) {
+      decksRef.current = [0, 1].map(() => {
+        const audio = new Audio();
+        audio.loop = true;
+        audio.preload = 'auto';
+        return { audio, trackId: '' };
+      });
     }
     return contextRef.current;
   }, []);
 
-  const unlock = useCallback(async () => {
-    const ctx = ensureContext();
-    await ctx.resume();
-    setUnlocked(true);
-  }, [ensureContext]);
+  const stopMusic = useCallback((status: PlaybackStatus) => {
+    fadeTokenRef.current += 1;
+    decksRef.current.forEach(({ audio }) => audio.pause());
+    setPlaybackStatus(status);
+  }, []);
 
-  useEffect(() => saveAudioSettings(settings), [settings]);
+  const playSceneTrack = useCallback(async (
+    nextScene: AudioScene,
+    nextSettings: AudioSettings,
+    immediate = false,
+  ) => {
+    ensureAudio();
+    if (!nextSettings.enabled) {
+      stopMusic('muted');
+      return;
+    }
+    const track = audioTrackForScene(nextScene);
+    if (!track.src) {
+      stopMusic('paused');
+      return;
+    }
+    const duck = duckedRef.current ? 0.28 : 1;
+    const targetVolume = nextSettings.music * 0.62 * duck;
+    const active = decksRef.current[activeDeckRef.current];
+    setPlaybackStatus('loading');
+    setPlaybackError(undefined);
+    try {
+      if (active.trackId === track.id) {
+        active.audio.volume = targetVolume;
+        await active.audio.play();
+        setPlaybackStatus('playing');
+        return;
+      }
+      const nextIndex = activeDeckRef.current === 0 ? 1 : 0;
+      const next = decksRef.current[nextIndex];
+      next.trackId = track.id;
+      next.audio.src = track.src;
+      next.audio.currentTime = 0;
+      next.audio.volume = immediate ? targetVolume : 0;
+      await next.audio.play();
+      const token = ++fadeTokenRef.current;
+      activeDeckRef.current = nextIndex;
+      if (immediate || active.trackId === '') {
+        active.audio.pause();
+        setPlaybackStatus('playing');
+        return;
+      }
+      const started = performance.now();
+      const oldVolume = active.audio.volume;
+      const fade = (now: number) => {
+        if (fadeTokenRef.current !== token) return;
+        const progress = Math.min(1, (now - started) / 900);
+        next.audio.volume = targetVolume * progress;
+        active.audio.volume = oldVolume * (1 - progress);
+        if (progress < 1) requestAnimationFrame(fade);
+        else {
+          active.audio.pause();
+          setPlaybackStatus('playing');
+        }
+      };
+      requestAnimationFrame(fade);
+    } catch (error) {
+      setPlaybackError(playbackMessage(error));
+      setPlaybackStatus('error');
+      throw error;
+    }
+  }, [ensureAudio, stopMusic]);
+
+  const unlock = useCallback(async () => {
+    const ctx = ensureAudio();
+    const enabledSettings = { ...settingsRef.current, enabled: true };
+    settingsRef.current = enabledSettings;
+    setSettings(enabledSettings);
+    await ctx.resume();
+    // This play call deliberately stays inside the user's click stack.
+    await playSceneTrack(sceneRef.current, enabledSettings, true);
+    setUnlocked(true);
+  }, [ensureAudio, playSceneTrack]);
+
+  const retry = useCallback(async () => {
+    setPlaybackError(undefined);
+    await unlock();
+  }, [unlock]);
+
+  const setScene = useCallback((nextScene: AudioScene) => {
+    sceneRef.current = nextScene;
+    setSceneState(nextScene);
+  }, []);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+    saveAudioSettings(settings);
+  }, [settings]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -115,38 +213,28 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
+    duckedRef.current = speechDucked || visibilityDucked;
+    if (!unlocked) return;
+    if (visibilityDucked) {
+      stopMusic('paused');
+      return;
+    }
+    void playSceneTrack(scene, settings).catch(() => undefined);
+  }, [playSceneTrack, scene, settings, speechDucked, stopMusic, unlocked, visibilityDucked]);
+
+  useEffect(() => {
     for (const source of sceneSourcesRef.current) {
       try { source.stop(); } catch { /* already stopped */ }
       source.disconnect();
     }
     sceneSourcesRef.current = [];
-    const townTrack = townTrackRef.current;
-    if (!unlocked || !settings.enabled || scene === 'paused') {
-      townTrack?.pause();
-      return;
-    }
-    const ctx = ensureContext();
-    const duck = speechDucked || visibilityDucked ? 0.28 : 1;
-    if (scene === 'town') {
-      if (townTrack) {
-        townTrack.volume = settings.music * 0.55 * duck;
-        void townTrack.play().catch(() => undefined);
-      }
-      if (settings.ambience > 0) {
-        sceneSourcesRef.current.push(makeNoise(ctx, settings.ambience * 0.012 * duck, 850));
-      }
-      return;
-    }
-    townTrack?.pause();
-    if (settings.music > 0) {
-      const pitch = scene === 'werewolf-night' ? 73 : scene === 'werewolf-vote' ? 92 : 110;
-      sceneSourcesRef.current.push(makeDrone(ctx, pitch, settings.music * 0.035 * duck));
-      sceneSourcesRef.current.push(makeDrone(ctx, pitch * 1.5, settings.music * 0.016 * duck));
-    }
+    if (!unlocked || !settings.enabled || scene === 'paused' || visibilityDucked) return;
+    const ctx = ensureAudio();
+    const duck = speechDucked ? 0.28 : 1;
     if (settings.ambience > 0) {
       sceneSourcesRef.current.push(makeNoise(
         ctx,
-        settings.ambience * (scene === 'werewolf-night' ? 0.022 : 0.012) * duck,
+        settings.ambience * (scene === 'werewolf-night' ? 0.018 : 0.009) * duck,
         scene === 'werewolf-night' ? 420 : 1050,
       ));
     }
@@ -157,15 +245,15 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
       }
       sceneSourcesRef.current = [];
     };
-  }, [ensureContext, scene, settings, speechDucked, unlocked, visibilityDucked]);
+  }, [ensureAudio, scene, settings.ambience, settings.enabled, speechDucked, unlocked, visibilityDucked]);
 
   useEffect(() => () => {
-    townTrackRef.current?.pause();
+    fadeTokenRef.current += 1;
+    decksRef.current.forEach(({ audio }) => audio.pause());
     for (const source of sceneSourcesRef.current) {
       try { source.stop(); } catch { /* already stopped */ }
       source.disconnect();
     }
-    sceneSourcesRef.current = [];
     void contextRef.current?.close();
   }, []);
 
@@ -177,7 +265,7 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
   }, []);
   const playEffect = useCallback((effect: TownEffect) => {
     if (!unlocked || !settings.enabled || settings.effects <= 0) return;
-    const ctx = ensureContext();
+    const ctx = ensureAudio();
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
     const frequencies: Record<TownEffect, number> = {
@@ -190,11 +278,12 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
     oscillator.connect(gain).connect(ctx.destination);
     oscillator.start();
     oscillator.stop(ctx.currentTime + 0.45);
-  }, [ensureContext, settings, unlocked]);
+  }, [ensureAudio, settings.effects, settings.enabled, unlocked]);
 
   return (
     <TownAudioContext.Provider value={{
-      settings, unlocked, scene, unlock, setScene, setChannel, toggleMute,
+      settings, unlocked, scene, currentTrack: audioTrackForScene(scene), playbackStatus,
+      playbackError, unlock, retry, setScene, setChannel, toggleMute,
       setDucked: setSpeechDucked, playEffect,
     }}>
       {children}

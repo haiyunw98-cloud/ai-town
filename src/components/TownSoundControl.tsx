@@ -6,15 +6,31 @@ const channels: Array<{ key: AudioChannel; label: string; icon: string }> = [
   { key: 'music', label: '音乐', icon: '♫' },
   { key: 'ambience', label: '环境', icon: '♒' },
   { key: 'effects', label: '音效', icon: '✦' },
+  { key: 'voice', label: '法官', icon: '⚖' },
 ];
 
+const statusLabels = {
+  locked: '等待开启', loading: '正在载入', playing: '正在播放', muted: '已静音',
+  paused: '已暂停', error: '播放异常',
+} as const;
+
 export default function TownSoundControl({ compact = false }: { compact?: boolean }) {
-  const { settings, unlocked, unlock, setChannel, toggleMute } = useTownAudio();
+  const {
+    settings, unlocked, unlock, retry, setChannel, toggleMute,
+    currentTrack, playbackStatus, playbackError,
+  } = useTownAudio();
   const [open, setOpen] = useState(false);
+  const [unlockError, setUnlockError] = useState<string>();
   const openOrUnlock = async () => {
     if (!unlocked) {
-      await unlock();
-      setOpen(true);
+      try {
+        setUnlockError(undefined);
+        await unlock();
+        setOpen(true);
+      } catch (error) {
+        setUnlockError(error instanceof Error ? error.message : '无法开启声音');
+        setOpen(true);
+      }
       return;
     }
     setOpen((value) => !value);
@@ -32,6 +48,11 @@ export default function TownSoundControl({ compact = false }: { compact?: boolea
       {open && (
         <section className="town-sound-panel" aria-label="声音设置">
           <header><strong>灯塔镇声场</strong><button onClick={() => setOpen(false)}>×</button></header>
+          <div className={`town-sound-now is-${playbackStatus}`}>
+            <span>当前曲目</span>
+            <strong>{currentTrack.title}</strong>
+            <small>{statusLabels[playbackStatus]}</small>
+          </div>
           {channels.map((channel) => (
             <label key={channel.key}>
               <span>{channel.icon} {channel.label}</span>
@@ -49,6 +70,12 @@ export default function TownSoundControl({ compact = false }: { compact?: boolea
           <button className="town-sound-mute" onClick={toggleMute}>
             {settings.enabled ? '全部静音（M）' : '恢复声音（M）'}
           </button>
+          {(playbackError || unlockError) && (
+            <div className="town-sound-error" role="alert">
+              <p>{playbackError ?? unlockError}</p>
+              <button onClick={() => void retry().catch(() => undefined)}>重试播放</button>
+            </div>
+          )}
         </section>
       )}
     </div>
