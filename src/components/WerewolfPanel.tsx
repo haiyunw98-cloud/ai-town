@@ -5,7 +5,13 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { buildWerewolfPanelView, type WerewolfPanelState } from './werewolfView';
 
-export default function WerewolfPanel({ worldId }: { worldId: Id<'worlds'> }) {
+export default function WerewolfPanel({
+  worldId,
+  onOpenVenue,
+}: {
+  worldId: Id<'worlds'>;
+  onOpenVenue?: () => void;
+}) {
   const snapshot = useQuery(api.werewolf.viewerState, { worldId }) as
     | WerewolfPanelState
     | null
@@ -48,13 +54,22 @@ export default function WerewolfPanel({ worldId }: { worldId: Id<'worlds'> }) {
       <div className="werewolf-phase"><b>{view.phaseLabel}</b><em>安全离场 · 无人受伤</em></div>
       {view.canStart && (
         <div className="werewolf-start-actions">
-          <button disabled={busy} onClick={() => void run(() => startSession({ worldId, mode: 'observe' }))}>
+          <button disabled={busy} onClick={() => void run(async () => {
+            await startSession({ worldId, mode: 'observe' });
+            onOpenVenue?.();
+          })}>
             👁 {view.startLabels[0]}
           </button>
-          <button disabled={busy} onClick={() => void run(() => startSession({ worldId, mode: 'play' }))}>
+          <button disabled={busy} onClick={() => void run(async () => {
+            await startSession({ worldId, mode: 'play' });
+            onOpenVenue?.();
+          })}>
             🎭 {view.startLabels[1]}
           </button>
         </div>
+      )}
+      {snapshot && snapshot.status !== 'completed' && (
+        <button className="werewolf-enter-venue" onClick={onOpenVenue}>进入圆桌会场</button>
       )}
       {view.privateCard && (
         <details className="werewolf-private-card">

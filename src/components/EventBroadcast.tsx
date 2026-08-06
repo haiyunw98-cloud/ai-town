@@ -24,9 +24,11 @@ import WerewolfPanel from './WerewolfPanel';
 export default function EventBroadcast({
   worldId,
   onSelectResident,
+  onOpenWerewolfVenue,
 }: {
   worldId: Id<'worlds'>;
   onSelectResident?: (residentId: GameId<'players'>) => void;
+  onOpenWerewolfVenue?: () => void;
 }) {
   const { locale, t } = useI18n();
   const [now, setNow] = useState(Date.now());
@@ -89,7 +91,7 @@ export default function EventBroadcast({
           </span>
         </div>
       </div>
-      <WerewolfPanel worldId={worldId} />
+      <WerewolfPanel worldId={worldId} onOpenVenue={onOpenWerewolfVenue} />
       {view.presentation === 'live' && snapshot.event && (
         <>
           <div className="event-poster event-poster-compact">

@@ -20,6 +20,7 @@ import PixiRuntimeGate from './PixiRuntimeGate';
 import { waitForInput } from '../hooks/sendInput';
 import { toast } from 'react-toastify';
 import ObserverPanelBoundary from './ObserverPanelBoundary';
+import WerewolfVenue from './WerewolfVenue';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
@@ -37,6 +38,7 @@ export default function Game() {
   const [observerOpen, setObserverOpen] = useState(() => window.innerWidth >= 960);
   const [cameraMode, setCameraMode] = useState<TownCameraMode>('town');
   const [observerRetry, setObserverRetry] = useState(0);
+  const [venueOpen, setVenueOpen] = useState(false);
   const [gameWrapper, setGameWrapper] = useState<HTMLDivElement | null>(null);
   const [{ width, height }, setGameSize] = useState({ width: 0, height: 0 });
 
@@ -130,6 +132,9 @@ export default function Game() {
         </div>
       </div>
     );
+  }
+  if (venueOpen) {
+    return <WerewolfVenue worldId={worldId} onClose={() => setVenueOpen(false)} />;
   }
   return (
     <>
@@ -279,8 +284,9 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
                 onClose={closeInstitutionDetails}
               />
             ) : sidebarTab === 'broadcast' ? (
-              <EventBroadcast
-                worldId={worldId}
+                  <EventBroadcast
+                    worldId={worldId}
+                    onOpenWerewolfVenue={() => setVenueOpen(true)}
                 onSelectResident={(residentId) => {
                   setSelectedElement({ kind: 'player', id: residentId });
                   setSelectedLandmark(undefined);
