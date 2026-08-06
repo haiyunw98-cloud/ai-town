@@ -34,7 +34,15 @@ export type WerewolfPhase =
 export type WerewolfAction =
   | { kind: 'wolf-vote'; actorId: string; targetId: string; at: number }
   | { kind: 'seer-check'; actorId: string; targetId: string; at: number }
-  | { kind: 'witch-use'; actorId: string; save: boolean; poisonTargetId?: string; at: number };
+  | { kind: 'witch-use'; actorId: string; save: boolean; poisonTargetId?: string; at: number }
+  | { kind: 'speech'; actorId: string; text: string; at: number }
+  | { kind: 'day-vote'; actorId: string; targetId?: string; at: number }
+  | { kind: 'hunter-shot'; actorId: string; targetId?: string; at: number };
+
+export type WerewolfRecordedAction = WerewolfAction & {
+  round: number;
+  phase: WerewolfPhase;
+};
 
 export type WerewolfPrivateResult = {
   targetId: string;
@@ -46,13 +54,15 @@ export type WerewolfState = {
   round: number;
   phase: WerewolfPhase;
   seats: WerewolfSeat[];
-  actions: WerewolfAction[];
+  actions: WerewolfRecordedAction[];
   pendingNightTargetId?: string;
   pendingPoisonTargetId?: string;
   nightSaved: boolean;
   speakingOrder: string[];
   runoffIds: string[];
   privateResults: Record<string, WerewolfPrivateResult[]>;
+  pendingHunterId?: string;
+  hunterResumePhase?: 'day-speaking' | 'night-wolves';
   winner?: WerewolfCamp | 'draw';
   updatedAt: number;
 };
