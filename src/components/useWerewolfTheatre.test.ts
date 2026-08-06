@@ -34,6 +34,12 @@ describe('werewolf theatre pacing', () => {
       { phase: 'day-voting', round: 2 }, 'completed', 2, true,
     )).toEqual([{ phase: 'completed', round: 2 }]);
     expect(theatreStepsForSnapshot(
+      { phase: 'night-witch', round: 2 }, 'day-speaking', 2, true,
+    )).toEqual([
+      { phase: 'dawn', round: 2 },
+      { phase: 'day-speaking', round: 2 },
+    ]);
+    expect(theatreStepsForSnapshot(
       { phase: 'dawn', round: 2 }, 'dawn', 2, true,
     )).toEqual([]);
   });

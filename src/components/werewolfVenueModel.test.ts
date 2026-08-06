@@ -1,5 +1,6 @@
 import {
   buildVenueActionCue,
+  roleForPresentation,
   seatAliveForPresentation,
   venueSeatPositions,
 } from './werewolfVenueModel';
@@ -44,5 +45,16 @@ describe('werewolf venue model', () => {
     expect(seatAliveForPresentation(seat, 'night-witch', 2)).toBe(true);
     expect(seatAliveForPresentation(seat, 'dawn', 2)).toBe(false);
     expect(seatAliveForPresentation(seat, 'night-witch', 3)).toBe(false);
+  });
+
+  test('reveals completed roles only when the presentation reaches completion', () => {
+    expect(roleForPresentation({ completedRole: 'werewolf', presentedPhase: 'night-witch' }))
+      .toBeUndefined();
+    expect(roleForPresentation({ completedRole: 'werewolf', presentedPhase: 'completed' }))
+      .toBe('werewolf');
+    expect(roleForPresentation({ ownRole: 'seer', completedRole: 'seer', presentedPhase: 'dawn' }))
+      .toBe('seer');
+    expect(roleForPresentation({ observerRole: 'witch', presentedPhase: 'night-wolves' }))
+      .toBe('witch');
   });
 });

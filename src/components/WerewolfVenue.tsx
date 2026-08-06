@@ -7,6 +7,7 @@ import type { WerewolfAction, WerewolfPhase, WerewolfRole } from '../../convex/w
 import { judgeCue } from './werewolfJudge';
 import {
   buildVenueActionCue,
+  roleForPresentation,
   seatAliveForPresentation,
   venueSeatPositions,
 } from './werewolfVenueModel';
@@ -118,8 +119,13 @@ export default function WerewolfVenue({
       (action as WerewolfAction & { round?: number }).round === theatre.presentedRound &&
       (theatre.presentedPhase === 'day-voting' || theatre.presentedPhase === 'runoff-voting'),
   ).slice(-9);
-  const revealRole = (playerId: string, ownRole?: WerewolfRole) =>
-    snapshot.observerSecrets?.roles[playerId] ?? ownRole;
+  const revealRole = (playerId: string, completedRole?: WerewolfRole) =>
+    roleForPresentation({
+      observerRole: snapshot.observerSecrets?.roles[playerId],
+      ownRole: snapshot.viewerId === playerId ? snapshot.privateRole : undefined,
+      completedRole,
+      presentedPhase: theatre.presentedPhase,
+    });
 
   return (
     <main className={`werewolf-venue is-${theatre.presentedPhase ?? snapshot.phase} theatre-speed-${speed}`}>
@@ -158,7 +164,7 @@ export default function WerewolfVenue({
         </svg>
         {snapshot.seats.map((seat) => {
           const point = pointBySeat.get(seat.seatNumber)!;
-          const role = revealRole(seat.playerId, snapshot.viewerId === seat.playerId ? snapshot.privateRole : seat.role);
+          const role = revealRole(seat.playerId, seat.role);
           const isWolf = snapshot.observerSecrets?.roles[seat.playerId] === 'werewolf';
           const active = cue.actorIds.includes(seat.playerId);
           const targeted = cue.targetId === seat.playerId;

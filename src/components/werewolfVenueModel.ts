@@ -1,4 +1,4 @@
-import type { WerewolfRecordedAction } from '../../convex/werewolf/types';
+import type { WerewolfPhase, WerewolfRecordedAction, WerewolfRole } from '../../convex/werewolf/types';
 import type { WerewolfPanelState } from './werewolfView';
 
 export type VenueSeatPoint = { seatNumber: number; x: number; y: number };
@@ -16,6 +16,16 @@ export function seatAliveForPresentation(
     seat.eliminatedRound === presentedRound &&
     (seat.eliminatedBy === 'wolves' || seat.eliminatedBy === 'witch');
   return seat.alive || concealedNightDeparture === true;
+}
+
+export function roleForPresentation(input: {
+  observerRole?: WerewolfRole;
+  ownRole?: WerewolfRole;
+  completedRole?: WerewolfRole;
+  presentedPhase?: WerewolfPhase;
+}) {
+  return input.observerRole ?? input.ownRole ??
+    (input.presentedPhase === 'completed' ? input.completedRole : undefined);
 }
 
 export function venueSeatPositions(count = 9): VenueSeatPoint[] {

@@ -36,7 +36,11 @@ export function theatreStepsForSnapshot(
       : [phase];
     return phases.map((candidate) => ({ phase: candidate, round }));
   }
-  return [{ phase, round }];
+  const skippedRequiredDawn = previous.round === round &&
+    previous.phase.startsWith('night-') &&
+    !phase.startsWith('night-') && phase !== 'dawn';
+  return (skippedRequiredDawn ? ['dawn', phase] : [phase])
+    .map((candidate) => ({ phase: candidate as WerewolfPhase, round }));
 }
 
 export function useWerewolfTheatre(
