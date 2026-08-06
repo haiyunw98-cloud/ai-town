@@ -5,7 +5,11 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { WerewolfAction, WerewolfPhase, WerewolfRole } from '../../convex/werewolf/types';
 import { judgeCue } from './werewolfJudge';
-import { buildVenueActionCue, venueSeatPositions } from './werewolfVenueModel';
+import {
+  buildVenueActionCue,
+  seatAliveForPresentation,
+  venueSeatPositions,
+} from './werewolfVenueModel';
 import { buildWerewolfPanelView, type WerewolfPanelState } from './werewolfView';
 import { useWerewolfTheatre } from './useWerewolfTheatre';
 import TownSoundControl from './TownSoundControl';
@@ -159,19 +163,22 @@ export default function WerewolfVenue({
           const active = cue.actorIds.includes(seat.playerId);
           const targeted = cue.targetId === seat.playerId;
           const speaking = snapshot.speakingPlayerId === seat.playerId;
+          const presentationAlive = seatAliveForPresentation(
+            seat, theatre.presentedPhase, theatre.presentedRound,
+          );
           return (
             <article
               key={seat.playerId}
               className={[
                 'werewolf-seat', active ? 'is-acting' : '', targeted ? 'is-targeted' : '',
-                speaking ? 'is-speaking' : '', !seat.alive ? 'is-eliminated' : '',
+                speaking ? 'is-speaking' : '', !presentationAlive ? 'is-eliminated' : '',
                 isWolf && theatre.presentedPhase?.startsWith('night') ? 'is-awake-wolf' : '',
               ].filter(Boolean).join(' ')}
               style={{ left: `${point.x}%`, top: `${point.y}%` }}
             >
-              <div className="werewolf-seat-avatar">{seat.alive ? (active ? '👁' : '😴') : '👤'}</div>
+              <div className="werewolf-seat-avatar">{presentationAlive ? (active ? '👁' : '😴') : '👤'}</div>
               <strong>{seat.seatNumber}号 · {seat.displayName}{snapshot.viewerId === seat.playerId ? '（你）' : ''}</strong>
-              <span>{!seat.alive ? '观众席' : role ? roleLabels[role] : '身份隐藏'}</span>
+              <span>{!presentationAlive ? '观众席' : role ? roleLabels[role] : '身份隐藏'}</span>
               {targeted && snapshot.mode === 'observe' && <em>🗡 今夜目标</em>}
             </article>
           );

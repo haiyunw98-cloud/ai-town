@@ -1,4 +1,8 @@
-import { buildVenueActionCue, venueSeatPositions } from './werewolfVenueModel';
+import {
+  buildVenueActionCue,
+  seatAliveForPresentation,
+  venueSeatPositions,
+} from './werewolfVenueModel';
 import type { WerewolfPanelState } from './werewolfView';
 
 describe('werewolf venue model', () => {
@@ -31,5 +35,14 @@ describe('werewolf venue model', () => {
   test('participant receives no secret target cue', () => {
     expect(buildVenueActionCue({ phase: 'night-wolves', round: 1 }))
       .toEqual({ kind: 'sleeping', actorIds: [], label: '夜间行动进行中' });
+  });
+
+  test('conceals this round night departure until the presented dawn', () => {
+    const seat = {
+      alive: false, eliminatedRound: 2, eliminatedBy: 'wolves' as const,
+    };
+    expect(seatAliveForPresentation(seat, 'night-witch', 2)).toBe(true);
+    expect(seatAliveForPresentation(seat, 'dawn', 2)).toBe(false);
+    expect(seatAliveForPresentation(seat, 'night-witch', 3)).toBe(false);
   });
 });

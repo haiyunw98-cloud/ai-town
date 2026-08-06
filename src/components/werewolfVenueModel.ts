@@ -3,6 +3,21 @@ import type { WerewolfPanelState } from './werewolfView';
 
 export type VenueSeatPoint = { seatNumber: number; x: number; y: number };
 
+export function seatAliveForPresentation(
+  seat: {
+    alive: boolean;
+    eliminatedRound?: number;
+    eliminatedBy?: 'wolves' | 'witch' | 'vote' | 'hunter';
+  },
+  presentedPhase: string | undefined,
+  presentedRound: number | undefined,
+) {
+  const concealedNightDeparture = presentedPhase?.startsWith('night-') &&
+    seat.eliminatedRound === presentedRound &&
+    (seat.eliminatedBy === 'wolves' || seat.eliminatedBy === 'witch');
+  return seat.alive || concealedNightDeparture === true;
+}
+
 export function venueSeatPositions(count = 9): VenueSeatPoint[] {
   return Array.from({ length: count }, (_, index) => {
     const angle = -Math.PI / 2 + (index * Math.PI * 2) / count;

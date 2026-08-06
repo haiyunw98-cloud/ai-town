@@ -97,5 +97,8 @@ describe('werewolf viewer privacy', () => {
     const peaceful: WerewolfState = { ...running, phase: 'day-speaking' };
     expect(buildWerewolfViewerState(peaceful).dawnResults)
       .toEqual([{ round: 1, eliminatedPlayerIds: [] }]);
+
+    const unsettledDawn: WerewolfState = { ...running, phase: 'dawn' };
+    expect(buildWerewolfViewerState(unsettledDawn).dawnResults).toEqual([]);
   });
 });

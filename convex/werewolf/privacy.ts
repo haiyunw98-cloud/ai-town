@@ -83,7 +83,9 @@ export function buildWerewolfViewerState(
     ? state.seats.find((seat) => seat.playerId === viewerId)
     : undefined;
   const completed = state.phase === 'completed';
-  const completedDawnRound = state.phase.startsWith('night-') ? state.round - 1 : state.round;
+  const completedDawnRound = state.phase.startsWith('night-') || state.phase === 'dawn'
+    ? state.round - 1
+    : state.round;
   const dawnResults = Array.from({ length: Math.max(0, completedDawnRound) }, (_, index) => {
     const round = index + 1;
     return {

@@ -23,16 +23,16 @@ describe('werewolf theatre pacing', () => {
     ]);
   });
 
-  test('appends only unseen forward phases and keeps rounds distinct', () => {
+  test('appends only observed phases and never invents conditional branches', () => {
     expect(theatreStepsForSnapshot(
       { phase: 'night-seer', round: 1 }, 'night-witch', 1, true,
     )).toEqual([{ phase: 'night-witch', round: 1 }]);
     expect(theatreStepsForSnapshot(
       { phase: 'day-voting', round: 1 }, 'night-seer', 2, true,
-    )).toEqual([
-      { phase: 'night-wolves', round: 2 },
-      { phase: 'night-seer', round: 2 },
-    ]);
+    )).toEqual([{ phase: 'night-seer', round: 2 }]);
+    expect(theatreStepsForSnapshot(
+      { phase: 'day-voting', round: 2 }, 'completed', 2, true,
+    )).toEqual([{ phase: 'completed', round: 2 }]);
     expect(theatreStepsForSnapshot(
       { phase: 'dawn', round: 2 }, 'dawn', 2, true,
     )).toEqual([]);

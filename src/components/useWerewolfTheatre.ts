@@ -36,15 +36,7 @@ export function theatreStepsForSnapshot(
       : [phase];
     return phases.map((candidate) => ({ phase: candidate, round }));
   }
-  const previousIndex = WEREWOLF_PHASE_ORDER.indexOf(previous.phase);
-  const phases = previous.round === round
-    ? (currentIndex > previousIndex
-      ? WEREWOLF_PHASE_ORDER.slice(previousIndex + 1, currentIndex + 1)
-      : [phase])
-    : (round > previous.round && replayOpening && currentIndex > 0
-      ? WEREWOLF_PHASE_ORDER.slice(0, currentIndex + 1)
-      : [phase]);
-  return phases.map((candidate) => ({ phase: candidate, round }));
+  return [{ phase, round }];
 }
 
 export function useWerewolfTheatre(

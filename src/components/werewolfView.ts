@@ -15,6 +15,8 @@ export type WerewolfPanelState = {
     displayName: string;
     seatNumber: number;
     alive: boolean;
+    eliminatedRound?: number;
+    eliminatedBy?: 'wolves' | 'witch' | 'vote' | 'hunter';
     role?: WerewolfRole;
   }>;
   publicActions: WerewolfAction[];
