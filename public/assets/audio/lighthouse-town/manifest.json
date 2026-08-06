@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "tracks": [
+    {
+      "id": "town-day",
+      "title": "水巷晨光",
+      "scene": "灯塔镇日常",
+      "seconds": 72,
+      "sampleRate": 22050,
+      "loopSafe": true,
+      "peak": 0.1784,
+      "sha256": "7973daa6291e5c8b39bc3cd953caf2ea2c34d0838bc92c3a57180d01c57db20e",
+      "generationDescription": "温暖江南五声音阶、竹笛般主旋律、古筝点奏、轻木打击与柔和水乡空气感。",
+      "license": "Original project-generated audio; MIT project distribution"
+    },
+    {
+      "id": "werewolf-night",
+      "title": "灯影入夜",
+      "scene": "狼人杀夜晚",
+      "seconds": 64,
+      "sampleRate": 22050,
+      "loopSafe": true,
+      "peak": 0.186,
+      "sha256": "e2e0064dc19f51e71b719c1c8a120cd62444de8385c3708ae7bf4154ce9eed05",
+      "generationDescription": "克制低鼓、古琴泛音、稀疏木质敲击与低风声，不含惊吓或暴力声音。",
+      "license": "Original project-generated audio; MIT project distribution"
+    },
+    {
+      "id": "werewolf-discussion",
+      "title": "围桌辨言",
+      "scene": "狼人杀白天讨论",
+      "seconds": 68,
+      "sampleRate": 22050,
+      "loopSafe": true,
+      "peak": 0.1026,
+      "sha256": "f0f73464a879e37d6ca79b6daa7ae14e4f148686ca424b1580cabd17e596ffcb",
+      "generationDescription": "轻拨弦、木质节奏与低存在感和声，给推理留出语言空间。",
+      "license": "Original project-generated audio; MIT project distribution"
+    },
+    {
+      "id": "werewolf-vote",
+      "title": "落签之前",
+      "scene": "狼人杀投票",
+      "seconds": 48,
+      "sampleRate": 22050,
+      "loopSafe": true,
+      "peak": 0.1752,
+      "sha256": "020008acba0d337ab7e65a34eb9f7a404f89e3c416ceb24f946feccdf942f3af",
+      "generationDescription": "逐渐清晰的低鼓与拨弦脉冲，紧张但不恐怖。",
+      "license": "Original project-generated audio; MIT project distribution"
+    },
+    {
+      "id": "werewolf-result",
+      "title": "灯火归席",
+      "scene": "狼人杀结算",
+      "seconds": 24,
+      "sampleRate": 22050,
+      "loopSafe": true,
+      "peak": 0.2193,
+      "sha256": "6be9f88deed6904affaf4e1c830ad4db37169136df485853e88cb733ccc7043b",
+      "generationDescription": "木槌提示后以明亮五声音阶和弦收束，适合回到小镇生活。",
+      "license": "Original project-generated audio; MIT project distribution"
+    }
+  ]
+}
