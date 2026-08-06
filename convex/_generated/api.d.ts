@@ -77,6 +77,7 @@ import type * as util_worldLocale from "../util/worldLocale.js";
 import type * as util_xxhash from "../util/xxhash.js";
 import type * as werewolf from "../werewolf.js";
 import type * as werewolf_model from "../werewolf/model.js";
+import type * as werewolf_movement from "../werewolf/movement.js";
 import type * as werewolf_privacy from "../werewolf/privacy.js";
 import type * as werewolf_setup from "../werewolf/setup.js";
 import type * as werewolf_stateMachine from "../werewolf/stateMachine.js";
@@ -159,6 +160,7 @@ declare const fullApi: ApiFromModules<{
   "util/xxhash": typeof util_xxhash;
   werewolf: typeof werewolf;
   "werewolf/model": typeof werewolf_model;
+  "werewolf/movement": typeof werewolf_movement;
   "werewolf/privacy": typeof werewolf_privacy;
   "werewolf/setup": typeof werewolf_setup;
   "werewolf/stateMachine": typeof werewolf_stateMachine;

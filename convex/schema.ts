@@ -386,6 +386,8 @@ export default defineSchema({
     stateJson: v.string(),
     nextActionAt: v.number(),
     winner: v.optional(v.string()),
+    settledAt: v.optional(v.number()),
+    settlementAttempts: v.optional(v.number()),
     startedAt: v.number(),
     endedAt: v.optional(v.number()),
     updatedAt: v.number(),

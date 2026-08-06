@@ -35,6 +35,7 @@ import { settlePurchase, settleWork } from './townEconomyRules';
 import { distance } from './util/geometry';
 import { recordInstitutionPurchaseTrade } from './townRelations';
 import { recordActivityFact } from './lives';
+import type { WerewolfCamp, WerewolfSeat } from './werewolf/types';
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
 // The final millisecond that still formats as a four-digit Shanghai calendar year.
@@ -797,6 +798,99 @@ export type DailyEventRewardSettlementArgs = Readonly<{
   hostServices: readonly DailyEventHostService[] | null;
   now: number;
 }>;
+
+export type WerewolfRewardPlan = {
+  residentId: string;
+  displayName: string;
+  tier: 'participation' | 'winner';
+  amount: 5 | 20;
+  idempotencyKey: string;
+};
+
+export function buildWerewolfRewardPlans(
+  sessionId: string,
+  seats: readonly WerewolfSeat[],
+  winner: WerewolfCamp,
+): WerewolfRewardPlan[] {
+  const plans: WerewolfRewardPlan[] = [];
+  for (const seat of seats) {
+    if (seat.kind !== 'ai') continue;
+    plans.push({
+      residentId: seat.playerId,
+      displayName: seat.displayName,
+      tier: 'participation',
+      amount: 5,
+      idempotencyKey: `werewolf:${sessionId}:participation:${seat.playerId}`,
+    });
+    const camp = seat.role === 'werewolf' ? 'wolves' : 'good';
+    if (camp === winner) {
+      plans.push({
+        residentId: seat.playerId,
+        displayName: seat.displayName,
+        tier: 'winner',
+        amount: 20,
+        idempotencyKey: `werewolf:${sessionId}:winner:${seat.playerId}`,
+      });
+    }
+  }
+  return plans;
+}
+
+export async function settleWerewolfRewards(
+  ctx: EconomyDbContext,
+  args: {
+    worldId: Id<'worlds'>;
+    sessionId: Id<'werewolfSessions'>;
+    winner: WerewolfCamp;
+    now: number;
+  },
+) {
+  const session = await ctx.db.get(args.sessionId);
+  if (!session || session.worldId !== args.worldId ||
+      session.status !== 'completed' || session.winner !== args.winner) {
+    throw new Error('狼人杀奖励需要一场已完成且胜方一致的对局。');
+  }
+  await initializeTownEconomy(ctx, args.worldId, args.now);
+  const seatRows = await ctx.db.query('werewolfSeats')
+    .withIndex('sessionId', (q) => q.eq('sessionId', args.sessionId)).collect();
+  if (seatRows.length !== 9) throw new Error('狼人杀奖励座位记录不完整。');
+  const seats = seatRows.map((row) => JSON.parse(row.stateJson) as WerewolfSeat);
+  const plans = buildWerewolfRewardPlans(String(args.sessionId), seats, args.winner);
+  let participationPaid = 0;
+  let winnerPaid = 0;
+  for (const plan of plans) {
+    const account = await ctx.db.query('residentEconomy')
+      .withIndex('resident', (q) =>
+        q.eq('worldId', args.worldId).eq('residentId', plan.residentId),
+      ).unique();
+    if (!account) throw new Error(`狼人杀奖励账户不存在：${plan.residentId}`);
+    const createdAt = args.now;
+    const dayKey = shanghaiEconomyDayKey(createdAt);
+    const entry: EconomyLedgerEntry = {
+      worldId: args.worldId,
+      idempotencyKey: plan.idempotencyKey,
+      dayKey,
+      residentId: plan.residentId,
+      kind: 'event-reward',
+      amount: plan.amount,
+      sourceKey: plan.idempotencyKey,
+      text: `${plan.displayName}获得狼人杀${plan.tier === 'winner' ? '胜方' : '参与'}奖励 ${plan.amount} 金贝。`,
+      createdAt,
+    };
+    const inserted = await appendEconomyLedger(ctx, entry);
+    if (!inserted) continue;
+    await ctx.db.patch(account._id, {
+      balance: account.balance + plan.amount,
+      todayIncome: (account.dayKey === dayKey ? account.todayIncome : 0) + plan.amount,
+      todayExpense: account.dayKey === dayKey ? account.todayExpense : 0,
+      dayKey,
+      updatedAt: Math.max(account.updatedAt, createdAt),
+    });
+    if (plan.tier === 'winner') winnerPaid += 1;
+    else participationPaid += 1;
+  }
+  return { participationPaid, winnerPaid };
+}
 
 const DAILY_EVENT_REWARD_TIERS = [
   { key: 'participation', amount: 10, label: '参与' },
@@ -2134,7 +2228,7 @@ async function validateLedgerContract(ctx: EconomyDbContext, entry: EconomyLedge
     }
     case 'event-reward':
       await requireResidentAccount(ctx, entry);
-      if (![10, 20, 50].includes(entry.amount)) {
+      if (![5, 10, 20, 50].includes(entry.amount)) {
         throw new Error('event reward amount must be an earned configured tier');
       }
       return;

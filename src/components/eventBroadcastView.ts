@@ -110,6 +110,38 @@ export type BroadcastSnapshot = {
     text: string;
     createdAt: number;
   }>;
+  werewolf?: null | {
+    sessionId: string;
+    status: 'running' | 'paused' | 'completed';
+    phase: string;
+    round: number;
+    mode: 'observe' | 'play';
+    winner?: string;
+    startedAt: number;
+    endedAt?: number;
+    seats: Array<{
+      playerId: string;
+      displayName: string;
+      seatNumber: number;
+      alive: boolean;
+      role?: string;
+    }>;
+    actions: Array<{
+      actionKey: string;
+      sequence: number;
+      round: number;
+      phase: string;
+      actorId?: string;
+      actorName?: string;
+      kind: string;
+      targetId?: string;
+      targetName?: string;
+      text?: string;
+      source: string;
+      createdAt: number;
+    }>;
+    truncated: boolean;
+  };
   snapshotTruncation?: Partial<Record<
     'dailyLifeEvents' | 'dailyMessages' | 'dailyEconomyLedger' | 'institutionStates' | 'dailyRelationshipChanges',
     { truncated: boolean; omittedAtLeast: number }
@@ -271,6 +303,7 @@ function reportRecordRange(data: DailyReportData) {
     ...data.economyLedger.map((entry) => entry.createdAt),
     ...data.institutionStates.map((state) => state.updatedAt),
     ...data.relationshipChanges.map((change) => change.createdAt),
+    ...(data.snapshot.werewolf?.actions.map((action) => action.createdAt) ?? []),
   ];
   if (timestamps.length === 0) return '当日无记录';
   return `${formatReportTime(Math.min(...timestamps), data.locale)}–${formatReportTime(Math.max(...timestamps), data.locale)}`;
@@ -299,6 +332,7 @@ function buildOverviewSection(data: DailyReportData) {
     `- 当日公共事件日志：${data.logs.length} 条`,
     `- 当日经济流水：${data.economyLedger.length} 笔${omitted('dailyEconomyLedger')}`,
     `- 当日关系变化：${data.relationshipChanges.length} 笔${omitted('dailyRelationshipChanges')}`,
+    `- 最近狼人杀公开记录：${data.snapshot.werewolf?.actions.length ?? 0} 条`,
   ]);
 }
 
@@ -573,6 +607,29 @@ function buildPublicEventsSection(data: DailyReportData) {
     for (const log of data.logs) {
       lines.push(`- [${escapeMarkdown(log.eventKey)}#${log.sequence}] ${escapeMarkdown(log.text)}`);
     }
+  }
+  const werewolf = data.snapshot.werewolf;
+  if (werewolf) {
+    lines.push('', `### 狼人杀第 ${werewolf.round} 轮`, '');
+    lines.push(`- 对局：${escapeMarkdown(werewolf.sessionId)}`);
+    lines.push(`- 状态：${escapeMarkdown(werewolf.status)} · ${escapeMarkdown(werewolf.phase)}`);
+    lines.push(`- 模式：${werewolf.mode === 'play' ? '观察者参与' : '九位 AI 居民观察局'}`);
+    if (werewolf.winner) {
+      lines.push(`- 真实胜负：${werewolf.winner === 'good' ? '好人阵营获胜' : werewolf.winner === 'wolves' ? '狼人阵营获胜' : '平局'}`);
+    }
+    if (werewolf.actions.length === 0) lines.push('- 公开过程：暂无');
+    for (const action of werewolf.actions) {
+      let fact = action.text ?? action.kind;
+      if (action.kind === 'day-vote') {
+        fact = `公开投票：${action.actorName ?? action.actorId ?? '居民'} → ${action.targetName ?? action.targetId ?? '弃票'}`;
+      } else if (action.kind === 'speech') {
+        fact = `公开发言：${action.actorName ?? action.actorId ?? '居民'}：“${action.text ?? ''}”`;
+      } else if (action.kind === 'hunter-shot') {
+        fact = `猎人公开行动：${action.actorName ?? action.actorId ?? '居民'} → ${action.targetName ?? action.targetId ?? '放弃'}`;
+      }
+      lines.push(`- [${escapeMarkdown(action.actionKey)}#${action.sequence}] 第 ${action.round} 轮｜${escapeMarkdown(fact)}`);
+    }
+    if (werewolf.truncated) lines.push('- 注意：公开动作超过 300 条，本次快照已截断。');
   }
   return reportSection('赛事与公共事件', lines);
 }

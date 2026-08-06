@@ -259,7 +259,22 @@ export function buildSocialObservationFacts(
   const lifeEvents = (snapshot.dailyLifeEvents ?? [])
     .filter((event) => sameShanghaiDay(event.createdAt, now))
     .sort(chronological);
-  const publicLogs = snapshot.logs
+  const werewolfLogs: PublicLog[] = (snapshot.werewolf?.actions ?? []).map((action) => {
+    const text = action.kind === 'day-vote'
+      ? `证据 ${action.actionKey}：公开投票，${action.actorName ?? action.actorId ?? '居民'}投给${action.targetName ?? action.targetId ?? '弃票'}。`
+      : action.kind === 'speech'
+        ? `证据 ${action.actionKey}：${action.actorName ?? action.actorId ?? '居民'}公开发言“${action.text ?? ''}”。`
+        : `证据 ${action.actionKey}：${action.text ?? action.kind}`;
+    return {
+      eventKey: action.actionKey,
+      sequence: action.sequence,
+      kind: action.kind === 'day-vote' ? '狼人杀公开投票' :
+        action.kind === 'speech' ? '狼人杀公开发言' : '狼人杀公开记录',
+      text,
+      createdAt: action.createdAt,
+    };
+  });
+  const publicLogs = [...snapshot.logs, ...werewolfLogs]
     .filter((log) => log.kind !== 'conversation' && sameShanghaiDay(log.createdAt, now))
     .sort(chronological);
   const runtimeProfileIds = buildRuntimeProfileIds(snapshot);

@@ -16,6 +16,8 @@ import { selectConfiguredAiRoster } from './events';
 import { buildWerewolfViewerState } from './werewolf/privacy';
 import { requestWerewolfAction } from './werewolf/model';
 import { buildWerewolfMovementCommands } from './werewolf/movement';
+import { settleWerewolfRewards } from './townEconomy';
+import { recordWerewolfRelationshipEvidence } from './townRelations';
 import { createWerewolfSetup } from './werewolf/setup';
 import {
   applyWerewolfAction,
@@ -154,13 +156,12 @@ export async function startWerewolfSession(
   args: { worldId: Id<'worlds'>; mode: 'observe' | 'play' },
 ) {
   const now = Date.now();
-  const [world, worldStatus, runningSessions, events, playerDescriptions, agentDescriptions] =
+  const [world, worldStatus, existingSessions, events, playerDescriptions, agentDescriptions] =
     await Promise.all([
       ctx.db.get(args.worldId),
       ctx.db.query('worldStatus').withIndex('worldId', (q) => q.eq('worldId', args.worldId)).unique(),
       ctx.db.query('werewolfSessions')
-        .withIndex('sessionKey', (q) => q.eq('worldId', args.worldId).eq('status', 'running'))
-        .collect(),
+        .withIndex('worldId', (q) => q.eq('worldId', args.worldId)).take(20),
       ctx.db.query('townEvents').withIndex('worldId', (q) => q.eq('worldId', args.worldId)).collect(),
       ctx.db.query('playerDescriptions')
         .withIndex('worldId', (q) => q.eq('worldId', args.worldId)).take(33),
@@ -171,7 +172,8 @@ export async function startWerewolfSession(
   if (worldStatus.status !== 'running') throw new Error('小镇暂停时不能开始狼人杀。');
   assertWerewolfCanStart({
     runningDailyEvent: events.some((event) => event.status === 'announced' || event.status === 'running'),
-    runningWerewolf: runningSessions.length > 0,
+    runningWerewolf: existingSessions.some((session) =>
+      session.status === 'running' || session.status === 'paused'),
   });
   if (playerDescriptions.length === 33 || agentDescriptions.length === 33) {
     throw new Error('狼人杀居民资料超过安全读取上限。');
@@ -392,6 +394,7 @@ export async function advanceWerewolfSession(
     actorId: pending.actorId,
     actionKey: key,
   });
+  await ctx.scheduler.runAfter(125_000, internal.werewolf.advanceSession, { sessionId });
   return { scheduledModelActions: 1 };
 }
 
@@ -478,6 +481,49 @@ export const commitAiAction = internalMutation({
     });
     await persistState(ctx, args.sessionId, next, at);
     await ctx.scheduler.runAfter(0, internal.werewolf.advanceSession, { sessionId: args.sessionId });
+  },
+});
+
+export const settleSession = internalMutation({
+  args: { sessionId: v.id('werewolfSessions') },
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get(args.sessionId);
+    if (!session || session.status !== 'completed' || session.settledAt) return;
+    const attempts = session.settlementAttempts ?? 0;
+    if (session.winner !== 'good' && session.winner !== 'wolves') {
+      await ctx.db.patch(session._id, { settledAt: Date.now(), settlementAttempts: attempts + 1 });
+      return;
+    }
+    const state = JSON.parse(session.stateJson) as WerewolfState;
+    try {
+      await settleWerewolfRewards(ctx, {
+        worldId: session.worldId,
+        sessionId: session._id,
+        winner: session.winner,
+        now: state.updatedAt,
+      });
+      await recordWerewolfRelationshipEvidence(ctx, {
+        worldId: session.worldId,
+        sessionId: session._id,
+        state,
+      });
+      await ctx.db.patch(session._id, {
+        settledAt: Date.now(),
+        settlementAttempts: attempts + 1,
+      });
+    } catch (error) {
+      const nextAttempt = attempts + 1;
+      await ctx.db.patch(session._id, { settlementAttempts: nextAttempt });
+      if (nextAttempt < 5) {
+        await ctx.scheduler.runAfter(Math.min(60_000, 5_000 * 2 ** attempts),
+          internal.werewolf.settleSession, { sessionId: session._id });
+      }
+      console.warn('Werewolf settlement will retry.', {
+        sessionId: String(session._id),
+        attempt: nextAttempt,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+    }
   },
 });
 
@@ -648,6 +694,7 @@ async function persistState(
   }
   if (state.phase === 'completed' && previous.phase !== 'completed') {
     await enqueueWerewolfMovements(ctx, session.worldId, state.seats, 'return', at);
+    await ctx.scheduler.runAfter(0, internal.werewolf.settleSession, { sessionId });
     return;
   }
   const newlyEliminated = new Set(state.seats.filter((seat) =>

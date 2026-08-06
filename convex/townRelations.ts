@@ -4,6 +4,7 @@ import { residentEconomyProfiles } from '../data/worlds/lighthouse-town/economy'
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { internalMutation, type MutationCtx } from './_generated/server';
+import type { WerewolfState } from './werewolf/types';
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
 const MAX_TIMESTAMP = Date.parse('9999-12-31T15:59:59.999Z');
@@ -156,6 +157,60 @@ export async function reconcileTownRelationsAfterAgentCreation(
 
 export async function recordRelationEvent(ctx: RelationContext, event: RelationEvent) {
   return recordRelationEventForStatus(ctx, event, 'running');
+}
+
+export function buildWerewolfRelationshipEvidence(
+  sessionId: string,
+  state: WerewolfState,
+): Array<{
+  idempotencyKey: string;
+  residentA: string;
+  residentB: string;
+  kind: 'cooperation' | 'dispute';
+  sourceKey: string;
+  text: string;
+  createdAt: number;
+}> {
+  const aiSeats = new Map(state.seats.filter((seat) => seat.kind === 'ai')
+    .map((seat) => [seat.playerId, seat]));
+  const evidence = [];
+  const seen = new Set<string>();
+  for (const action of state.actions) {
+    if (action.kind !== 'day-vote' || !action.targetId) continue;
+    const actor = aiSeats.get(action.actorId);
+    const target = aiSeats.get(action.targetId);
+    if (!actor || !target) continue;
+    const pair = [actor.playerId, target.playerId].sort();
+    const key = `werewolf:${sessionId}:vote:${action.round}:${action.phase}:${actor.playerId}:${target.playerId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const sameCamp = (actor.role === 'werewolf') === (target.role === 'werewolf');
+    evidence.push({
+      idempotencyKey: key,
+      residentA: pair[0],
+      residentB: pair[1],
+      kind: sameCamp ? 'cooperation' as const : 'dispute' as const,
+      sourceKey: key,
+      text: sameCamp
+        ? `${actor.displayName}在狼人杀公开投票中与同阵营的${target.displayName}形成可核查票型。`
+        : `${actor.displayName}在狼人杀公开投票中指向不同阵营的${target.displayName}。`,
+      createdAt: action.at,
+    });
+  }
+  return evidence;
+}
+
+export async function recordWerewolfRelationshipEvidence(
+  ctx: RelationContext,
+  args: { worldId: Id<'worlds'>; sessionId: Id<'werewolfSessions'>; state: WerewolfState },
+) {
+  const evidence = buildWerewolfRelationshipEvidence(String(args.sessionId), args.state);
+  let recorded = 0;
+  for (const entry of evidence) {
+    const result = await recordRelationEvent(ctx, { worldId: args.worldId, ...entry });
+    if (result.status === 'recorded') recorded += 1;
+  }
+  return { recorded, total: evidence.length };
 }
 
 export async function recordInactiveRelationEvent(

@@ -54,6 +54,8 @@ import {
   segmentConversationGraphemes,
   splitConversationClauses,
 } from './util/conversationText';
+import { buildWerewolfViewerState } from './werewolf/privacy';
+import type { WerewolfState } from './werewolf/types';
 
 const EVENT_NAME = '灯塔镇百万金贝寻宝赛';
 const OBSERVER_SNAPSHOT_LIMIT = 500;
@@ -522,6 +524,7 @@ export const observerSnapshot = query({
         dailyEconomyLedger: [],
         institutionStates: [],
         dailyRelationshipChanges: [],
+        werewolf: null,
         snapshotTruncation: {},
       };
     }
@@ -639,6 +642,58 @@ export const observerSnapshot = query({
         text: change.text,
         createdAt: change.createdAt,
       }));
+    const werewolfSession = await ctx.db.query('werewolfSessions')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId)).order('desc').first();
+    let werewolf = null;
+    if (werewolfSession) {
+      const [seatRows, actionRows] = await Promise.all([
+        ctx.db.query('werewolfSeats')
+          .withIndex('sessionId', (q) => q.eq('sessionId', werewolfSession._id)).collect(),
+        ctx.db.query('werewolfActions')
+          .withIndex('sessionId', (q) => q.eq('sessionId', werewolfSession._id))
+          .order('asc').take(301),
+      ]);
+      const state = JSON.parse(werewolfSession.stateJson) as WerewolfState;
+      const publicView = buildWerewolfViewerState(state);
+      const publicActionKeys = new Set(publicView.publicActions.map((action) =>
+        `${action.kind}:${action.actorId}:${action.at}`));
+      const seatNames = new Map(seatRows.map((seat) => [seat.playerId, seat.displayName]));
+      werewolf = {
+        sessionId: String(werewolfSession._id),
+        status: werewolfSession.status,
+        phase: werewolfSession.phase,
+        round: werewolfSession.round,
+        mode: werewolfSession.mode,
+        winner: werewolfSession.winner,
+        startedAt: werewolfSession.startedAt,
+        endedAt: werewolfSession.endedAt,
+        seats: seatRows.sort((left, right) => left.seatNumber - right.seatNumber).map((seat) => ({
+          playerId: seat.playerId,
+          displayName: seat.displayName,
+          seatNumber: seat.seatNumber,
+          alive: seat.alive,
+          ...(werewolfSession.status === 'completed' ? { role: seat.role } : {}),
+        })),
+        actions: actionRows.slice(0, 300)
+          .filter((action) => action.visibility !== 'private' ||
+            (action.actorId && publicActionKeys.has(`${action.kind}:${action.actorId}:${action.createdAt}`)))
+          .map((action) => ({
+            actionKey: action.actionKey,
+            sequence: action.sequence,
+            round: action.round,
+            phase: action.phase,
+            actorId: action.actorId,
+            actorName: action.actorId ? seatNames.get(action.actorId) ?? action.actorId : undefined,
+            kind: action.kind,
+            targetId: action.targetId,
+            targetName: action.targetId ? seatNames.get(action.targetId) ?? action.targetId : undefined,
+            text: action.text,
+            source: action.source,
+            createdAt: action.createdAt,
+          })),
+        truncated: actionRows.length > 300,
+      };
+    }
     const conversations = groupConversationMessages(messages, names,
       world?.conversations ?? [],
       observerNow,
@@ -668,6 +723,7 @@ export const observerSnapshot = query({
         dailyEconomyLedger,
         institutionStates,
         dailyRelationshipChanges,
+        werewolf,
         snapshotTruncation,
         logs: legacyMessages.map((message, index) => ({
           eventKey: `message:${message._id}`,
@@ -731,6 +787,7 @@ export const observerSnapshot = query({
       dailyEconomyLedger,
       institutionStates,
       dailyRelationshipChanges,
+      werewolf,
       snapshotTruncation,
     };
   },
