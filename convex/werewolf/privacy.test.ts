@@ -67,4 +67,17 @@ describe('werewolf viewer privacy', () => {
     const completed: WerewolfState = { ...running, phase: 'completed', winner: 'good' };
     expect(buildWerewolfViewerState(completed).seats.every((seat) => !!seat.role)).toBe(true);
   });
+
+  test('god observer receives night theatre actions while a player never does', () => {
+    const state = stateWithSecrets();
+    const observer = buildWerewolfViewerState(state, undefined, 'observe');
+    expect(observer.observerSecrets?.roles['p:0']).toBe('werewolf');
+    expect(observer.observerSecrets?.nightActions.some((action) => action.kind === 'wolf-vote'))
+      .toBe(true);
+    expect(observer.observerSecrets?.pendingNightTargetId).toBe('p:3');
+
+    const player = buildWerewolfViewerState(state, 'p:3', 'play');
+    expect(player.observerSecrets).toBeUndefined();
+    expect(JSON.stringify(player)).not.toMatch(/wolf-vote|seer-check/u);
+  });
 });

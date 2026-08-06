@@ -251,7 +251,7 @@ export async function queryWerewolfViewerState(ctx: QueryCtx, worldId: Id<'world
     status: session.status,
     mode: session.mode,
     spectatorPlayerId: session.spectatorPlayerId,
-    ...buildWerewolfViewerState(state, viewerId),
+    ...buildWerewolfViewerState(state, viewerId, session.mode),
   };
 }
 

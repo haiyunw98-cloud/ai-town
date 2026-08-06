@@ -3,6 +3,7 @@ import type {
   WerewolfAction,
   WerewolfCamp,
   WerewolfPhase,
+  WerewolfRecordedAction,
   WerewolfRole,
   WerewolfSeat,
   WerewolfState,
@@ -30,6 +31,12 @@ export type WerewolfViewerState = {
   speakingPlayerId?: string;
   runoffIds: string[];
   winner?: WerewolfCamp | 'draw';
+  observerSecrets?: {
+    roles: Record<string, WerewolfRole>;
+    nightActions: WerewolfRecordedAction[];
+    pendingNightTargetId?: string;
+    pendingPoisonTargetId?: string;
+  };
 };
 
 function publicAction(state: WerewolfState, action: WerewolfState['actions'][number]) {
@@ -69,6 +76,7 @@ function pendingAction(state: WerewolfState, viewer: WerewolfSeat) {
 export function buildWerewolfViewerState(
   state: WerewolfState,
   viewerId?: string,
+  mode: 'observe' | 'play' | 'public' = 'public',
 ): WerewolfViewerState {
   const viewer = viewerId
     ? state.seats.find((seat) => seat.playerId === viewerId)
@@ -95,7 +103,17 @@ export function buildWerewolfViewerState(
     runoffIds: [...state.runoffIds],
     winner: state.winner,
   };
-  if (!viewer) return result;
+  if (!viewer) {
+    if (mode === 'observe') {
+      result.observerSecrets = {
+        roles: Object.fromEntries(state.seats.map((seat) => [seat.playerId, seat.role])),
+        nightActions: state.actions.filter((action) => action.phase.startsWith('night-')),
+        pendingNightTargetId: state.pendingNightTargetId,
+        pendingPoisonTargetId: state.pendingPoisonTargetId,
+      };
+    }
+    return result;
+  }
 
   result.privateRole = viewer.role;
   if (viewer.role === 'werewolf') {
