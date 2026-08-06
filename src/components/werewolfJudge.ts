@@ -19,6 +19,27 @@ export type WerewolfJudgeCue = {
   effect: 'bell' | 'reveal' | 'gavel' | 'none';
 };
 
+export const WEREWOLF_OPENING_CUES: Array<WerewolfJudgeCue & { id: string }> = [
+  {
+    id: 'intro-welcome',
+    line: '各位居民，欢迎来到灯塔镇狼人杀圆桌。法官将全程主持，请听从阶段提示。',
+    tone: 'day',
+    effect: 'bell',
+  },
+  {
+    id: 'intro-seating',
+    line: '请九位玩家按座位号入座。上帝观察者可以看到全局，但不会替玩家行动。',
+    tone: 'day',
+    effect: 'none',
+  },
+  {
+    id: 'intro-roles',
+    line: '身份已经分发。狼人、预言家、女巫、猎人和平民请确认自己的身份；现在准备入夜。',
+    tone: 'night',
+    effect: 'reveal',
+  },
+];
+
 export function judgeCue(input: {
   phase: WerewolfPhase;
   round: number;

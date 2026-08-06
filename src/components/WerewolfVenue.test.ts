@@ -9,6 +9,9 @@ describe('dedicated werewolf venue', () => {
     expect(source).toContain('submitHumanAction');
     expect(source).toContain('发送本轮发言');
     expect(source).toContain('女巫行动');
+    expect(source).toContain('useJudgeVoice');
+    expect(source).toContain('judgeSpeechKey');
+    expect(source).toContain('voiceName');
   });
 
   test('game can switch to the venue without moving world heartbeat ownership', () => {

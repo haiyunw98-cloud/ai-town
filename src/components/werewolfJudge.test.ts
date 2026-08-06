@@ -1,6 +1,15 @@
-import { judgeCue, WEREWOLF_PHASE_ORDER } from './werewolfJudge';
+import { judgeCue, WEREWOLF_OPENING_CUES, WEREWOLF_PHASE_ORDER } from './werewolfJudge';
 
 describe('werewolf judge presentation', () => {
+  test('welcomes, seats and explains roles before the first night', () => {
+    expect(WEREWOLF_OPENING_CUES.map((cue) => cue.id)).toEqual([
+      'intro-welcome', 'intro-seating', 'intro-roles',
+    ]);
+    expect(WEREWOLF_OPENING_CUES[0].line).toContain('欢迎');
+    expect(WEREWOLF_OPENING_CUES[1].line).toContain('入座');
+    expect(WEREWOLF_OPENING_CUES[2].line).toContain('身份');
+  });
+
   test('begins with night and never calls the first phase a vote', () => {
     expect(WEREWOLF_PHASE_ORDER[0]).toBe('night-wolves');
     expect(judgeCue({ phase: 'night-wolves', round: 1 }).line)

@@ -4,7 +4,7 @@ import { toast } from 'react-toastify';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { WerewolfAction, WerewolfPhase, WerewolfRole } from '../../convex/werewolf/types';
-import { judgeCue } from './werewolfJudge';
+import { judgeCue, WEREWOLF_OPENING_CUES } from './werewolfJudge';
 import {
   buildVenueActionCue,
   roleForPresentation,
@@ -16,6 +16,8 @@ import { useWerewolfTheatre } from './useWerewolfTheatre';
 import TownSoundControl from './TownSoundControl';
 import { useTownAudio } from '../audio/TownAudioProvider';
 import { audioSceneForWerewolfPhase } from '../audio/townAudio';
+import { judgeSpeechKey } from '../audio/judgeVoice';
+import { useJudgeVoice } from '../audio/useJudgeVoice';
 
 const roleLabels: Record<WerewolfRole, string> = {
   werewolf: '狼人', villager: '平民', seer: '预言家', witch: '女巫', hunter: '猎人',
@@ -38,7 +40,12 @@ export default function WerewolfVenue({
   const [busy, setBusy] = useState(false);
   const [speech, setSpeech] = useState('');
   const [speed, setSpeed] = useState<1 | 2>(1);
-  const { setScene, setDucked, playEffect } = useTownAudio();
+  const [openingIndex, setOpeningIndex] = useState(
+    replayOpening ? 0 : WEREWOLF_OPENING_CUES.length,
+  );
+  const {
+    settings, unlocked, setScene, setDucked, playEffect,
+  } = useTownAudio();
   const view = useMemo(() => buildWerewolfPanelView(snapshot), [snapshot]);
   const names = useMemo(
     () => new Map(snapshot?.seats.map((seat) => [seat.playerId, seat.displayName]) ?? []),
@@ -62,21 +69,45 @@ export default function WerewolfVenue({
   const dawnDepartures = snapshot?.dawnResults
     ?.find((result) => result.round === theatre.presentedRound)
     ?.eliminatedPlayerIds.map((playerId) => names.get(playerId) ?? playerId);
-  const judge = judgeCue({
+  const phaseJudge = judgeCue({
     phase: theatre.presentedPhase ?? 'night-wolves',
     round: theatre.presentedRound ?? snapshot?.round ?? 1,
     speakingPlayerName: currentSpeakerName,
     dawnDepartures,
   });
+  const openingCue = WEREWOLF_OPENING_CUES[openingIndex];
+  const judge = openingCue ?? phaseJudge;
+  const speechKey = openingCue
+    ? `${snapshot?.sessionId ?? worldId}:${openingCue.id}`
+    : judgeSpeechKey(
+      String(snapshot?.sessionId ?? worldId),
+      theatre.presentedPhase ?? 'night-wolves',
+      theatre.presentedRound ?? snapshot?.round ?? 1,
+      judge.line,
+    );
+  const judgeVoice = useJudgeVoice({
+    speechKey,
+    text: judge.line,
+    enabled: unlocked && settings.enabled && settings.voice > 0,
+    volume: settings.voice,
+  });
 
   useEffect(() => {
-    if (!theatre.presentedPhase) return;
-    setScene(audioSceneForWerewolfPhase(theatre.presentedPhase));
-    setDucked(true);
-    if (judge.effect !== 'none') playEffect(judge.effect);
-    const timer = window.setTimeout(() => setDucked(false), 1300 / speed);
+    if (!openingCue) return;
+    const timer = window.setTimeout(
+      () => setOpeningIndex((index) => Math.min(index + 1, WEREWOLF_OPENING_CUES.length)),
+      3600 / speed,
+    );
     return () => window.clearTimeout(timer);
-  }, [judge.effect, playEffect, setDucked, setScene, speed, theatre.presentedPhase]);
+  }, [openingCue, speed]);
+
+  useEffect(() => {
+    if (!theatre.presentedPhase && !openingCue) return;
+    setScene(openingCue ? 'werewolf-lobby' : audioSceneForWerewolfPhase(theatre.presentedPhase!));
+    if (judge.effect !== 'none') playEffect(judge.effect);
+  }, [judge.effect, openingCue, playEffect, setScene, speechKey, theatre.presentedPhase]);
+
+  useEffect(() => setDucked(judgeVoice.speaking), [judgeVoice.speaking, setDucked]);
 
   useEffect(() => () => {
     setDucked(false);
@@ -141,15 +172,15 @@ export default function WerewolfVenue({
       </header>
 
       <section className={`werewolf-judge tone-${judge.tone}`} aria-label="狼人杀法官">
-        <span>⚖</span><div><strong>法官</strong><p>{judge.line}</p></div>
+        <span>⚖</span><div><strong>女法官 · {judgeVoice.voiceName}{judgeVoice.speaking ? ' · 正在播报' : ''}</strong><p>{judge.line}</p>{judgeVoice.error && <small>{judgeVoice.error}</small>}</div>
       </section>
 
       <section className="werewolf-stage" aria-label="九人狼人杀圆桌会场">
         <div className="werewolf-night-vignette" aria-hidden="true" />
         <div className="werewolf-round-table">
           <div className="werewolf-table-center">
-            <b>{theatre.presentedPhase?.startsWith('night') ? `第 ${theatre.presentedRound} 夜` : `第 ${theatre.presentedRound} 天`}</b>
-            <span>{cue.kind === 'wolf-target' ? '🗡 ' : ''}{cue.label}</span>
+                <b>{openingCue ? '法官开场' : theatre.presentedPhase?.startsWith('night') ? `第 ${theatre.presentedRound} 夜` : `第 ${theatre.presentedRound} 天`}</b>
+                <span>{openingCue ? `第 ${openingIndex + 1} / ${WEREWOLF_OPENING_CUES.length} 项准备` : <>{cue.kind === 'wolf-target' ? '🗡 ' : ''}{cue.label}</>}</span>
             {snapshot.mode === 'observe' && snapshot.status !== 'completed' && <small>上帝观察视角</small>}
           </div>
         </div>
