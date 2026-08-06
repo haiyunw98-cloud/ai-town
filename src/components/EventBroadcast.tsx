@@ -19,6 +19,7 @@ import {
 } from './reportExportController';
 import type { GameId } from '../../convex/aiTown/ids';
 import { inauguralEventMemory } from '../../data/worlds/lighthouse-town/history';
+import WerewolfPanel from './WerewolfPanel';
 
 export default function EventBroadcast({
   worldId,
@@ -88,6 +89,7 @@ export default function EventBroadcast({
           </span>
         </div>
       </div>
+      <WerewolfPanel worldId={worldId} />
       {view.presentation === 'live' && snapshot.event && (
         <>
           <div className="event-poster event-poster-compact">
