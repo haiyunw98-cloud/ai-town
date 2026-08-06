@@ -7,6 +7,7 @@ import type { WerewolfAction, WerewolfPhase, WerewolfRole } from '../../convex/w
 import { judgeCue } from './werewolfJudge';
 import { buildVenueActionCue, venueSeatPositions } from './werewolfVenueModel';
 import { buildWerewolfPanelView, type WerewolfPanelState } from './werewolfView';
+import { useWerewolfTheatre } from './useWerewolfTheatre';
 
 const roleLabels: Record<WerewolfRole, string> = {
   werewolf: '狼人', villager: '平民', seer: '预言家', witch: '女巫', hunter: '猎人',
@@ -28,7 +29,6 @@ export default function WerewolfVenue({
   const [speech, setSpeech] = useState('');
   const [speed, setSpeed] = useState<1 | 2>(1);
   const view = useMemo(() => buildWerewolfPanelView(snapshot), [snapshot]);
-  const cue = useMemo(() => buildVenueActionCue(snapshot ?? {}), [snapshot]);
   const names = useMemo(
     () => new Map(snapshot?.seats.map((seat) => [seat.playerId, seat.displayName]) ?? []),
     [snapshot?.seats],
@@ -36,8 +36,18 @@ export default function WerewolfVenue({
   const currentSpeakerName = snapshot?.speakingPlayerId
     ? names.get(snapshot.speakingPlayerId)
     : undefined;
+  const theatre = useWerewolfTheatre(
+    (snapshot?.phase ?? 'night-wolves') as WerewolfPhase,
+    snapshot?.round ?? 1,
+    speed,
+    snapshot?.mode === 'observe',
+  );
+  const cue = useMemo(
+    () => buildVenueActionCue(snapshot ? { ...snapshot, phase: theatre.presentedPhase } : {}),
+    [snapshot, theatre.presentedPhase],
+  );
   const judge = judgeCue({
-    phase: (snapshot?.phase ?? 'night-wolves') as WerewolfPhase,
+    phase: theatre.presentedPhase,
     round: snapshot?.round ?? 1,
     speakingPlayerName: currentSpeakerName,
   });
@@ -79,14 +89,14 @@ export default function WerewolfVenue({
     snapshot.observerSecrets?.roles[playerId] ?? ownRole;
 
   return (
-    <main className={`werewolf-venue is-${snapshot.phase} theatre-speed-${speed}`}>
+    <main className={`werewolf-venue is-${theatre.presentedPhase} theatre-speed-${speed}`}>
       <header className="werewolf-venue-toolbar">
         <button onClick={onClose}>← 缩回小镇</button>
-        <div><strong>灯塔镇狼人杀会场</strong><span>第 {snapshot.round} 轮 · {view.phaseLabel}</span></div>
+        <div><strong>灯塔镇狼人杀会场</strong><span>第 {snapshot.round} 轮 · {theatre.catchingUp ? '法官正在主持阶段演出' : view.phaseLabel}</span></div>
         <div className="werewolf-speed-controls" aria-label="演出速度">
           <button className={speed === 1 ? 'is-active' : ''} onClick={() => setSpeed(1)}>1×</button>
           <button className={speed === 2 ? 'is-active' : ''} onClick={() => setSpeed(2)}>2×</button>
-          <button onClick={() => setSpeed(2)}>跳过演出</button>
+          <button onClick={theatre.skip}>跳过演出</button>
         </div>
       </header>
 
@@ -98,7 +108,7 @@ export default function WerewolfVenue({
         <div className="werewolf-night-vignette" aria-hidden="true" />
         <div className="werewolf-round-table">
           <div className="werewolf-table-center">
-            <b>{snapshot.phase.startsWith('night') ? `第 ${snapshot.round} 夜` : `第 ${snapshot.round} 天`}</b>
+            <b>{theatre.presentedPhase.startsWith('night') ? `第 ${snapshot.round} 夜` : `第 ${snapshot.round} 天`}</b>
             <span>{cue.kind === 'wolf-target' ? '🗡 ' : ''}{cue.label}</span>
             {snapshot.mode === 'observe' && snapshot.status !== 'completed' && <small>上帝观察视角</small>}
           </div>
@@ -125,7 +135,7 @@ export default function WerewolfVenue({
               className={[
                 'werewolf-seat', active ? 'is-acting' : '', targeted ? 'is-targeted' : '',
                 speaking ? 'is-speaking' : '', !seat.alive ? 'is-eliminated' : '',
-                isWolf && snapshot.phase.startsWith('night') ? 'is-awake-wolf' : '',
+                isWolf && theatre.presentedPhase.startsWith('night') ? 'is-awake-wolf' : '',
               ].filter(Boolean).join(' ')}
               style={{ left: `${point.x}%`, top: `${point.y}%` }}
             >
