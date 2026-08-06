@@ -22,6 +22,7 @@ import { cameraFrame, type TownCameraMode } from './cameraFrame.ts';
 import type { GameId } from '../../convex/aiTown/ids.ts';
 import { resolveObserverDestination } from './observerDestination.ts';
 import { toast } from 'react-toastify';
+import WerewolfMapOverlay from './WerewolfMapOverlay.tsx';
 
 export const PixiGame = (props: {
   worldId: Id<'worlds'>;
@@ -41,6 +42,7 @@ export const PixiGame = (props: {
 
   const humanTokenIdentifier = useQuery(api.world.userStatus, { worldId: props.worldId }) ?? null;
   const eventMapSnapshot = useQuery(api.events.eventMapSnapshot, { worldId: props.worldId });
+  const werewolfSnapshot = useQuery(api.werewolf.viewerState, { worldId: props.worldId });
   const humanPlayerId = [...props.game.world.players.values()].find(
     (p) => p.human === humanTokenIdentifier,
   )?.id;
@@ -176,6 +178,7 @@ export const PixiGame = (props: {
       <TownLandmarks tileDim={tileDim} onSelect={props.onSelectLandmark} />
       <FerryOverlay tileDim={tileDim} />
       <EventMapOverlay tileDim={tileDim} snapshot={eventMapSnapshot} />
+      <WerewolfMapOverlay tileDim={tileDim} snapshot={werewolfSnapshot} />
       {players.map(
         (p) =>
           // Only show the path for the human player in non-debug mode.

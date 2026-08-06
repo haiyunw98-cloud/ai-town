@@ -241,6 +241,29 @@ export const eventCheckpoints = {
   lanternShop: { x: 35, y: 7 },
 } as const;
 
+// A temporary round table appears on the inland lighthouse plaza during
+// social games. These are engine-walkable tiles, not decorative teleport points.
+export const werewolfCheckpoints = {
+  center: { x: 22, y: 15 },
+  seats: [
+    { x: 20, y: 13 },
+    { x: 22, y: 13 },
+    { x: 24, y: 13 },
+    { x: 26, y: 14 },
+    { x: 26, y: 16 },
+    { x: 24, y: 17 },
+    { x: 22, y: 17 },
+    { x: 20, y: 17 },
+    { x: 18, y: 15 },
+  ],
+  spectators: [
+    { x: 17, y: 12 },
+    { x: 17, y: 14 },
+    { x: 17, y: 16 },
+    { x: 17, y: 18 },
+  ],
+} as const;
+
 export const trialIslandCheckpoints = {
   arrival: { x: 50, y: 14 },
   track: { x: 63, y: 10 },

@@ -10,10 +10,12 @@ import type { Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { DEFAULT_NAME } from './constants';
-import { playerId } from './aiTown/ids';
+import { parseGameId, playerId } from './aiTown/ids';
+import { insertInput } from './aiTown/insertInput';
 import { selectConfiguredAiRoster } from './events';
 import { buildWerewolfViewerState } from './werewolf/privacy';
 import { requestWerewolfAction } from './werewolf/model';
+import { buildWerewolfMovementCommands } from './werewolf/movement';
 import { createWerewolfSetup } from './werewolf/setup';
 import {
   applyWerewolfAction,
@@ -220,6 +222,7 @@ export async function startWerewolfSession(
     source: 'system',
     createdAt: now,
   });
+  await enqueueWerewolfMovements(ctx, args.worldId, seats, 'seating', now);
   await ctx.scheduler.runAfter(0, internal.werewolf.advanceSession, { sessionId });
   return { sessionId, mode: args.mode, spectatorPlayerId: selected.spectator?.residentId };
 }
@@ -621,6 +624,9 @@ async function persistState(
   state: WerewolfState,
   at: number,
 ) {
+  const session = await ctx.db.get(sessionId);
+  if (!session) throw new Error('狼人杀会话在保存前已丢失。');
+  const previous = JSON.parse(session.stateJson) as WerewolfState;
   await ctx.db.patch(sessionId, {
     status: state.phase === 'completed' ? 'completed' : 'running',
     phase: state.phase,
@@ -639,6 +645,54 @@ async function persistState(
       alive: seat.alive,
       stateJson: JSON.stringify(seat),
     });
+  }
+  if (state.phase === 'completed' && previous.phase !== 'completed') {
+    await enqueueWerewolfMovements(ctx, session.worldId, state.seats, 'return', at);
+    return;
+  }
+  const newlyEliminated = new Set(state.seats.filter((seat) =>
+    !seat.alive && previous.seats.find((oldSeat) => oldSeat.playerId === seat.playerId)?.alive,
+  ).map((seat) => seat.playerId));
+  if (newlyEliminated.size > 0) {
+    const commands = buildWerewolfMovementCommands(state.seats, 'elimination', at)
+      .filter((command) => newlyEliminated.has(command.residentId));
+    await enqueueMovementCommands(ctx, session.worldId, commands);
+  }
+}
+
+async function enqueueWerewolfMovements(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  seats: readonly WerewolfState['seats'][number][],
+  phase: 'seating' | 'elimination' | 'return',
+  now: number,
+) {
+  await enqueueMovementCommands(
+    ctx,
+    worldId,
+    buildWerewolfMovementCommands(seats, phase, now),
+  );
+}
+
+async function enqueueMovementCommands(
+  ctx: MutationCtx,
+  worldId: Id<'worlds'>,
+  commands: readonly ReturnType<typeof buildWerewolfMovementCommands>[number][],
+) {
+  for (const command of commands) {
+    try {
+      await insertInput(ctx, worldId, 'eventMove', {
+        playerId: parseGameId('players', command.residentId),
+        destination: command.destination,
+        description: command.description,
+        until: command.until,
+      });
+    } catch (error) {
+      console.warn('Werewolf movement input was deferred.', {
+        residentId: command.residentId,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+    }
   }
 }
 
