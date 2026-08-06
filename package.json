@@ -14,6 +14,8 @@
     "verify:event-runtime": "node --loader ts-node/esm --experimental-specifier-resolution=node scripts/verify-daily-event-runtime.ts",
     "archive:ima": "node --loader ts-node/esm --experimental-specifier-resolution=node scripts/export-lighthouse-ima.ts",
     "archive:ima:watch": "node --loader ts-node/esm --experimental-specifier-resolution=node scripts/run-lighthouse-archive.ts",
+    "audio:generate": "node scripts/generate-lighthouse-audio.mjs",
+    "audio:validate": "node scripts/generate-lighthouse-audio.mjs --validate",
     "validate:world": "node scripts/validate-world-assets.mjs",
     "level-editor": "vite src/editor/",
     "le": "vite src/editor/"
