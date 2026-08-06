@@ -708,12 +708,13 @@ describe('social observation structured model boundary', () => {
       expect(result.fallbackReason).toBe('模型不可用');
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('http://test.local/v1/chat/completions');
+      expect(url).toBe('http://test.local/api/chat');
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body).toEqual(expect.objectContaining({
         model: 'gemma4:12b',
-        temperature: 0.2,
         stream: false,
+        think: false,
+        options: expect.objectContaining({ temperature: 0.2 }),
       }));
       const logged = logSpies
         .flatMap((spy) => spy.mock.calls)

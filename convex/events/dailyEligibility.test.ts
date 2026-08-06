@@ -37,7 +37,7 @@ describe('daily model persistence eligibility', () => {
     expect(schema).toContain(".index('isDefault', ['isDefault'])");
     expect(source).not.toContain(".filter((q) => q.eq(q.field('isDefault'), true))");
     expect(source.match(/\.withIndex\('isDefault', \(q\) => q\.eq\('isDefault', true\)\)/gu))
-      .toHaveLength(6);
+      .toHaveLength(7);
   });
 
   test('classifies exactly one older daily event while ignoring legacy and today rows', () => {

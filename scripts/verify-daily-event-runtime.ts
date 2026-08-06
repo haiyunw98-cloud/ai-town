@@ -44,6 +44,7 @@ export function verifyDailyEventRuntime() {
     spectators: number;
     movementCommands: number;
     transfers: number;
+    ferryMovements: number;
   }> = [];
   const assemblyCommands = buildDailyStageMovementCommands(
     template,
@@ -59,6 +60,8 @@ export function verifyDailyEventRuntime() {
     spectators: 0,
     movementCommands: assemblyCommands.length,
     transfers: assemblyCommands.filter((command) => command.kind === 'transfer').length,
+    ferryMovements: assemblyCommands.filter((command) =>
+      command.description.includes('乘坐内河渡船')).length,
   });
 
   let persisted = draft;
@@ -87,6 +90,8 @@ export function verifyDailyEventRuntime() {
       ).length,
       movementCommands: commands.length,
       transfers: commands.filter((command) => command.kind === 'transfer').length,
+      ferryMovements: commands.filter((command) =>
+        command.description.includes('乘坐内河渡船')).length,
     });
   }
 
@@ -147,9 +152,12 @@ export function verifyDailyEventRuntime() {
     oneWinner: persisted.participants.filter((entry) => entry.role === 'winner').length === 1,
     safeElimination: persisted.logs.every((entry) => !unsafeText.test(entry.text)),
     mapLifecycle: stageResults.every((entry) => entry.movementCommands >= 9),
-    islandTransfer: stageResults[1].transfers === 9,
+    islandFerryRoute: stageResults[1].transfers === 0
+      && stageResults[1].ferryMovements === 9,
     returnToTown: returnCommands.length === 9
-      && returnCommands.every((command) => command.kind === 'transfer'),
+      && returnCommands.every((command) =>
+        command.kind === 'move'
+        && command.description.includes('乘坐内河渡船')),
     rewardsUnique: new Set(rewardRows.map((row) => row.key)).size === rewardRows.length,
     rewardTotal: rewardRows.reduce((total, row) => total + row.amount, 0) === 220,
     historyArchived: persisted.event.archiveReason === 'completed'
