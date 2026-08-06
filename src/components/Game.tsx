@@ -41,6 +41,7 @@ export default function Game() {
   const [cameraMode, setCameraMode] = useState<TownCameraMode>('town');
   const [observerRetry, setObserverRetry] = useState(0);
   const [venueOpen, setVenueOpen] = useState(false);
+  const [venueReplayOpening, setVenueReplayOpening] = useState(false);
   const [gameWrapper, setGameWrapper] = useState<HTMLDivElement | null>(null);
   const [{ width, height }, setGameSize] = useState({ width: 0, height: 0 });
 
@@ -140,7 +141,11 @@ export default function Game() {
     );
   }
   if (venueOpen) {
-    return <WerewolfVenue worldId={worldId} onClose={() => setVenueOpen(false)} />;
+    return <WerewolfVenue
+      worldId={worldId}
+      replayOpening={venueReplayOpening}
+      onClose={() => setVenueOpen(false)}
+    />;
   }
   return (
     <>
@@ -292,7 +297,10 @@ https://github.com/michalochman/react-pixi-fiber/issues/145#issuecomment-5315492
             ) : sidebarTab === 'broadcast' ? (
                   <EventBroadcast
                     worldId={worldId}
-                    onOpenWerewolfVenue={() => setVenueOpen(true)}
+                    onOpenWerewolfVenue={(replayOpening = false) => {
+                      setVenueReplayOpening(replayOpening);
+                      setVenueOpen(true);
+                    }}
                 onSelectResident={(residentId) => {
                   setSelectedElement({ kind: 'player', id: residentId });
                   setSelectedLandmark(undefined);

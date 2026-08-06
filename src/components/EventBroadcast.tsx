@@ -28,7 +28,7 @@ export default function EventBroadcast({
 }: {
   worldId: Id<'worlds'>;
   onSelectResident?: (residentId: GameId<'players'>) => void;
-  onOpenWerewolfVenue?: () => void;
+  onOpenWerewolfVenue?: (replayOpening?: boolean) => void;
 }) {
   const { locale, t } = useI18n();
   const [now, setNow] = useState(Date.now());

@@ -25,6 +25,7 @@ export type WerewolfPanelState = {
   speakingPlayerId?: string;
   runoffIds: string[];
   winner?: 'good' | 'wolves' | 'draw';
+  dawnResults?: Array<{ round: number; eliminatedPlayerIds: string[] }>;
   knownWolfIds?: string[];
   seerResults?: Array<{ targetId: string; camp: 'good' | 'wolves' }>;
   witchNoticeTargetId?: string;

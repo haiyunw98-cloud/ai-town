@@ -19,9 +19,11 @@ const roleLabels: Record<WerewolfRole, string> = {
 export default function WerewolfVenue({
   worldId,
   onClose,
+  replayOpening = false,
 }: {
   worldId: Id<'worlds'>;
   onClose: () => void;
+  replayOpening?: boolean;
 }) {
   const snapshot = useQuery(api.werewolf.viewerState, { worldId }) as
     | WerewolfPanelState
@@ -41,22 +43,29 @@ export default function WerewolfVenue({
     ? names.get(snapshot.speakingPlayerId)
     : undefined;
   const theatre = useWerewolfTheatre(
-    (snapshot?.phase ?? 'night-wolves') as WerewolfPhase,
-    snapshot?.round ?? 1,
+    snapshot?.phase as WerewolfPhase | undefined,
+    snapshot?.round,
     speed,
-    snapshot?.mode === 'observe',
+    replayOpening && snapshot?.mode === 'observe',
   );
   const cue = useMemo(
-    () => buildVenueActionCue(snapshot ? { ...snapshot, phase: theatre.presentedPhase } : {}),
-    [snapshot, theatre.presentedPhase],
+    () => buildVenueActionCue(snapshot && theatre.presentedPhase ? {
+      ...snapshot, phase: theatre.presentedPhase, round: theatre.presentedRound,
+    } : {}),
+    [snapshot, theatre.presentedPhase, theatre.presentedRound],
   );
+  const dawnDepartures = snapshot?.dawnResults
+    ?.find((result) => result.round === theatre.presentedRound)
+    ?.eliminatedPlayerIds.map((playerId) => names.get(playerId) ?? playerId);
   const judge = judgeCue({
-    phase: theatre.presentedPhase,
-    round: snapshot?.round ?? 1,
+    phase: theatre.presentedPhase ?? 'night-wolves',
+    round: theatre.presentedRound ?? snapshot?.round ?? 1,
     speakingPlayerName: currentSpeakerName,
+    dawnDepartures,
   });
 
   useEffect(() => {
+    if (!theatre.presentedPhase) return;
     setScene(audioSceneForWerewolfPhase(theatre.presentedPhase));
     setDucked(true);
     if (judge.effect !== 'none') playEffect(judge.effect);
@@ -100,16 +109,19 @@ export default function WerewolfVenue({
   const points = venueSeatPositions(snapshot.seats.length);
   const pointBySeat = new Map(points.map((point) => [point.seatNumber, point]));
   const publicVotes = snapshot.publicActions.filter(
-    (action): action is Extract<WerewolfAction, { kind: 'day-vote' }> => action.kind === 'day-vote',
+    (action): action is Extract<WerewolfAction, { kind: 'day-vote' }> =>
+      action.kind === 'day-vote' &&
+      (action as WerewolfAction & { round?: number }).round === theatre.presentedRound &&
+      (theatre.presentedPhase === 'day-voting' || theatre.presentedPhase === 'runoff-voting'),
   ).slice(-9);
   const revealRole = (playerId: string, ownRole?: WerewolfRole) =>
     snapshot.observerSecrets?.roles[playerId] ?? ownRole;
 
   return (
-    <main className={`werewolf-venue is-${theatre.presentedPhase} theatre-speed-${speed}`}>
+    <main className={`werewolf-venue is-${theatre.presentedPhase ?? snapshot.phase} theatre-speed-${speed}`}>
       <header className="werewolf-venue-toolbar">
         <button onClick={onClose}>← 缩回小镇</button>
-        <div><strong>灯塔镇狼人杀会场</strong><span>第 {snapshot.round} 轮 · {theatre.catchingUp ? '法官正在主持阶段演出' : view.phaseLabel}</span></div>
+        <div><strong>灯塔镇狼人杀会场</strong><span>第 {theatre.presentedRound ?? snapshot.round} 轮 · {theatre.catchingUp ? '法官正在主持阶段演出' : view.phaseLabel}</span></div>
         <div className="werewolf-speed-controls" aria-label="演出速度">
           <button className={speed === 1 ? 'is-active' : ''} onClick={() => setSpeed(1)}>1×</button>
           <button className={speed === 2 ? 'is-active' : ''} onClick={() => setSpeed(2)}>2×</button>
@@ -126,7 +138,7 @@ export default function WerewolfVenue({
         <div className="werewolf-night-vignette" aria-hidden="true" />
         <div className="werewolf-round-table">
           <div className="werewolf-table-center">
-            <b>{theatre.presentedPhase.startsWith('night') ? `第 ${snapshot.round} 夜` : `第 ${snapshot.round} 天`}</b>
+            <b>{theatre.presentedPhase?.startsWith('night') ? `第 ${theatre.presentedRound} 夜` : `第 ${theatre.presentedRound} 天`}</b>
             <span>{cue.kind === 'wolf-target' ? '🗡 ' : ''}{cue.label}</span>
             {snapshot.mode === 'observe' && snapshot.status !== 'completed' && <small>上帝观察视角</small>}
           </div>
@@ -153,7 +165,7 @@ export default function WerewolfVenue({
               className={[
                 'werewolf-seat', active ? 'is-acting' : '', targeted ? 'is-targeted' : '',
                 speaking ? 'is-speaking' : '', !seat.alive ? 'is-eliminated' : '',
-                isWolf && theatre.presentedPhase.startsWith('night') ? 'is-awake-wolf' : '',
+                isWolf && theatre.presentedPhase?.startsWith('night') ? 'is-awake-wolf' : '',
               ].filter(Boolean).join(' ')}
               style={{ left: `${point.x}%`, top: `${point.y}%` }}
             >

@@ -9,7 +9,10 @@ describe('werewolf judge presentation', () => {
   });
 
   test('announces daylight before speaking and voting', () => {
-    expect(judgeCue({ phase: 'dawn', round: 1 }).line).toContain('天亮');
+    expect(judgeCue({ phase: 'dawn', round: 1, dawnDepartures: [] }).line)
+      .toBe('天亮了。昨夜平安，无人离场。');
+    expect(judgeCue({ phase: 'dawn', round: 1, dawnDepartures: ['白露', '墨七'] }).line)
+      .toBe('天亮了。昨夜白露、墨七离场，已安全前往观众席。');
     expect(judgeCue({ phase: 'day-speaking', round: 1, speakingPlayerName: '林澜' }).line)
       .toContain('林澜');
     expect(judgeCue({ phase: 'day-voting', round: 1 }).line).toContain('开始投票');

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WerewolfPhase } from '../../convex/werewolf/types';
 import { WEREWOLF_PHASE_ORDER } from './werewolfJudge';
 
@@ -15,48 +15,65 @@ const phaseDwell: Record<WerewolfPhase, number> = {
   completed: 8000,
 };
 
+export type TheatreStep = { phase: WerewolfPhase; round: number };
+
 export function phaseDwellMs(phase: WerewolfPhase, speed: 1 | 2) {
   return phaseDwell[phase] / speed;
 }
 
-export function initialTheatreQueue(
+export function theatreStepsForSnapshot(
+  previous: TheatreStep | undefined,
   phase: WerewolfPhase,
   round: number,
   replayOpening: boolean,
-): WerewolfPhase[] {
-  if (!replayOpening || round !== 1) return [phase];
+): TheatreStep[] {
+  if (previous?.phase === phase && previous.round === round) return [];
   const currentIndex = WEREWOLF_PHASE_ORDER.indexOf(phase);
-  if (currentIndex <= 0 || currentIndex > WEREWOLF_PHASE_ORDER.indexOf('day-voting')) return [phase];
-  return WEREWOLF_PHASE_ORDER.slice(0, currentIndex + 1);
+  if (!previous) {
+    const phases = replayOpening && round === 1 && currentIndex > 0 &&
+      currentIndex <= WEREWOLF_PHASE_ORDER.indexOf('day-voting')
+      ? WEREWOLF_PHASE_ORDER.slice(0, currentIndex + 1)
+      : [phase];
+    return phases.map((candidate) => ({ phase: candidate, round }));
+  }
+  const previousIndex = WEREWOLF_PHASE_ORDER.indexOf(previous.phase);
+  const phases = previous.round === round
+    ? (currentIndex > previousIndex
+      ? WEREWOLF_PHASE_ORDER.slice(previousIndex + 1, currentIndex + 1)
+      : [phase])
+    : (round > previous.round && replayOpening && currentIndex > 0
+      ? WEREWOLF_PHASE_ORDER.slice(0, currentIndex + 1)
+      : [phase]);
+  return phases.map((candidate) => ({ phase: candidate, round }));
 }
 
 export function useWerewolfTheatre(
-  phase: WerewolfPhase,
-  round: number,
+  phase: WerewolfPhase | undefined,
+  round: number | undefined,
   speed: 1 | 2,
   replayOpening: boolean,
 ) {
-  const initial = useMemo(
-    () => initialTheatreQueue(phase, round, replayOpening),
-    // The opening queue must be chosen only when the venue mounts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-  const [queue, setQueue] = useState<WerewolfPhase[]>(initial);
+  const initial = phase && round
+    ? theatreStepsForSnapshot(undefined, phase, round, replayOpening)
+    : [];
+  const [queue, setQueue] = useState<TheatreStep[]>(initial);
+  const lastObserved = useRef<TheatreStep | undefined>(initial.at(-1));
 
   useEffect(() => {
-    const incoming = initialTheatreQueue(phase, round, replayOpening);
-    setQueue((current) => [
-      ...current,
-      ...incoming.filter((candidate) => !current.includes(candidate)),
-    ]);
+    if (!phase || !round) return;
+    const incoming = theatreStepsForSnapshot(lastObserved.current, phase, round, replayOpening);
+    lastObserved.current = { phase, round };
+    setQueue((current) => {
+      const keys = new Set(current.map((step) => `${step.round}:${step.phase}`));
+      return [...current, ...incoming.filter((step) => !keys.has(`${step.round}:${step.phase}`))];
+    });
   }, [phase, replayOpening, round]);
 
   useEffect(() => {
     if (queue.length <= 1) return;
     const timer = window.setTimeout(() => {
       setQueue((current) => current.length > 1 ? current.slice(1) : current);
-    }, phaseDwellMs(queue[0], speed));
+    }, phaseDwellMs(queue[0].phase, speed));
     return () => window.clearTimeout(timer);
   }, [queue, speed]);
 
@@ -65,7 +82,8 @@ export function useWerewolfTheatre(
   }, []);
 
   return {
-    presentedPhase: queue[0] ?? phase,
+    presentedPhase: queue[0]?.phase ?? phase,
+    presentedRound: queue[0]?.round ?? round,
     catchingUp: queue.length > 1,
     skip,
   };

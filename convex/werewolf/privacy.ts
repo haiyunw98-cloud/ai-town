@@ -31,6 +31,7 @@ export type WerewolfViewerState = {
   speakingPlayerId?: string;
   runoffIds: string[];
   winner?: WerewolfCamp | 'draw';
+  dawnResults?: Array<{ round: number; eliminatedPlayerIds: string[] }>;
   observerSecrets?: {
     roles: Record<string, WerewolfRole>;
     nightActions: WerewolfRecordedAction[];
@@ -82,6 +83,18 @@ export function buildWerewolfViewerState(
     ? state.seats.find((seat) => seat.playerId === viewerId)
     : undefined;
   const completed = state.phase === 'completed';
+  const completedDawnRound = state.phase.startsWith('night-') ? state.round - 1 : state.round;
+  const dawnResults = Array.from({ length: Math.max(0, completedDawnRound) }, (_, index) => {
+    const round = index + 1;
+    return {
+      round,
+      eliminatedPlayerIds: state.seats
+        .filter((seat) => seat.eliminatedRound === round &&
+          (seat.eliminatedBy === 'wolves' || seat.eliminatedBy === 'witch'))
+        .sort((left, right) => left.seatNumber - right.seatNumber)
+        .map((seat) => seat.playerId),
+    };
+  });
   const seats = state.seats.map((seat): PublicSeat => ({
     playerId: seat.playerId,
     displayName: seat.displayName,
@@ -102,6 +115,7 @@ export function buildWerewolfViewerState(
     speakingPlayerId: state.speakingOrder[0],
     runoffIds: [...state.runoffIds],
     winner: state.winner,
+    dawnResults,
   };
   if (!viewer) {
     if (mode === 'observe') {

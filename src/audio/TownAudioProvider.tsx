@@ -66,7 +66,8 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
   const [settings, setSettings] = useState(loadAudioSettings);
   const [unlocked, setUnlocked] = useState(false);
   const [scene, setScene] = useState<AudioScene>('town');
-  const [ducked, setDucked] = useState(false);
+  const [speechDucked, setSpeechDucked] = useState(false);
+  const [visibilityDucked, setVisibilityDucked] = useState(() => document.hidden);
   const contextRef = useRef<AudioContext>();
   const townTrackRef = useRef<HTMLAudioElement>();
   const sceneSourcesRef = useRef<AudioScheduledSourceNode[]>([]);
@@ -96,6 +97,9 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ||
+          (target instanceof HTMLElement && target.isContentEditable)) return;
       if (event.key.toLowerCase() === 'm') {
         setSettings((current) => ({ ...current, enabled: !current.enabled }));
       }
@@ -105,7 +109,7 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    const onVisibility = () => setDucked(document.hidden);
+    const onVisibility = () => setVisibilityDucked(document.hidden);
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
@@ -122,7 +126,7 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
       return;
     }
     const ctx = ensureContext();
-    const duck = ducked ? 0.28 : 1;
+    const duck = speechDucked || visibilityDucked ? 0.28 : 1;
     if (scene === 'town') {
       if (townTrack) {
         townTrack.volume = settings.music * 0.55 * duck;
@@ -153,7 +157,17 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
       }
       sceneSourcesRef.current = [];
     };
-  }, [ducked, ensureContext, scene, settings, unlocked]);
+  }, [ensureContext, scene, settings, speechDucked, unlocked, visibilityDucked]);
+
+  useEffect(() => () => {
+    townTrackRef.current?.pause();
+    for (const source of sceneSourcesRef.current) {
+      try { source.stop(); } catch { /* already stopped */ }
+      source.disconnect();
+    }
+    sceneSourcesRef.current = [];
+    void contextRef.current?.close();
+  }, []);
 
   const setChannel = useCallback((channel: AudioChannel, value: number) => {
     setSettings((current) => normalizeAudioSettings({ ...current, [channel]: value }));
@@ -180,7 +194,8 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
 
   return (
     <TownAudioContext.Provider value={{
-      settings, unlocked, scene, unlock, setScene, setChannel, toggleMute, setDucked, playEffect,
+      settings, unlocked, scene, unlock, setScene, setChannel, toggleMute,
+      setDucked: setSpeechDucked, playEffect,
     }}>
       {children}
     </TownAudioContext.Provider>

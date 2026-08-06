@@ -80,4 +80,22 @@ describe('werewolf viewer privacy', () => {
     expect(player.observerSecrets).toBeUndefined();
     expect(JSON.stringify(player)).not.toMatch(/wolf-vote|seer-check/u);
   });
+
+  test('publishes an auditable dawn result without exposing private night actions', () => {
+    const running = stateWithSecrets();
+    const afterDawn: WerewolfState = {
+      ...running,
+      phase: 'day-speaking',
+      seats: running.seats.map((seat) => seat.playerId === 'p:3' ? {
+        ...seat, alive: false, eliminatedRound: 1, eliminatedBy: 'wolves',
+      } : seat),
+    };
+    const player = buildWerewolfViewerState(afterDawn, 'p:4', 'play');
+    expect(player.dawnResults).toEqual([{ round: 1, eliminatedPlayerIds: ['p:3'] }]);
+    expect(JSON.stringify(player)).not.toMatch(/wolf-vote|seer-check/u);
+
+    const peaceful: WerewolfState = { ...running, phase: 'day-speaking' };
+    expect(buildWerewolfViewerState(peaceful).dawnResults)
+      .toEqual([{ round: 1, eliminatedPlayerIds: [] }]);
+  });
 });

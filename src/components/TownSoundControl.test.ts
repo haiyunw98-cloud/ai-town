@@ -17,4 +17,12 @@ describe('town sound control', () => {
     expect(provider).toContain('AudioContext');
     expect(oldButton).not.toContain("sound.add('background'");
   });
+
+  test('keeps visibility ducking separate and cleans up browser audio resources', () => {
+    const provider = readFileSync(new URL('../audio/TownAudioProvider.tsx', import.meta.url), 'utf8');
+    expect(provider).toContain('visibilityDucked');
+    expect(provider).toContain('speechDucked');
+    expect(provider).toContain("target instanceof HTMLInputElement");
+    expect(provider).toContain('contextRef.current?.close()');
+  });
 });

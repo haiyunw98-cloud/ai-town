@@ -23,6 +23,7 @@ export function judgeCue(input: {
   phase: WerewolfPhase;
   round: number;
   speakingPlayerName?: string;
+  dawnDepartures?: string[];
 }): WerewolfJudgeCue {
   switch (input.phase) {
     case 'night-wolves':
@@ -44,7 +45,15 @@ export function judgeCue(input: {
         effect: 'reveal',
       };
     case 'dawn':
-      return { line: '天亮了。现在公布昨夜结果。', tone: 'dawn', effect: 'bell' };
+      return {
+        line: input.dawnDepartures
+          ? input.dawnDepartures.length > 0
+            ? `天亮了。昨夜${input.dawnDepartures.join('、')}离场，已安全前往观众席。`
+            : '天亮了。昨夜平安，无人离场。'
+          : '天亮了。现在公布昨夜结果。',
+        tone: 'dawn',
+        effect: 'bell',
+      };
     case 'day-speaking':
       return {
         line: input.speakingPlayerName

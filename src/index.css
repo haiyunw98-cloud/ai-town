@@ -1603,7 +1603,6 @@ p[contenteditable='true']:empty::before {
   .werewolf-venue-toolbar { position: sticky; top: 0; grid-template-columns: auto minmax(0, 1fr) auto; padding: 7px; }
   .werewolf-venue-toolbar > div:nth-child(2) { display: grid; gap: 1px; justify-items: center; }
   .werewolf-venue-toolbar > div:nth-child(2) strong { font-size: 13px; }
-  .werewolf-speed-controls button:last-child { display: none; }
   .werewolf-venue-toolbar > .town-sound-control { grid-column: 3; grid-row: 1; }
   .werewolf-speed-controls { position: absolute; top: 58px; right: 8px; z-index: 8; }
   .werewolf-judge { grid-column: 1; padding: 8px 10px; }

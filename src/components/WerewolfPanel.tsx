@@ -10,7 +10,7 @@ export default function WerewolfPanel({
   onOpenVenue,
 }: {
   worldId: Id<'worlds'>;
-  onOpenVenue?: () => void;
+  onOpenVenue?: (replayOpening?: boolean) => void;
 }) {
   const snapshot = useQuery(api.werewolf.viewerState, { worldId }) as
     | WerewolfPanelState
@@ -56,20 +56,20 @@ export default function WerewolfPanel({
         <div className="werewolf-start-actions">
           <button disabled={busy} onClick={() => void run(async () => {
             await startSession({ worldId, mode: 'observe' });
-            onOpenVenue?.();
+            onOpenVenue?.(true);
           })}>
             👁 {view.startLabels[0]}
           </button>
           <button disabled={busy} onClick={() => void run(async () => {
             await startSession({ worldId, mode: 'play' });
-            onOpenVenue?.();
+            onOpenVenue?.(true);
           })}>
             🎭 {view.startLabels[1]}
           </button>
         </div>
       )}
       {snapshot && snapshot.status !== 'completed' && (
-        <button className="werewolf-enter-venue" onClick={onOpenVenue}>进入圆桌会场</button>
+        <button className="werewolf-enter-venue" onClick={() => onOpenVenue?.(false)}>进入圆桌会场</button>
       )}
       {view.privateCard && (
         <details className="werewolf-private-card">
