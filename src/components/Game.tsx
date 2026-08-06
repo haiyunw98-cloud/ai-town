@@ -21,12 +21,14 @@ import { waitForInput } from '../hooks/sendInput';
 import { toast } from 'react-toastify';
 import ObserverPanelBoundary from './ObserverPanelBoundary';
 import WerewolfVenue from './WerewolfVenue';
+import { useTownAudio } from '../audio/TownAudioProvider';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
 export default function Game() {
   const convex = useConvex();
   const { t } = useI18n();
+  const { setScene } = useTownAudio();
   const [selectedElement, setSelectedElement] = useState<{
     kind: 'player';
     id: GameId<'players'>;
@@ -87,6 +89,10 @@ export default function Game() {
 
   // Send a periodic heartbeat to our world to keep it alive.
   useWorldHeartbeat();
+
+  useEffect(() => {
+    if (!venueOpen) setScene(worldStatus?.status === 'stoppedByDeveloper' ? 'paused' : 'town');
+  }, [setScene, venueOpen, worldStatus?.status]);
 
   const worldState = useQuery(api.world.worldState, worldId ? { worldId } : 'skip');
   const eventMapSnapshot = useQuery(

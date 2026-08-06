@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { toast } from 'react-toastify';
 import { api } from '../../convex/_generated/api';
@@ -8,6 +8,9 @@ import { judgeCue } from './werewolfJudge';
 import { buildVenueActionCue, venueSeatPositions } from './werewolfVenueModel';
 import { buildWerewolfPanelView, type WerewolfPanelState } from './werewolfView';
 import { useWerewolfTheatre } from './useWerewolfTheatre';
+import TownSoundControl from './TownSoundControl';
+import { useTownAudio } from '../audio/TownAudioProvider';
+import { audioSceneForWerewolfPhase } from '../audio/townAudio';
 
 const roleLabels: Record<WerewolfRole, string> = {
   werewolf: '狼人', villager: '平民', seer: '预言家', witch: '女巫', hunter: '猎人',
@@ -28,6 +31,7 @@ export default function WerewolfVenue({
   const [busy, setBusy] = useState(false);
   const [speech, setSpeech] = useState('');
   const [speed, setSpeed] = useState<1 | 2>(1);
+  const { setScene, setDucked, playEffect } = useTownAudio();
   const view = useMemo(() => buildWerewolfPanelView(snapshot), [snapshot]);
   const names = useMemo(
     () => new Map(snapshot?.seats.map((seat) => [seat.playerId, seat.displayName]) ?? []),
@@ -51,6 +55,19 @@ export default function WerewolfVenue({
     round: snapshot?.round ?? 1,
     speakingPlayerName: currentSpeakerName,
   });
+
+  useEffect(() => {
+    setScene(audioSceneForWerewolfPhase(theatre.presentedPhase));
+    setDucked(true);
+    if (judge.effect !== 'none') playEffect(judge.effect);
+    const timer = window.setTimeout(() => setDucked(false), 1300 / speed);
+    return () => window.clearTimeout(timer);
+  }, [judge.effect, playEffect, setDucked, setScene, speed, theatre.presentedPhase]);
+
+  useEffect(() => () => {
+    setDucked(false);
+    setScene('town');
+  }, [setDucked, setScene]);
 
   const run = async (operation: () => Promise<unknown>) => {
     if (busy) return;
@@ -98,6 +115,7 @@ export default function WerewolfVenue({
           <button className={speed === 2 ? 'is-active' : ''} onClick={() => setSpeed(2)}>2×</button>
           <button onClick={theatre.skip}>跳过演出</button>
         </div>
+        <TownSoundControl compact />
       </header>
 
       <section className={`werewolf-judge tone-${judge.tone}`} aria-label="狼人杀法官">

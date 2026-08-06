@@ -17,12 +17,14 @@ import FreezeButton from './components/FreezeButton.tsx';
 import { MAX_HUMAN_PLAYERS } from '../convex/constants.ts';
 import LanguageButton from './components/LanguageButton.tsx';
 import { useI18n } from './i18n';
+import { TownAudioProvider } from './audio/TownAudioProvider';
 
 export default function Home() {
   const [helpModalOpen, setHelpModalOpen] = useState(false);
   const { t } = useI18n();
   return (
-    <main className="town-app font-body game-background">
+    <TownAudioProvider>
+      <main className="town-app font-body game-background">
 
       <ReactModal
         isOpen={helpModalOpen}
@@ -77,7 +79,8 @@ export default function Home() {
         </footer>
         <ToastContainer position="bottom-right" autoClose={2000} closeOnClick theme="dark" />
       </div>
-    </main>
+      </main>
+    </TownAudioProvider>
   );
 }
 
