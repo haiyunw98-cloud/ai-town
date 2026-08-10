@@ -16,6 +16,8 @@
     "archive:ima:watch": "node --loader ts-node/esm --experimental-specifier-resolution=node scripts/run-lighthouse-archive.ts",
     "audio:generate": "node scripts/generate-lighthouse-audio.mjs",
     "audio:validate": "node scripts/generate-lighthouse-audio.mjs --validate",
+    "voice:generate": "node scripts/generate-judge-voice.mjs",
+    "voice:validate": "node scripts/generate-judge-voice.mjs --validate",
     "validate:world": "node scripts/validate-world-assets.mjs",
     "level-editor": "vite src/editor/",
     "le": "vite src/editor/"

@@ -34,6 +34,12 @@ type TownAudioApi = {
   toggleMute: () => void;
   setDucked: (ducked: boolean) => void;
   playEffect: (effect: TownEffect) => void;
+  playVoiceClip: (
+    src: string,
+    volume: number,
+    onStart: () => void,
+    onEnd: () => void,
+  ) => Promise<() => void>;
 };
 
 const TownAudioContext = createContext<TownAudioApi | null>(null);
@@ -78,6 +84,8 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
   const activeDeckRef = useRef(0);
   const fadeTokenRef = useRef(0);
   const sceneSourcesRef = useRef<AudioScheduledSourceNode[]>([]);
+  const voiceSourcesRef = useRef(new Set<AudioBufferSourceNode>());
+  const voiceBuffersRef = useRef(new Map<string, Promise<AudioBuffer>>());
   const sceneRef = useRef(scene);
   const settingsRef = useRef(settings);
   const duckedRef = useRef(false);
@@ -254,6 +262,11 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
       try { source.stop(); } catch { /* already stopped */ }
       source.disconnect();
     }
+    for (const source of voiceSourcesRef.current) {
+      try { source.stop(); } catch { /* already stopped */ }
+      source.disconnect();
+    }
+    voiceSourcesRef.current.clear();
     void contextRef.current?.close();
   }, []);
 
@@ -280,11 +293,51 @@ export function TownAudioProvider({ children }: PropsWithChildren) {
     oscillator.stop(ctx.currentTime + 0.45);
   }, [ensureAudio, settings.effects, settings.enabled, unlocked]);
 
+  const playVoiceClip = useCallback(async (
+    src: string,
+    volume: number,
+    onStart: () => void,
+    onEnd: () => void,
+  ) => {
+    const ctx = ensureAudio();
+    if (ctx.state !== 'running') await ctx.resume();
+    let pendingBuffer = voiceBuffersRef.current.get(src);
+    if (!pendingBuffer) {
+      pendingBuffer = fetch(src).then(async (response) => {
+        if (!response.ok) throw new Error(`Judge voice request failed: ${response.status}`);
+        return ctx.decodeAudioData(await response.arrayBuffer());
+      });
+      voiceBuffersRef.current.set(src, pendingBuffer);
+    }
+    const buffer = await pendingBuffer;
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    source.buffer = buffer;
+    gain.gain.value = Math.max(0, Math.min(1, volume));
+    source.connect(gain).connect(ctx.destination);
+    let stopped = false;
+    source.onended = () => {
+      voiceSourcesRef.current.delete(source);
+      source.disconnect();
+      gain.disconnect();
+      if (!stopped) onEnd();
+    };
+    voiceSourcesRef.current.add(source);
+    source.start();
+    onStart();
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      voiceSourcesRef.current.delete(source);
+      try { source.stop(); } catch { /* already stopped */ }
+    };
+  }, [ensureAudio]);
+
   return (
     <TownAudioContext.Provider value={{
       settings, unlocked, scene, currentTrack: audioTrackForScene(scene), playbackStatus,
       playbackError, unlock, retry, setScene, setChannel, toggleMute,
-      setDucked: setSpeechDucked, playEffect,
+      setDucked: setSpeechDucked, playEffect, playVoiceClip,
     }}>
       {children}
     </TownAudioContext.Provider>

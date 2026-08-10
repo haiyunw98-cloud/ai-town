@@ -1,0 +1,997 @@
+{
+  "version": 1,
+  "tracks": [
+    {
+      "id": "judge-001",
+      "text": "各位居民，欢迎来到灯塔镇狼人杀圆桌。法官将全程主持，请听从阶段提示。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-001.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "bc51e9cd294c1317ef4ed34aada13c08fb1ef725c3f90586c35991abcb2c9ad8"
+    },
+    {
+      "id": "judge-002",
+      "text": "请九位玩家按座位号入座。上帝观察者可以看到全局，但不会替玩家行动。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-002.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "277b7516e153a13c3572916b32bb7ab709a66f7524f0459de6bec525f84fc71d"
+    },
+    {
+      "id": "judge-003",
+      "text": "身份已经分发。狼人、预言家、女巫、猎人和平民请确认自己的身份；现在准备入夜。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-003.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "d9d21c8a8145650d9d9988d51cac06340f9f97fb7d725d47d9f5bf7f2841768b"
+    },
+    {
+      "id": "judge-004",
+      "text": "天黑请闭眼。狼人请睁眼，商量今晚的目标。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-004.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "26ec9024657fda5341942afc4c4cecf07c9046a02cde857ad36e2d3055f8acc3"
+    },
+    {
+      "id": "judge-005",
+      "text": "狼人请闭眼。预言家请睁眼并选择查验对象。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-005.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "6ceebd4e83d50d9b61f46a9431c4810b83a93dbeab7873ccb99f9a13aa589c29"
+    },
+    {
+      "id": "judge-006",
+      "text": "预言家请闭眼。女巫请睁眼并决定是否用药。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-006.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "c66815a8d3fbef0006d61da878d0083dcdef3e3bd51ab126d061384a881e9785"
+    },
+    {
+      "id": "judge-007",
+      "text": "天亮了。现在公布昨夜结果。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-007.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "d57f3b22534a59f613a357314e59c7f2bf121d503d5cee92b18465bc332dd813"
+    },
+    {
+      "id": "judge-008",
+      "text": "天亮了。昨夜平安，无人离场。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-008.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "5a5a6362aec5b69dbb7782a82c2f7412e730708d61bcff01ce3c78e7d900d1ef"
+    },
+    {
+      "id": "judge-009",
+      "text": "现在按座位顺序依次发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-009.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "087c6c05bad03fb199e47bb9572dec8d5d08e8231869da7d927ea7b140445508"
+    },
+    {
+      "id": "judge-010",
+      "text": "发言结束，现在开始投票。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-010.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "78370bd682ac02f1938c97745439e8f430a0f8a97eb0245389ce523bea01f985"
+    },
+    {
+      "id": "judge-011",
+      "text": "出现平票，请候选人依次补充发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-011.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "1bec3844b09631c9796eb4013952ef9a95edf7bd668b95bac7d3e7c0fe777239"
+    },
+    {
+      "id": "judge-012",
+      "text": "补充发言结束，现在重新投票。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-012.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "02c844220c8caaa229a3181727dda0244e9e97831aa6459d381172a66bd4d42d"
+    },
+    {
+      "id": "judge-013",
+      "text": "猎人可以选择发动技能，也可以放弃。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-013.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "2898806e7fbfaa03f6b771d1c0f07d52173683be2634196bae19ca0a843fb4c0"
+    },
+    {
+      "id": "judge-014",
+      "text": "本局结束，现在公布身份与结果。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-014.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "812fa84433f72e4ea8b499d18176fc9643f4ca3ab48a28e7bc8e020156935242"
+    },
+    {
+      "id": "judge-015",
+      "text": "现在请 你（ME） 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-015.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "6b894c8551937382847bbf7dbf4c3b65d1301af84197b7dac213e9cdda5bd4e7"
+    },
+    {
+      "id": "judge-016",
+      "text": "现在请 林澜 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-016.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "fc89e41d781387270127e08b58eea080f8b7660fd887dec08531610c62edd34f"
+    },
+    {
+      "id": "judge-017",
+      "text": "现在请 沈砚 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-017.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "b7727d26c733cc01be33cd5ad978e612757f4a1f5bcaec14e6091c45e13b5032"
+    },
+    {
+      "id": "judge-018",
+      "text": "现在请 唐果 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-018.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "8cb6b6a67f50bf5e8e9e9dff616b96550946c6072395210cd66f237f07eed130"
+    },
+    {
+      "id": "judge-019",
+      "text": "现在请 墨七 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-019.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "3f67b1242b9af1a129adfc36151b2f4b2a9bd4ad60983bf7421ff36c526f38e6"
+    },
+    {
+      "id": "judge-020",
+      "text": "现在请 苏萤 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-020.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "d48bb04fa1c05a5e80ee639348b0d86b0d58c28085782f137aa03aa0accb035a"
+    },
+    {
+      "id": "judge-021",
+      "text": "现在请 白露 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-021.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "1fc9486bd28fa345453db065022b2d0031f1a82d6ad0ac13c6472457b3845bcc"
+    },
+    {
+      "id": "judge-022",
+      "text": "现在请 顾潮 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-022.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "61e067eca6674790a61100afda666b5eae599c4fa90772c898cea42cdb27b107"
+    },
+    {
+      "id": "judge-023",
+      "text": "现在请 阿满 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-023.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "1d6d90294914fdfcfe286707338086cb44415993c62bdd34b36a98188eac7146"
+    },
+    {
+      "id": "judge-024",
+      "text": "现在请 玄微先生 发言。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-024.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "b89db354726feca8f5f4c532ff7fe1e91615b6a2cb665857b793a7f46a247ebc"
+    },
+    {
+      "id": "judge-025",
+      "text": "天亮了。昨夜你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-025.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "f0c7410b3f2c61454556b3660d6c1f658d4edc3a2dd9666b46d55e7dbc859df6"
+    },
+    {
+      "id": "judge-026",
+      "text": "天亮了。昨夜林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-026.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "1b5c59b5b0e64272d99f6a15967e0ab639573fce03f8f100912261078fb1f3cb"
+    },
+    {
+      "id": "judge-027",
+      "text": "天亮了。昨夜沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-027.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "da74d92c1d27e295c2269bdea9d3c26929637b6ac873cd9b8aba8333469cf794"
+    },
+    {
+      "id": "judge-028",
+      "text": "天亮了。昨夜唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-028.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "e5b9c86dcbb30beaea55084e4e79851496edd11ec54142801297670ac08280b8"
+    },
+    {
+      "id": "judge-029",
+      "text": "天亮了。昨夜墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-029.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "9616ec038a9fcd8b8b1e5ad08d7bb6f08b860dc541d5eca1f7c99a8ed95540e8"
+    },
+    {
+      "id": "judge-030",
+      "text": "天亮了。昨夜苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-030.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "383b7968e222aeb2c8bf815ebe5a00d0ece76b332034c7eec25583a636f69379"
+    },
+    {
+      "id": "judge-031",
+      "text": "天亮了。昨夜白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-031.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "64fa2ebc91647e3c07228fe85cc84824ae397361456c7cbeca2634300f53adc9"
+    },
+    {
+      "id": "judge-032",
+      "text": "天亮了。昨夜顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-032.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "118da5c7eeba7df0c8235494f5f18cbad444a7a91e422ad8d73c6f501a06b31f"
+    },
+    {
+      "id": "judge-033",
+      "text": "天亮了。昨夜阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-033.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "54ea94a04ab7cffa01a549cdcf49f403566e532e27dcdebbdeaa091dd70bd83b"
+    },
+    {
+      "id": "judge-034",
+      "text": "天亮了。昨夜玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-034.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "0679b08355309c7201ddce4a8b2c31a57cc9e4cfea5cd16149d50504c4c30b14"
+    },
+    {
+      "id": "judge-035",
+      "text": "天亮了。昨夜你（ME）、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-035.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "eb31564adad7c995839e80ea952b0720b03a4418c7a1e41291ed02597930b285"
+    },
+    {
+      "id": "judge-036",
+      "text": "天亮了。昨夜你（ME）、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-036.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "46a4dba598c7006156b2423f2ae4ca1d64e0cd516ef9d89e37be0a1b11a0f79c"
+    },
+    {
+      "id": "judge-037",
+      "text": "天亮了。昨夜你（ME）、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-037.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "d322dd564f92a0742f960b97763401ece70eff7baf0175ee3fb674fd5b65ebd6"
+    },
+    {
+      "id": "judge-038",
+      "text": "天亮了。昨夜你（ME）、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-038.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "12a3dd6212710830239a0dd3b86b21b2beb28a6e59d72734f970464009d2935f"
+    },
+    {
+      "id": "judge-039",
+      "text": "天亮了。昨夜你（ME）、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-039.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "bbc0404b4eb032bc0b1bfb0db9f9252c29650a47b5df867b2232ba1fc89b6069"
+    },
+    {
+      "id": "judge-040",
+      "text": "天亮了。昨夜你（ME）、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-040.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "8a80b8c45bc3ad371a8b69c79fd7c8e7fa550c0407ee6b353401946e6770eee7"
+    },
+    {
+      "id": "judge-041",
+      "text": "天亮了。昨夜你（ME）、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-041.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "2dcff6acb520653b90c8c981ea3287ba72dd3da627df4229b476055d503ce6cd"
+    },
+    {
+      "id": "judge-042",
+      "text": "天亮了。昨夜你（ME）、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-042.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "db801e1700689e91d85cb45d612a7ca6d82672f22c40056814a179e5a43917dd"
+    },
+    {
+      "id": "judge-043",
+      "text": "天亮了。昨夜你（ME）、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-043.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "9943a15339c74c1acaded8cf8cbfa49ccb0316193b12acbb86ccb3cd8cb92b58"
+    },
+    {
+      "id": "judge-044",
+      "text": "天亮了。昨夜林澜、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-044.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "8fc4ebd22508d10504f9c9a74647e3752b42050afc915b38fe8d757debd36893"
+    },
+    {
+      "id": "judge-045",
+      "text": "天亮了。昨夜林澜、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-045.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "36a39384dc467afccafcf3c91d123ec1e446a7610b151c792a14fe4d2b60a53c"
+    },
+    {
+      "id": "judge-046",
+      "text": "天亮了。昨夜林澜、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-046.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "a93d1c7b568172e51d705e9d27d708fcd79cf7a29fba95bb628bc8c83fe94a61"
+    },
+    {
+      "id": "judge-047",
+      "text": "天亮了。昨夜林澜、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-047.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "56db02cb89ca0c8f26bd951a424c20c2ea6ac5344fd390dd9801fd64e1e1f25b"
+    },
+    {
+      "id": "judge-048",
+      "text": "天亮了。昨夜林澜、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-048.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "a01534e14fd39fdd0a20271eb854292c70d315711a59918384da66d9c5d8188d"
+    },
+    {
+      "id": "judge-049",
+      "text": "天亮了。昨夜林澜、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-049.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "224055dca60e9a41da62eb1e81a8f190961047bf9875ad7a563918f775df4470"
+    },
+    {
+      "id": "judge-050",
+      "text": "天亮了。昨夜林澜、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-050.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "ee48ec93253e3c81d41e4b8252b736bd437399386b015ef1012b8bcd2f516ae6"
+    },
+    {
+      "id": "judge-051",
+      "text": "天亮了。昨夜林澜、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-051.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "2adb2a47a34524b4b5088866f8d76f4b7aedf4a79d02f230eca32040e6c3ca79"
+    },
+    {
+      "id": "judge-052",
+      "text": "天亮了。昨夜林澜、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-052.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "f8a05fe4c1d4b704a95aa8e37bd8182cf4e0b7c359fc1ef65ea0c95e870c3cb5"
+    },
+    {
+      "id": "judge-053",
+      "text": "天亮了。昨夜沈砚、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-053.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "b96b0749a4bc79ba833a83c36b9ebe7f9eca550e41e6bd0b9bac735c6e4486e4"
+    },
+    {
+      "id": "judge-054",
+      "text": "天亮了。昨夜沈砚、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-054.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "9247db1bb2bd95df508d2467e060b93591da80c1d749dba7aa7be3b542483173"
+    },
+    {
+      "id": "judge-055",
+      "text": "天亮了。昨夜沈砚、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-055.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "cfae64f4cef0f568d7620c40442937c942c114cfa61f113d060cc4f8f4e95c62"
+    },
+    {
+      "id": "judge-056",
+      "text": "天亮了。昨夜沈砚、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-056.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "40e9960b6b02302435fec5ccf4d6e228d4fe07506e29d509877f976332ca14e2"
+    },
+    {
+      "id": "judge-057",
+      "text": "天亮了。昨夜沈砚、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-057.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "51529cfc6e331a044dc1ae40ccecbf246b2490bdc4e96bc08351bd1db68eaaf5"
+    },
+    {
+      "id": "judge-058",
+      "text": "天亮了。昨夜沈砚、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-058.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "b899489d434d24f7bd5c6b07a57a4f50df46ab7c6695a6ee8ea7ba860f1cdf7a"
+    },
+    {
+      "id": "judge-059",
+      "text": "天亮了。昨夜沈砚、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-059.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "ee3718173a09623c634ebd705846c2c73ff05d9b1dba0476cebf23b907456a73"
+    },
+    {
+      "id": "judge-060",
+      "text": "天亮了。昨夜沈砚、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-060.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "ddb261e01253ffd3fb796a9b4aba3b0ea26506396da37180487037edc00ac046"
+    },
+    {
+      "id": "judge-061",
+      "text": "天亮了。昨夜沈砚、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-061.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "5ae378e433bb60ab0a068faf71bb9e06f1297bc7d196f9d34b093c68136c064f"
+    },
+    {
+      "id": "judge-062",
+      "text": "天亮了。昨夜唐果、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-062.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "24c8b6c2005d1d8d58f31f0ac4634fd93642d5c727bb58888601f923cb9f994f"
+    },
+    {
+      "id": "judge-063",
+      "text": "天亮了。昨夜唐果、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-063.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "8bbb0dba1c0080ad17126ea2cd66f12399b1ad2c4adcc4a1db06cb61d219a64c"
+    },
+    {
+      "id": "judge-064",
+      "text": "天亮了。昨夜唐果、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-064.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "fd9625b443d71f839f95437412b00223fe034ec51e6130c874f0d37a0630b5e2"
+    },
+    {
+      "id": "judge-065",
+      "text": "天亮了。昨夜唐果、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-065.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "2a21724e5243e7c9c011a9925e41ca7a53c45f14b772e1223173377c7a03f2d4"
+    },
+    {
+      "id": "judge-066",
+      "text": "天亮了。昨夜唐果、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-066.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "2a947739d25a0fbd4c4931ca4d4495a8985849fd539c5f081dc8113fa89a9864"
+    },
+    {
+      "id": "judge-067",
+      "text": "天亮了。昨夜唐果、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-067.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "950ded87cd2c890707c596ab6e7ab4e698264adab7783c3d8ff97e7f431bf1e6"
+    },
+    {
+      "id": "judge-068",
+      "text": "天亮了。昨夜唐果、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-068.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "d7bbed0612814487b7fbf7308aa3f872ff618e70aedf7e725a497a84ec86e4d7"
+    },
+    {
+      "id": "judge-069",
+      "text": "天亮了。昨夜唐果、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-069.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "6789eba3f0ebc13eaf842fd174be0d7bff75d516af747a91cc1b0f318546b023"
+    },
+    {
+      "id": "judge-070",
+      "text": "天亮了。昨夜唐果、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-070.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "ee53b5eddf68a10c0d3911ee782234b79fb703699d97648a1c2fc6a492586cb7"
+    },
+    {
+      "id": "judge-071",
+      "text": "天亮了。昨夜墨七、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-071.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "8e54a76e73a0b4b9ab6415f1f2186e9bfc9863f5146d780b6ef406425a12d749"
+    },
+    {
+      "id": "judge-072",
+      "text": "天亮了。昨夜墨七、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-072.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "abc7fbca3ebf246f0f3416f0c37c1d6b9e1b1c28c2c72a7d75a2cfbbb16fe5c6"
+    },
+    {
+      "id": "judge-073",
+      "text": "天亮了。昨夜墨七、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-073.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "9c7a135a58eba05da96331e7d7a30c318b32ca6dfeb5167fd48d83cf58967ffc"
+    },
+    {
+      "id": "judge-074",
+      "text": "天亮了。昨夜墨七、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-074.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "8b4928ec7b8935b2db5b318dbfeed5b0376116f836336fe08f6f671f97009779"
+    },
+    {
+      "id": "judge-075",
+      "text": "天亮了。昨夜墨七、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-075.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "6cbe632f606593e91c2357e3c1be8e63bad575655c926b279427e0c4176b7084"
+    },
+    {
+      "id": "judge-076",
+      "text": "天亮了。昨夜墨七、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-076.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "4ca5da0ad6507ea290daa0b91c4b584f13320f2fb5d3231e83a246ba7641be08"
+    },
+    {
+      "id": "judge-077",
+      "text": "天亮了。昨夜墨七、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-077.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "4afdb77b473d95e036bc71191625a822453ad99072f24858604778595bef7a0e"
+    },
+    {
+      "id": "judge-078",
+      "text": "天亮了。昨夜墨七、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-078.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "42276d0ad3cd814a03d73f4e713114365c4c42a300f0af34cb794c398fd032c4"
+    },
+    {
+      "id": "judge-079",
+      "text": "天亮了。昨夜墨七、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-079.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "fb788311c175a0326eaeb0dfa78757ae2e0951096abb8a832a9c1bbaa363deb6"
+    },
+    {
+      "id": "judge-080",
+      "text": "天亮了。昨夜苏萤、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-080.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "2bbd0e41385e1d44de45b93b2167ea771e4e6362cd8ca45d8137c286f66b243a"
+    },
+    {
+      "id": "judge-081",
+      "text": "天亮了。昨夜苏萤、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-081.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "2519ce5476b34ddb2a48aced6c0bea0ca6f93f625dfb9b42c1e812a363e70e37"
+    },
+    {
+      "id": "judge-082",
+      "text": "天亮了。昨夜苏萤、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-082.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "059b46118203d365d9a87773d687f7ee4147b067ab39d0cc0747838611c6f1d7"
+    },
+    {
+      "id": "judge-083",
+      "text": "天亮了。昨夜苏萤、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-083.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "e1a6a665207010cf44c8aa930313083e8cd839bbe0ffe42d6117ce96e26c7e42"
+    },
+    {
+      "id": "judge-084",
+      "text": "天亮了。昨夜苏萤、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-084.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "9ae1bc1593c89297338eaa9f3b54e295f38949e237353de0082c4e3f2bb8649d"
+    },
+    {
+      "id": "judge-085",
+      "text": "天亮了。昨夜苏萤、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-085.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "cb45f33fb733eeff9ca1bfe55c439a2904136f3f541c5090b8137656936b9709"
+    },
+    {
+      "id": "judge-086",
+      "text": "天亮了。昨夜苏萤、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-086.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "267ff52fb25aad2e6f55a5dddae83aab34f794fbfeb4b3c281ea9b80dd95a08c"
+    },
+    {
+      "id": "judge-087",
+      "text": "天亮了。昨夜苏萤、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-087.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "2c2fd42030c49475cad3f1d476038693aaedb0172930afd03e84813fa7822b40"
+    },
+    {
+      "id": "judge-088",
+      "text": "天亮了。昨夜苏萤、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-088.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "1ba55f5a5128b1731d3f66c252a47e5a84c0ed5f41ddbcbfb37716f3596d1d66"
+    },
+    {
+      "id": "judge-089",
+      "text": "天亮了。昨夜白露、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-089.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "e61d0c1bb284fb85d7c585e7b301dc762aada24efc658131d2984457c9a4eb63"
+    },
+    {
+      "id": "judge-090",
+      "text": "天亮了。昨夜白露、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-090.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "8f3f2202fb04d53e958e80680708e8685f134258453cdb71a626040f2def89bc"
+    },
+    {
+      "id": "judge-091",
+      "text": "天亮了。昨夜白露、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-091.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "764aecd64ce4e33a83a8e96de80f44ac54003aedc6993e95e085bfe043dfab57"
+    },
+    {
+      "id": "judge-092",
+      "text": "天亮了。昨夜白露、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-092.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "872a58498db417fcceeb9f7fcbe250e975625bc3af9d6f67c2fb058f080ea431"
+    },
+    {
+      "id": "judge-093",
+      "text": "天亮了。昨夜白露、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-093.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "3274c2cd285be45177945dea25560f8052a2ce018c352d110371bb9b2237c2c0"
+    },
+    {
+      "id": "judge-094",
+      "text": "天亮了。昨夜白露、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-094.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "075faa39c3ac43f73f83500145bf96373a2369c8f28a9be9a1d44a8f7eb31e9a"
+    },
+    {
+      "id": "judge-095",
+      "text": "天亮了。昨夜白露、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-095.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "00c09b79a8029a232be6106ee48cb268c7f2adc6983c298480ce5e25c9b07cdf"
+    },
+    {
+      "id": "judge-096",
+      "text": "天亮了。昨夜白露、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-096.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "a50fbc9f8ec5dfbc04aa09e75c74bfbdbcb4513983fa65fdbf96de6e267bdb0a"
+    },
+    {
+      "id": "judge-097",
+      "text": "天亮了。昨夜白露、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-097.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "358dfe15c5e6e5a8fba3a88b552cc16d162c29849afac3fb3cef82562ce7a28f"
+    },
+    {
+      "id": "judge-098",
+      "text": "天亮了。昨夜顾潮、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-098.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "bd47d1be6c6c8f718d3f28be4705e126e9cccf26b4741aac1f55ec034a10d38d"
+    },
+    {
+      "id": "judge-099",
+      "text": "天亮了。昨夜顾潮、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-099.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "4acd01bbdd11e88146e290b5236b3648c8ced50542b9cc391586f9de715ee607"
+    },
+    {
+      "id": "judge-100",
+      "text": "天亮了。昨夜顾潮、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-100.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "a3fcf43ef8730d2350218e28fcd6b2a73b9e8f6c549e6f76b9b309a2432f90cb"
+    },
+    {
+      "id": "judge-101",
+      "text": "天亮了。昨夜顾潮、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-101.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "6d687d2bfbe4d986a957ec0ed18dbe0d2e39c86bc041ee1754fd5da30edb8b75"
+    },
+    {
+      "id": "judge-102",
+      "text": "天亮了。昨夜顾潮、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-102.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "fd4308cb88691cbac377d9591d42a261d2130ad1647a7d750e3387f0895e2be1"
+    },
+    {
+      "id": "judge-103",
+      "text": "天亮了。昨夜顾潮、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-103.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "c3cb8cb23b20b581716f69f5e59ed9f08bea5d9f4c3825c9716965c316df6eb7"
+    },
+    {
+      "id": "judge-104",
+      "text": "天亮了。昨夜顾潮、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-104.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "262a5ebe06726dfeee9e435dc62908dc2792ae17b456220d466ce2b1622f81a3"
+    },
+    {
+      "id": "judge-105",
+      "text": "天亮了。昨夜顾潮、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-105.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "4171f291bd8547818da477fa981ead8feafd37dc474f86d4ebe7c19818a2ba58"
+    },
+    {
+      "id": "judge-106",
+      "text": "天亮了。昨夜顾潮、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-106.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "1ec5dd87ad1cb5b471b430b33f3e5259341c4cfb3efdec269e50a8695363cd8d"
+    },
+    {
+      "id": "judge-107",
+      "text": "天亮了。昨夜阿满、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-107.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "c0a8107e4b765c612614ccd58fadd5e46cdcea34015ce7b5694dc67fb2dae85d"
+    },
+    {
+      "id": "judge-108",
+      "text": "天亮了。昨夜阿满、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-108.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "8c310643ad2710b806227ad3106d0fab4f55273ece7f27cd5d8fe349508ee772"
+    },
+    {
+      "id": "judge-109",
+      "text": "天亮了。昨夜阿满、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-109.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "4a5144f8c3c064e9ddb0ce47c366befdb47544af4d4abc8f69b4c4e1bd5b9cda"
+    },
+    {
+      "id": "judge-110",
+      "text": "天亮了。昨夜阿满、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-110.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "c9974b74c7cb6c0d44dcf3b99f1f3c13946763e2229d8cbb40e6d328c0107160"
+    },
+    {
+      "id": "judge-111",
+      "text": "天亮了。昨夜阿满、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-111.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "f22cf7dea1a6c8dbc5c92eca0242b8ac5778510a3e7f615f3685e2c389c0a6ba"
+    },
+    {
+      "id": "judge-112",
+      "text": "天亮了。昨夜阿满、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-112.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "71e3ec560fef3a2438e6fdef603dabca5ddaa795da92215de290e586cba2efb2"
+    },
+    {
+      "id": "judge-113",
+      "text": "天亮了。昨夜阿满、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-113.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "61448197c1eba1cd79e228ac1894c6cc36f156cddd857996d5b8c8d43e4da447"
+    },
+    {
+      "id": "judge-114",
+      "text": "天亮了。昨夜阿满、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-114.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "cd8752e6fdcd5522b0740e3f1bce62bcb68f5f105db18a9934a54bb3f20ff73e"
+    },
+    {
+      "id": "judge-115",
+      "text": "天亮了。昨夜阿满、玄微先生离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-115.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "07d4d55d32965cd7a7e6992eef6d69678e567fee969c3ff9f380832d913aa174"
+    },
+    {
+      "id": "judge-116",
+      "text": "天亮了。昨夜玄微先生、你（ME）离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-116.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "fd4e9d77f935eecc25a84cc660437034e203ed981aa89793dcd2eeaf884be15c"
+    },
+    {
+      "id": "judge-117",
+      "text": "天亮了。昨夜玄微先生、林澜离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-117.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "21c3694e7f8d032f5f1e2121046950aa24f5c65c0ecf57aa4a795a75c7dd5828"
+    },
+    {
+      "id": "judge-118",
+      "text": "天亮了。昨夜玄微先生、沈砚离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-118.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "85ad4870bffa901c4cdc100b5e45c779ef568597d35ebd0cffc8f9f9af0de45f"
+    },
+    {
+      "id": "judge-119",
+      "text": "天亮了。昨夜玄微先生、唐果离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-119.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "7840c66143cc432f513b26be80c3f07811c4c0c808cf9b5568310a21a987eb40"
+    },
+    {
+      "id": "judge-120",
+      "text": "天亮了。昨夜玄微先生、墨七离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-120.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "db9b81c8920be4aa98bfba33b5cc7590094bf6d50f2c4b8c2877943260215cbf"
+    },
+    {
+      "id": "judge-121",
+      "text": "天亮了。昨夜玄微先生、苏萤离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-121.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "d0a8b1f5b52aa8eb536cf8f38cc8e6c891827ab0ea2b7492045067ba4a449704"
+    },
+    {
+      "id": "judge-122",
+      "text": "天亮了。昨夜玄微先生、白露离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-122.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "61dd688796aa571eca3c564ce40ebc4a6f7dda310d51fba10f1bf5e96e1069d5"
+    },
+    {
+      "id": "judge-123",
+      "text": "天亮了。昨夜玄微先生、顾潮离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-123.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "20f5b4b60fe58e4c8c2b59ea731b3a5fe1b8fa8875c410136b2a163443dd5ec9"
+    },
+    {
+      "id": "judge-124",
+      "text": "天亮了。昨夜玄微先生、阿满离场，已安全前往观众席。",
+      "src": "/ai-town/assets/audio/lighthouse-town/judge/judge-124.m4a",
+      "voice": "Tingting (zh_CN, local macOS voice)",
+      "aiGenerated": true,
+      "sha256": "0ebaaedbbc25b81a310ae83a5c1366938d7b498c52cd34d43be684aa5ff39fdd"
+    }
+  ]
+}

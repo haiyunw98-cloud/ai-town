@@ -26,6 +26,8 @@ describe('town sound control', () => {
     expect(provider).toContain('speechDucked');
     expect(provider).toContain("target instanceof HTMLInputElement");
     expect(provider).toContain('contextRef.current?.close()');
+    expect(provider).toContain('decodeAudioData');
+    expect(provider).toContain('playVoiceClip');
   });
 
   test('reports the real playback state and offers retry on failure', () => {
